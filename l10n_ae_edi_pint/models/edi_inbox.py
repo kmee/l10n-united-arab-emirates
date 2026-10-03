@@ -200,7 +200,7 @@ class UaeEdiInbox(models.Model):
         )
         if (
             tree.findtext("./{*}CustomizationID") != "urn:peppol:pint:billing-1@ae-1"
-            or type_code != ("381" if is_credit else "380")
+            or type_code not in (("381", "81") if is_credit else ("380", "480"))
             or tree.findtext("./{*}ProfileExecutionID") != "00000000"
             or tree.findtext("./{*}DocumentCurrencyCode") != "AED"
             or tree.findall("./{*}AllowanceCharge")
@@ -268,6 +268,9 @@ class UaeEdiInbox(models.Model):
                 "company_id": self.company_id.id,
                 "journal_id": journal.id,
                 "move_type": "in_refund" if is_credit else "in_invoice",
+                "l10n_ae_document_category": "commercial"
+                if type_code in ("480", "81")
+                else "tax",
                 "l10n_ae_credit_reason": tree.findtext(
                     "./{*}DiscrepancyResponse/{*}ResponseCode"
                 )
@@ -276,6 +279,7 @@ class UaeEdiInbox(models.Model):
                 "l10n_ae_origin_system": "controlled-inbound",
                 "l10n_ae_origin_document_id": f"{self.binding_id.id}:{self.remote_id}",
                 "l10n_ae_fiscal_uuid": tree.findtext("./{*}UUID"),
+                "l10n_ae_received_currency_id": self.env.ref("base.AED").id,
                 "l10n_ae_received_prepaid_amount": float(
                     tree.findtext("./{*}LegalMonetaryTotal/{*}PrepaidAmount") or 0
                 ),

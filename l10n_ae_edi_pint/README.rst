@@ -65,6 +65,13 @@ remain available for review. Processing does not post, reconcile or
 import payments. Missing or ambiguous references stay in the
 received-document review inbox with their original XML.
 
+Ordinary AED commercial invoices and credits can also be processed. A
+supplier without a VAT identifier must already have the matching routing
+endpoint, legal registration number/type and issuing authority. Unknown
+identities and tax mappings stay in review. The received category and
+original currency are protected; declared amounts keep the XML currency
+even if the accounting draft is reviewed in another currency.
+
 Known issues / Roadmap
 ======================
 

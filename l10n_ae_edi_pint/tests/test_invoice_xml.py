@@ -119,6 +119,162 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         self.assertFalse(inbox.move_id)
         self.assertIn("supplier", inbox.diagnostic)
 
+    def test_received_declared_amounts_keep_the_xml_currency_during_accounting_review(
+        self,
+    ):
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {"name": "Received currency evidence"}
+        )
+        content = etree.tostring(self._received_test_xml())
+        inbox = self.env["l10n_ae.edi.inbox"].receive_controlled_document(
+            binding.id, "received-currency", content
+        )
+        self.assertTrue(inbox.action_process(), inbox.diagnostic)
+        bill = inbox.move_id
+        usd = self.env.ref("base.USD")
+        usd.active = True
+        bill.currency_id = usd
+        self.assertEqual(bill.currency_id, usd)
+        self.assertEqual(bill.l10n_ae_received_currency_id, self.env.ref("base.AED"))
+        self.assertEqual(bill.l10n_ae_received_payable_amount, 105)
+        self.assertEqual(inbox.original_xml.content, content)
+        with self.assertRaisesRegex(UserError, "received"):
+            bill.write({"l10n_ae_received_currency_id": usd.id})
+
+    def _commercial_received_fixture(self):
+        self.partner_a.vat = False
+        outside_scope = self.tax_sale_a.copy(
+            {
+                "name": "Commercial outside scope",
+                "amount": 0,
+                "ubl_cii_tax_category_code": "O",
+            }
+        )
+        purchase_tax = self.env.company.account_purchase_tax_id.copy(
+            {
+                "name": "Reviewed outside-scope purchase",
+                "amount": 0,
+                "ubl_cii_tax_category_code": "O",
+            }
+        )
+        source = self.init_invoice("out_invoice", amounts=[100], taxes=outside_scope)
+        source.write(
+            {
+                "l10n_ae_document_category": "commercial",
+                "l10n_ae_fiscal_uuid": "ccccccca-1111-4111-8111-111111111111",
+            }
+        )
+        source.action_post()
+        tree = self._received_test_xml(source)
+        return source, purchase_tax, tree
+
+    def test_received_commercial_invoice_matches_non_vat_supplier_registration(
+        self,
+    ):
+        _source, purchase_tax, tree = self._commercial_received_fixture()
+        self.assertIsNone(
+            tree.find("cac:AccountingSupplierParty/cac:Party/cac:PartyTaxScheme", NS)
+        )
+        content = etree.tostring(tree)
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {"name": "Incoming commercial document"}
+        )
+        inbox = self.env["l10n_ae.edi.inbox"].receive_controlled_document(
+            binding.id, "non-vat-commercial", content
+        )
+        self.assertTrue(inbox.action_process(), inbox.diagnostic)
+        bill = inbox.move_id
+        self.assertEqual(bill.move_type, "in_invoice")
+        self.assertEqual(bill.state, "draft")
+        self.assertEqual(bill.partner_id, self.partner_a)
+        self.assertEqual(bill.l10n_ae_document_category, "commercial")
+        self.assertEqual(bill.amount_untaxed, 100)
+        self.assertEqual(bill.amount_tax, 0)
+        self.assertEqual(bill.amount_total, 100)
+        self.assertEqual(bill.invoice_line_ids.tax_ids, purchase_tax)
+        self.assertEqual(bill.l10n_ae_received_currency_id, self.env.ref("base.AED"))
+        self.assertFalse(self.partner_a.vat)
+        self.assertEqual(inbox.original_xml.content, content)
+        with self.assertRaisesRegex(UserError, "received"):
+            bill.write({"l10n_ae_document_category": "tax"})
+
+    def test_non_vat_supplier_with_a_different_license_stays_in_review(self):
+        source, _purchase_tax, tree = self._commercial_received_fixture()
+        tree.find(
+            "cac:AccountingSupplierParty/cac:Party/cac:PartyLegalEntity/cbc:CompanyID",
+            NS,
+        ).text = "UNMAPPED-LICENSE-0042"
+        content = etree.tostring(tree)
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {"name": "Incoming unknown license"}
+        )
+        inbox = self.env["l10n_ae.edi.inbox"].receive_controlled_document(
+            binding.id, "unknown-license", content
+        )
+        self.assertFalse(inbox.action_process())
+        self.assertEqual(inbox.state, "review")
+        self.assertFalse(inbox.move_id)
+        self.assertEqual(inbox.original_xml.content, content)
+        self.assertIn("supplier", inbox.diagnostic)
+        self.assertFalse(
+            self.env["account.move"].search(
+                [
+                    ("move_type", "=", "in_invoice"),
+                    ("ref", "=", source.name),
+                    ("company_id", "=", self.env.company.id),
+                ]
+            )
+        )
+
+    def test_received_commercial_credit_links_the_non_vat_supplier_bill(
+        self,
+    ):
+        source, purchase_tax, tree = self._commercial_received_fixture()
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {"name": "Incoming commercial adjustment"}
+        )
+        model = self.env["l10n_ae.edi.inbox"]
+        original = model.receive_controlled_document(
+            binding.id, "commercial-original", etree.tostring(tree)
+        )
+        self.assertTrue(original.action_process(), original.diagnostic)
+        credit = self.init_invoice(
+            "out_refund", amounts=[40], taxes=source.invoice_line_ids.tax_ids
+        )
+        credit.write(
+            {
+                "reversed_entry_id": source.id,
+                "l10n_ae_document_category": "commercial",
+                "l10n_ae_credit_reason": "DL8.61.1.C",
+                "l10n_ae_fiscal_uuid": "ccccccca-2222-4222-8222-222222222222",
+            }
+        )
+        credit.action_post()
+        credit_tree = self._received_test_xml(credit)
+        self.assertEqual(
+            credit_tree.findtext("cbc:CreditNoteTypeCode", namespaces=NS), "81"
+        )
+        content = etree.tostring(credit_tree)
+        inbox = model.receive_controlled_document(
+            binding.id, "commercial-credit", content
+        )
+        self.assertTrue(inbox.action_process(), inbox.diagnostic)
+        refund = inbox.move_id
+        self.assertEqual(refund.state, "draft")
+        self.assertEqual(refund.move_type, "in_refund")
+        self.assertEqual(refund.partner_id, self.partner_a)
+        self.assertEqual(refund.l10n_ae_document_category, "commercial")
+        self.assertEqual(refund.reversed_entry_id, original.move_id)
+        self.assertEqual(refund.l10n_ae_credit_reason, "DL8.61.1.C")
+        self.assertEqual(refund.invoice_line_ids.tax_ids, purchase_tax)
+        self.assertEqual(refund.amount_total, 40)
+        self.assertEqual(refund.amount_tax, 0)
+        self.assertEqual(original.move_id.amount_total, 100)
+        self.assertEqual(original.move_id.state, "draft")
+        self.assertEqual(inbox.original_xml.content, content)
+        self.assertTrue(inbox.action_process())
+        self.assertEqual(inbox.move_id, refund)
+
     def test_received_credit_with_a_wrong_original_date_stays_in_review(self):
         original = self.init_invoice(
             "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
