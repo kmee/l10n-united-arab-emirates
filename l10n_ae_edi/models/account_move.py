@@ -16,6 +16,25 @@ class AccountMove(models.Model):
     l10n_ae_received_document = fields.Boolean(
         string="Received UAE Document", readonly=True, copy=False
     )
+    l10n_ae_received_process = fields.Selection(
+        [("billing", "Billing"), ("selfbilling", "Self-Billing")],
+        string="Received UAE Process",
+        readonly=True,
+        copy=False,
+    )
+    l10n_ae_received_agreement_snapshot = fields.Json(readonly=True, copy=False)
+    l10n_ae_received_agreement_reference = fields.Char(
+        string="Agreement Reference at Receipt",
+        compute="_compute_l10n_ae_received_agreement_reference",
+    )
+
+    @api.depends("l10n_ae_received_agreement_snapshot")
+    def _compute_l10n_ae_received_agreement_reference(self):
+        for move in self:
+            move.l10n_ae_received_agreement_reference = (
+                move.l10n_ae_received_agreement_snapshot or {}
+            ).get("reference")
+
     l10n_ae_received_currency_id = fields.Many2one(
         "res.currency", string="Received Document Currency", readonly=True, copy=False
     )
@@ -166,6 +185,8 @@ class AccountMove(models.Model):
             "l10n_ae_selfbilling_agreement_id",
         }
         received_fields = identity_fields | {
+            "l10n_ae_received_agreement_snapshot",
+            "l10n_ae_received_process",
             "l10n_ae_document_category",
             "l10n_ae_credit_reason",
             "l10n_ae_received_currency_id",
@@ -233,6 +254,7 @@ class AccountMove(models.Model):
             "buyer": company_party if self.is_self_billing else counterparty,
             "selfbilling_agreement": {
                 "reference": agreement.name,
+                "local_role": agreement.local_role,
                 "start_date": fields.Date.to_string(agreement.start_date),
                 "end_date": fields.Date.to_string(agreement.end_date),
                 "scope": agreement.scope,
@@ -417,6 +439,7 @@ class AccountMove(models.Model):
                 if (
                     not agreement
                     or not agreement.active
+                    or agreement.local_role != "buyer"
                     or agreement.company_id != move.company_id
                     or agreement.partner_id != move.partner_id.commercial_partner_id
                     or not issue_date

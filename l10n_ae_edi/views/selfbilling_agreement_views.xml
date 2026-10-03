@@ -10,6 +10,7 @@
                         <field name="name" />
                         <field name="company_id" />
                         <field name="partner_id" />
+                        <field name="local_role" />
                         <field name="active" />
                         <field name="start_date" />
                         <field name="end_date" />
@@ -28,6 +29,7 @@
                 <field name="name" />
                 <field name="company_id" />
                 <field name="partner_id" />
+                <field name="local_role" />
                 <field name="start_date" />
                 <field name="end_date" />
                 <field name="active" />

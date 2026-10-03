@@ -37,13 +37,21 @@
                             name="l10n_ae_document_category"
                             readonly="l10n_ae_received_document"
                         />
+                        <field
+                            name="l10n_ae_received_process"
+                            invisible="not l10n_ae_received_document"
+                        />
+                        <field
+                            name="l10n_ae_received_agreement_reference"
+                            invisible="l10n_ae_received_process != 'selfbilling'"
+                        />
                         <field name="l10n_ae_fiscal_uuid" readonly="True" />
                         <field name="is_self_billing" invisible="True" />
                         <field
                             name="l10n_ae_selfbilling_agreement_id"
                             domain="[('company_id', '=', company_id), ('partner_id', '=', partner_id)]"
-                            invisible="not is_self_billing or l10n_ae_received_document"
-                            readonly="l10n_ae_transmission_id"
+                            invisible="not is_self_billing and l10n_ae_received_process != 'selfbilling'"
+                            readonly="l10n_ae_transmission_id or l10n_ae_received_document"
                         />
                         <field
                             name="l10n_ae_credit_reason"

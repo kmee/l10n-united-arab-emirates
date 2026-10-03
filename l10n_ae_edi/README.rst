@@ -54,15 +54,22 @@ production fiscal transmission.
 
 For an outbound self-billed purchase, use a native self-billing purchase
 journal and select a UAE Self-Billing Agreement in the invoice's UAE
-tab. Accounting managers maintain agreements for the company and
-commercial supplier, including reference, supply scope, validity dates
-and a reference to reviewed supplier onboarding evidence. Both parties
-need UAE VAT TRNs and eligible participant endpoints. Missing or expired
-agreements block automatic posting/queuing. Only tax invoices/credit
-notes are eligible; ordinary purchases and received documents do not
-emit. Invoice389 and credit261 preserve the company as buyer issuer, the
-partner as supplier and the selected agreement in immutable transmission
-evidence. The checks do not query a live VAT or ASP registry.
+tab. Accounting managers maintain buyer-role agreements for the company
+and commercial supplier, including reference, supply scope, validity
+dates and a reference to reviewed supplier onboarding evidence. Both
+parties need UAE VAT TRNs and eligible participant endpoints. Missing or
+expired agreements block automatic posting/queuing. Only tax
+invoices/credit notes are eligible; ordinary purchases and received
+documents do not emit. Invoice389 and credit261 preserve the company as
+buyer issuer, the partner as supplier and the selected agreement in
+immutable transmission evidence. The checks do not query a live VAT or
+ASP registry.
+
+For incoming buyer-issued self-billing, use a separate agreement with
+local role **Supplier Receiving Self-Billing**, referencing the known
+buyer and reviewed onboarding evidence. Received accounting forms
+display the original agreement reference and process without enabling
+another outbound transmission.
 
 Known issues / Roadmap
 ======================

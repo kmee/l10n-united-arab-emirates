@@ -13,17 +13,25 @@ class UaeSelfBillingAgreement(models.Model):
         "res.company", required=True, default=lambda self: self.env.company, index=True
     )
     partner_id = fields.Many2one(
-        "res.partner", string="Supplier", required=True, check_company=True
+        "res.partner", string="Counterparty", required=True, check_company=True
+    )
+    local_role = fields.Selection(
+        [
+            ("buyer", "Buyer Issuing Self-Billing"),
+            ("supplier", "Supplier Receiving Self-Billing"),
+        ],
+        required=True,
+        default="buyer",
     )
     active = fields.Boolean(default=True)
     start_date = fields.Date(required=True)
     end_date = fields.Date()
     scope = fields.Text(required=True)
     onboarding_reference = fields.Char(
-        string="Supplier Onboarding Evidence",
+        string="Counterparty Onboarding Evidence",
         required=True,
         help=(
-            "Reference to the reviewed evidence that the supplier participates "
+            "Reference to the reviewed evidence that the counterparty participates "
             "in the system."
         ),
     )
