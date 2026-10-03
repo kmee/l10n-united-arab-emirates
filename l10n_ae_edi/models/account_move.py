@@ -16,6 +16,12 @@ class AccountMove(models.Model):
     l10n_ae_received_document = fields.Boolean(
         string="Received UAE Document", readonly=True, copy=False
     )
+    l10n_ae_received_prepaid_amount = fields.Monetary(
+        string="Received Declared Prepaid Amount", readonly=True, copy=False
+    )
+    l10n_ae_received_payable_amount = fields.Monetary(
+        string="Received Declared Payable Amount", readonly=True, copy=False
+    )
 
     @api.model_create_multi
     def create(self, vals_list):
@@ -143,7 +149,12 @@ class AccountMove(models.Model):
             "l10n_ae_origin_document_id",
             "l10n_ae_fiscal_uuid",
         }
-        if identity_fields.intersection(vals) and self.filtered(
+        received_fields = identity_fields | {
+            "l10n_ae_credit_reason",
+            "l10n_ae_received_prepaid_amount",
+            "l10n_ae_received_payable_amount",
+        }
+        if received_fields.intersection(vals) and self.filtered(
             "l10n_ae_received_document"
         ):
             raise UserError(
