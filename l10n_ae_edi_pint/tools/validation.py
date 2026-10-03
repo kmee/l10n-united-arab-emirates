@@ -253,7 +253,9 @@ def _worker():
     resource.setrlimit(resource.RLIMIT_CPU, (30, 30))
     resource.setrlimit(resource.RLIMIT_FSIZE, (8 * 1024 * 1024, 8 * 1024 * 1024))
     if sys.platform.startswith("linux"):
-        resource.setrlimit(resource.RLIMIT_AS, (8 * 1024**3, 8 * 1024**3))
+        # SaxonC/Graal reserves ~32GiB of virtual address space at startup.
+        # This is not an RSS quota; the deployment must limit physical memory.
+        resource.setrlimit(resource.RLIMIT_AS, (64 * 1024**3, 64 * 1024**3))
     try:
         report = _validate_offline(
             sys.stdin.buffer.read(MAX_XML_BYTES + 1), sys.argv[1]
