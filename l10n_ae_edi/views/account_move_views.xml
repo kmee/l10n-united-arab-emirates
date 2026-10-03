@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<odoo>
+    <record id="account_move_form_uae_edi" model="ir.ui.view">
+        <field name="name">account.move.form.uae.edi</field>
+        <field name="model">account.move</field>
+        <field name="inherit_id" ref="account.view_move_form" />
+        <field name="arch" type="xml">
+            <xpath expr="//form/header" position="inside">
+                <button
+                    name="action_l10n_ae_validate"
+                    type="object"
+                    string="Validate UAE E-Invoice"
+                    groups="account.group_account_invoice"
+                    invisible="country_code != 'AE' or move_type == 'entry'"
+                />
+            </xpath>
+            <xpath expr="//notebook" position="inside">
+                <page
+                    string="UAE E-Invoicing"
+                    name="uae_edi"
+                    invisible="country_code != 'AE'"
+                >
+                    <group>
+                        <field name="l10n_ae_document_category" />
+                        <field name="l10n_ae_free_zone" />
+                        <field
+                            name="l10n_ae_beneficiary_id"
+                            invisible="not l10n_ae_free_zone"
+                            required="l10n_ae_free_zone"
+                        />
+                    </group>
+                </page>
+            </xpath>
+        </field>
+    </record>
+</odoo>

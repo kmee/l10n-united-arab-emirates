@@ -1,0 +1,1 @@
+Complete the accepted specification in the KMEE brain repository, including formal validation, durable asynchronous transport, independent fiscal status events, inbound/self-billing, multi-currency and release readiness.

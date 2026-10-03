@@ -1,0 +1,1 @@
+Install only in an isolated Odoo 20.0 development database. Read the repository architecture and QA instructions before preparing synthetic documents. These Alpha modules are not approved for production fiscal transmission.

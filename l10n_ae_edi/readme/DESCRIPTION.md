@@ -1,0 +1,1 @@
+Validate confirmed company TINs and Free Zone beneficiary presence. Prepare a frozen accounting snapshot with immutable business identity and company-scoped provider binding. Production preparation is disabled. The asynchronous executor and remaining fiscal validations are under development.
