@@ -1,0 +1,1 @@
+Extend the public Odoo UBL/PINT generator for AE identifiers, six document categories and eight transaction bits. Freeze the generated XML at preparation. This is an initial serializer: formal XSD/Schematron conformance and additional UAE fields are pending. It does not submit to Peppol or the FTA.
