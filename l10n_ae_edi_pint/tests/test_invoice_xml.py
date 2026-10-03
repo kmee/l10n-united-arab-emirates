@@ -1,5 +1,7 @@
 # Copyright 2026 KMEE
 # License AGPL-3.0 or later (https://www.gnu.org/licenses/agpl).
+import json
+
 from lxml import etree
 
 from odoo.exceptions import AccessError, UserError
@@ -751,6 +753,17 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
                 invoice = self.init_invoice(move_type, amounts=[100], taxes=False)
                 if process == "selfbilling":
                     invoice.journal_id.is_self_billing = True
+                    invoice.l10n_ae_selfbilling_agreement_id = self.env[
+                        "l10n_ae.selfbilling.agreement"
+                    ].create(
+                        {
+                            "name": "Synthetic self-billing agreement",
+                            "partner_id": invoice.partner_id.commercial_partner_id.id,
+                            "start_date": invoice.invoice_date,
+                            "scope": "Synthetic test supplies and adjustments",
+                            "onboarding_reference": "SYNTH-ONBOARD-0002",
+                        }
+                    )
                 invoice.l10n_ae_document_category = category
                 invoice.action_post()
                 xml = etree.fromstring(invoice.preview_l10n_ae_pint().encode())
@@ -765,6 +778,124 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
                     xml.findtext("cbc:ProfileID", namespaces=NS),
                     f"urn:peppol:bis:{process}",
                 )
+
+    def _selfbilling_bill_with_agreement(self):
+        bill = self.init_invoice("in_invoice", amounts=[100], taxes=self.tax_purchase_a)
+        bill.journal_id.is_self_billing = True
+        agreement = self.env["l10n_ae.selfbilling.agreement"].create(
+            {
+                "name": "SYNTH-AGREEMENT-0002",
+                "partner_id": self.partner_a.id,
+                "start_date": bill.invoice_date,
+                "scope": "Synthetic services and adjustments",
+                "onboarding_reference": "SYNTH-ONBOARD-0002",
+            }
+        )
+        bill.write(
+            {
+                "l10n_ae_selfbilling_agreement_id": agreement.id,
+                "l10n_ae_fiscal_uuid": "ddddddda-3333-4333-8333-333333333333",
+                "l10n_ae_binding_id": self.env["l10n_ae.edi.binding"]
+                .create({"name": "Synthetic self-billing sandbox"})
+                .id,
+            }
+        )
+        return bill, agreement
+
+    def test_self_billed_purchase_freezes_buyer_issuer_and_supplier_roles(self):
+        bill, agreement = self._selfbilling_bill_with_agreement()
+        bill.action_post()
+        bill.action_l10n_ae_prepare()
+        frozen = bill.l10n_ae_transmission_id
+        snapshot = json.loads(frozen.payload)
+        self.assertEqual(snapshot["issuer_role"], "buyer")
+        self.assertEqual(snapshot["supplier"]["vat"], "100000000200003")
+        self.assertEqual(snapshot["buyer"]["vat"], "100000000100003")
+        self.assertEqual(
+            snapshot["selfbilling_agreement"]["reference"], "SYNTH-AGREEMENT-0002"
+        )
+        xml = etree.fromstring(frozen.xml_content.encode())
+        self.assertEqual(xml.findtext("cbc:InvoiceTypeCode", namespaces=NS), "389")
+        self.assertEqual(
+            xml.findtext(
+                "cac:AccountingSupplierParty/cac:Party/cbc:EndpointID", namespaces=NS
+            ),
+            "1000000002",
+        )
+        self.assertEqual(
+            xml.findtext(
+                "cac:AccountingCustomerParty/cac:Party/cbc:EndpointID", namespaces=NS
+            ),
+            "1000000001",
+        )
+        report = bill.validate_l10n_ae_pint()
+        self.assertTrue(report["valid"], report)
+        self.assertEqual(report["profile"], "selfbilling")
+        expected = frozen.payload
+        agreement.name = "Changed after preparation"
+        self.partner_a.name = "Changed supplier after preparation"
+        bill.action_l10n_ae_prepare()
+        self.assertEqual(frozen.payload, expected)
+        with self.assertRaisesRegex(UserError, "frozen"):
+            bill.write({"l10n_ae_selfbilling_agreement_id": False})
+
+    def test_self_billing_requires_vat_registration_for_both_economic_parties(self):
+        bill, _agreement = self._selfbilling_bill_with_agreement()
+        for party in (self.env.company.partner_id, self.partner_a):
+            with self.subTest(party=party.id):
+                original_vat = party.vat
+                party.vat = False
+                with self.assertRaisesRegex(UserError, "VAT registration"):
+                    bill.action_l10n_ae_validate()
+                party.vat = original_vat
+
+    def test_self_billing_cannot_use_a_supplier_placeholder_endpoint(self):
+        bill, _agreement = self._selfbilling_bill_with_agreement()
+        self.partner_a.routing_endpoint = "9900000098"
+        with self.assertRaisesRegex(UserError, "onboarding"):
+            bill.action_l10n_ae_validate()
+
+    def test_self_billing_does_not_emit_commercial_documents(self):
+        bill, _agreement = self._selfbilling_bill_with_agreement()
+        bill.l10n_ae_document_category = "commercial"
+        with self.assertRaisesRegex(UserError, "tax documents"):
+            bill.action_l10n_ae_validate()
+
+    def test_self_billing_on_a_sales_journal_cannot_invert_economic_roles(self):
+        invoice = self.init_invoice("out_invoice", amounts=[100], taxes=self.tax_sale_a)
+        invoice.journal_id.is_self_billing = True
+        with self.assertRaisesRegex(UserError, "purchase"):
+            invoice.action_l10n_ae_validate()
+
+    def test_self_billing_posting_is_atomic_when_agreement_is_outside_its_term(self):
+        bill, agreement = self._selfbilling_bill_with_agreement()
+        self.env.company.write(
+            {
+                "l10n_ae_edi_auto_prepare": True,
+                "l10n_ae_edi_binding_id": bill.l10n_ae_binding_id.id,
+            }
+        )
+        agreement.write({"start_date": "2000-01-01", "end_date": "2000-12-31"})
+        with self.assertRaisesRegex(UserError, "self-billing agreement"):
+            bill.action_post()
+        self.assertEqual(bill.state, "draft")
+        self.assertFalse(bill.l10n_ae_transmission_id)
+
+    def test_readonly_accountant_cannot_authorize_a_self_billing_agreement(self):
+        _bill, agreement = self._selfbilling_bill_with_agreement()
+        reader = new_test_user(
+            self.env,
+            login="selfbilling-review-reader",
+            groups="account.group_account_readonly",
+        )
+        with self.assertRaises(AccessError):
+            agreement.with_user(reader).write({"end_date": "2099-12-31"})
+        foreign = self.env["res.company"].create({"name": "Foreign agreement entity"})
+        agreement.company_id = foreign
+        with self.assertRaises(AccessError):
+            agreement.with_user(reader).with_context(
+                allowed_company_ids=self.env.company.ids
+            ).read(["scope"])
 
     def test_combined_free_zone_export_preserves_eight_bits_and_beneficiary(self):
         invoice = self.init_invoice(

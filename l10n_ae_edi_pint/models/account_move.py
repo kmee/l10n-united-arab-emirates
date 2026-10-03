@@ -2,6 +2,7 @@
 # License AGPL-3.0 or later (https://www.gnu.org/licenses/agpl).
 import hashlib
 import os
+import re
 
 from odoo import models
 from odoo.exceptions import UserError
@@ -11,6 +12,28 @@ from ..tools.validation import OfflinePintValidator, ValidationUnavailable
 
 class AccountMove(models.Model):
     _inherit = "account.move"
+
+    def action_l10n_ae_validate(self):
+        result = super().action_l10n_ae_validate()
+        for move in self.filtered("is_self_billing"):
+            supplier = move.partner_id.commercial_partner_id
+            buyer = move.company_id.partner_id
+            if (
+                supplier.routing_scheme != "0235"
+                or not re.fullmatch(r"[0-9]{10}", supplier.routing_endpoint or "")
+                or supplier.routing_endpoint
+                in {"9900000097", "9900000098", "9900000099"}
+                or buyer.routing_scheme != "0235"
+                or buyer.routing_endpoint != move.company_id.l10n_ae_tin
+            ):
+                raise UserError(
+                    self.env._(
+                        "Review self-billing onboarding: both parties need confirmed "
+                        "UAE participant endpoints; placeholder destinations "
+                        "are not eligible."
+                    )
+                )
+        return result
 
     def preview_l10n_ae_pint(self):
         """Read frozen XML when prepared; otherwise preview without submitting."""
