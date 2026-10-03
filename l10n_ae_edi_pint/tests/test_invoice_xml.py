@@ -1,6 +1,7 @@
 # Copyright 2026 KMEE
 # License AGPL-3.0 or later (https://www.gnu.org/licenses/agpl).
 import json
+import uuid
 from decimal import Decimal
 
 from lxml import etree
@@ -1444,6 +1445,89 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         )
         with self.assertRaisesRegex(UserError, "ibr-193-ae"):
             invoice.action_l10n_ae_validate_pint()
+
+    def test_controlled_preparation_assigns_one_uuid_without_preseeded_identity(self):
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {
+                "name": "Explicit UUID simulation",
+                "fiscal_uuid_policy": "controlled_local",
+            }
+        )
+        invoice = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
+        )
+        self.assertFalse(invoice.l10n_ae_fiscal_uuid)
+        invoice.l10n_ae_binding_id = binding
+        invoice.action_l10n_ae_prepare()
+        self.assertTrue(invoice.l10n_ae_fiscal_uuid)
+        assigned_uuid = invoice.l10n_ae_fiscal_uuid
+        self.assertEqual(uuid.UUID(assigned_uuid).version, 4)
+        transmission = invoice.l10n_ae_transmission_id
+        self.assertEqual(json.loads(transmission.payload)["fiscal_uuid"], assigned_uuid)
+        self.assertEqual(
+            json.loads(transmission.payload)["fiscal_uuid_assignment"],
+            {
+                "policy": "controlled_local",
+                "source": "controlled_local",
+                "environment": "sandbox",
+                "simulation": True,
+            },
+        )
+        tree = etree.fromstring(invoice.preview_l10n_ae_pint().encode())
+        self.assertEqual(tree.findtext("cbc:UUID", namespaces=NS), assigned_uuid)
+        report = invoice.validate_l10n_ae_pint()
+        self.assertTrue(report["valid"], report)
+        payload, xml = transmission.payload, transmission.xml_content
+        invoice.action_l10n_ae_prepare()
+        self.assertEqual(invoice.l10n_ae_fiscal_uuid, assigned_uuid)
+        self.assertEqual(invoice.l10n_ae_transmission_id, transmission)
+        self.assertEqual(
+            (transmission.payload, transmission.xml_content), (payload, xml)
+        )
+        self.assertFalse(transmission.attempt_ids)
+
+    def test_failed_controlled_preparation_leaves_no_assigned_uuid(self):
+        usd = self.env.ref("base.USD")
+        usd.active = True
+        self.env["res.currency.rate"].create(
+            {
+                "currency_id": usd.id,
+                "company_id": self.env.company.id,
+                "name": "2019-01-01",
+                "rate": 1 / 3.6725,
+            }
+        )
+        invoice = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a, currency=usd, post=True
+        )
+        invoice.write(
+            {
+                "l10n_ae_tax_exchange_rate": "0.272294",
+                "l10n_ae_tax_exchange_date": invoice.invoice_date,
+                "l10n_ae_tax_exchange_source": "SYNTH-WRONG-DIRECTION",
+                "l10n_ae_binding_id": self.env["l10n_ae.edi.binding"]
+                .create(
+                    {
+                        "name": "UUID failure simulation",
+                        "fiscal_uuid_policy": "controlled_local",
+                    }
+                )
+                .id,
+            }
+        )
+        # Odoo assertRaises adds a savepoint; catch directly to verify the action
+        # itself restores its UUID when the caller handles the failure.
+        try:
+            invoice.action_l10n_ae_prepare()
+        except UserError as error:
+            self.assertRegex(str(error), "AED.*accounting")
+        else:
+            self.fail("The inconsistent AED obligation must require review.")
+        self.assertFalse(invoice.l10n_ae_fiscal_uuid)
+        self.assertFalse(invoice.l10n_ae_transmission_id)
+        self.assertEqual(
+            (invoice.state, invoice.amount_total_signed), ("posted", 385.61)
+        )
 
     def test_partial_credit_uses_its_own_amount_and_preserves_original_reference(self):
         original = self.init_invoice(
