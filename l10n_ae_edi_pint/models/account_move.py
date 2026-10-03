@@ -54,8 +54,7 @@ class AccountMove(models.Model):
                 self.env._("UAE formal validation is unavailable: %s", str(error))
             ) from error
 
-    def action_l10n_ae_validate_pint(self):
-        report = self.validate_l10n_ae_pint()
+    def _l10n_ae_check_pint_report(self, report):
         if not report["valid"]:
             diagnostics = [
                 f"UBL {issue['code']} (line {issue['line']})"
@@ -69,6 +68,10 @@ class AccountMove(models.Model):
             raise UserError(
                 self.env._("PINT-AE validation failed:\n%s", "\n".join(diagnostics))
             )
+
+    def action_l10n_ae_validate_pint(self):
+        report = self.validate_l10n_ae_pint()
+        self._l10n_ae_check_pint_report(report)
         return {
             "type": "ir.actions.client",
             "tag": "display_notification",
