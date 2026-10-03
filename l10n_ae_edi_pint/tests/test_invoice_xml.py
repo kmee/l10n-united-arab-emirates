@@ -2,6 +2,7 @@
 # License AGPL-3.0 or later (https://www.gnu.org/licenses/agpl).
 from lxml import etree
 
+from odoo.exceptions import UserError
 from odoo.tests import tagged
 
 from odoo.addons.account.tests.common import AccountTestInvoicingCommon
@@ -26,8 +27,12 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
                 "vat": "100000000100003",
                 "street": "Synthetic supplier street",
                 "city": "Dubai",
+                "state_id": cls.env.ref("base.state_ae_du").id,
                 "routing_scheme": "0235",
                 "routing_endpoint": "1000000001",
+                "l10n_ae_registration_type": "TL",
+                "l10n_ae_registration_authority": "Synthetic Free Zone Authority",
+                "additional_identifiers": {"AE_TL": "SYNTH-TRADE-0001"},
             }
         )
         cls.partner_a.write(
@@ -36,8 +41,12 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
                 "vat": "100000000200003",
                 "street": "Synthetic buyer street",
                 "city": "Dubai",
+                "state_id": cls.env.ref("base.state_ae_du").id,
                 "routing_scheme": "0235",
                 "routing_endpoint": "1000000002",
+                "l10n_ae_registration_type": "TL",
+                "l10n_ae_registration_authority": "Synthetic Buyer Authority",
+                "additional_identifiers": {"AE_TL": "SYNTH-TRADE-0002"},
             }
         )
 
@@ -69,6 +78,71 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
             xml.findtext("cac:LegalMonetaryTotal/cbc:PayableAmount", namespaces=NS),
             "105.00",
         )
+        self.assertEqual(
+            xml.findtext(
+                "cac:InvoiceLine/cac:ItemPriceExtension/cbc:Amount", namespaces=NS
+            ),
+            "105.00",
+        )
+        self.assertEqual(
+            xml.findtext(
+                "cac:InvoiceLine/cac:ItemPriceExtension/cac:TaxTotal/cbc:TaxAmount",
+                namespaces=NS,
+            ),
+            "5.00",
+        )
+        registration = xml.find(
+            "cac:AccountingSupplierParty/cac:Party/cac:PartyLegalEntity/cbc:CompanyID",
+            NS,
+        )
+        self.assertEqual(registration.text, "SYNTH-TRADE-0001")
+        self.assertEqual(registration.get("schemeAgencyID"), "TL")
+        self.assertEqual(
+            registration.get("schemeAgencyName"), "Synthetic Free Zone Authority"
+        )
+
+    def test_standard_tax_invoice_passes_the_official_offline_rules(self):
+        invoice = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
+        )
+        # Synthetic ASP-assigned value: separate from number/origin/request identity.
+        invoice.l10n_ae_fiscal_uuid = "11111111-1111-4111-8111-111111111111"
+        report = invoice.validate_l10n_ae_pint()
+        self.assertTrue(report["valid"], report)
+        self.assertTrue(report["xsd_valid"])
+        self.assertEqual(
+            [layer["name"] for layer in report["layers"]], ["shared", "ae"]
+        )
+
+    def test_formal_action_reports_missing_uuid_as_a_normative_diagnostic(self):
+        invoice = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
+        )
+        with self.assertRaisesRegex(UserError, "ibr-193-ae"):
+            invoice.action_l10n_ae_validate_pint()
+
+    def test_discount_and_quantity_keep_core_totals_and_pass_official_rules(self):
+        invoice = self.init_invoice("out_invoice", amounts=[100], taxes=self.tax_sale_a)
+        invoice.invoice_line_ids.write({"quantity": 2, "discount": 10})
+        invoice.l10n_ae_fiscal_uuid = "44444444-4444-4444-8444-444444444444"
+        invoice.action_post()
+        xml = etree.fromstring(invoice.preview_l10n_ae_pint().encode())
+        # Two units at AED100 less 10%: net180, VAT9, payable189.
+        self.assertEqual(invoice.amount_total, 189)
+        self.assertEqual(
+            xml.findtext(
+                "cac:LegalMonetaryTotal/cbc:TaxExclusiveAmount", namespaces=NS
+            ),
+            "180.00",
+        )
+        self.assertEqual(
+            xml.findtext(
+                "cac:InvoiceLine/cac:ItemPriceExtension/cbc:Amount", namespaces=NS
+            ),
+            "189.00",
+        )
+        report = invoice.validate_l10n_ae_pint()
+        self.assertTrue(report["valid"], report)
 
     def test_six_document_categories_preserve_type_and_process(self):
         cases = [
@@ -136,3 +210,15 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         self.assertIn(
             "Synthetic buyer street", invoice.l10n_ae_transmission_id.xml_content
         )
+
+    def test_formal_validation_reads_frozen_xml_after_master_data_changes(self):
+        invoice = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
+        )
+        invoice.l10n_ae_fiscal_uuid = "22222222-2222-4222-8222-222222222222"
+        invoice.l10n_ae_binding_id = self.env["l10n_ae.edi.binding"].create(
+            {"name": "Synthetic frozen validation sandbox"}
+        )
+        invoice.action_l10n_ae_prepare()
+        self.partner_a.write({"street": False, "city": False})
+        self.assertTrue(invoice.validate_l10n_ae_pint()["valid"])

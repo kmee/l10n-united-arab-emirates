@@ -2,7 +2,8 @@
 # License AGPL-3.0 or later (https://www.gnu.org/licenses/agpl).
 from odoo import models
 
-from odoo.addons.account_edi_ubl_cii.tools.ubl_21_common import CustomerParty
+from odoo.addons.account_edi_ubl_cii.models.account_edi_common import FloatFmt
+from odoo.addons.account_edi_ubl_cii.tools.ubl_21_common import CustomerParty, TaxTotal
 
 
 class AccountEdiUblUae(models.AbstractModel):
@@ -56,9 +57,102 @@ class AccountEdiUblUae(models.AbstractModel):
             vals["document_node"]["cbc:CreditNoteTypeCode"]["_text"] = "81"
         return result
 
+    def _ubl_add_party_legal_entity_nodes(self, vals):
+        result = super()._ubl_add_party_legal_entity_nodes(vals)
+        partner = vals["party_vals"]["partner"].commercial_partner_id
+        if partner.country_code == "AE":
+            for node in vals["party_node"]["cac:PartyLegalEntity"]:
+                # VAT/endpoint identity is not a trade-license identifier.
+                node["cbc:CompanyID"] = {
+                    "_text": partner._l10n_ae_legal_registration_number() or None,
+                    "schemeAgencyID": partner.l10n_ae_registration_type or None,
+                    "schemeAgencyName": partner.l10n_ae_registration_authority or None,
+                }
+        return result
+
+    def _ubl_add_line_item_name_description_nodes(self, vals):
+        result = super()._ubl_add_line_item_name_description_nodes(vals)
+        if not vals["item_node"].get("cbc:Description"):
+            vals["item_node"]["cbc:Description"] = {
+                "_text": vals["line_vals"]["base_line"].get("name")
+            }
+        return result
+
+    def _ubl_add_line_price_node(self, vals, in_foreign_currency=True):
+        result = super()._ubl_add_line_price_node(vals, in_foreign_currency)
+        price = vals["line_node"]["cac:Price"]
+        quantity = vals["line_node"].get("cbc:InvoicedQuantity") or vals[
+            "line_node"
+        ].get("cbc:CreditedQuantity")
+        price["cbc:BaseQuantity"] = {"_text": 1, "unitCode": quantity.get("unitCode")}
+        # Odoo expresses invoice discounts at line level. The price-level
+        # gross/net relation therefore has a zero allowance, even with no discount.
+        price["cac:AllowanceCharge"] = {
+            "cbc:ChargeIndicator": {"_text": "false"},
+            "cbc:Amount": {
+                "_text": "0",
+                "currencyID": price["cbc:PriceAmount"]["currencyID"],
+            },
+            "cbc:BaseAmount": dict(price["cbc:PriceAmount"]),
+        }
+        return result
+
+    def _ubl_add_line_allowance_charge_nodes(self, vals):
+        result = super()._ubl_add_line_allowance_charge_nodes(vals)
+        self._ubl_add_line_allowance_charge_nodes_for_discount(vals)
+        return result
+
+    def _l10n_ae_add_line_aed_amounts(self, vals):
+        if vals["company"].currency_id.name != "AED":
+            # Such output remains nonconformant until an explicit AED policy exists.
+            return
+        details = vals["line_vals"]["base_line"]["tax_details"]
+        extension = vals["line_node"]["cac:ItemPriceExtension"] = {
+            "cbc:Amount": {
+                "_text": FloatFmt(details["total_included"], min_dp=2, max_dp=2),
+                "currencyID": "AED",
+            }
+        }
+        categories = vals["line_node"]["cac:Item"]["cac:ClassifiedTaxCategory"]
+        if not categories or any(node["cbc:ID"]["_text"] != "E" for node in categories):
+            extension["cac:TaxTotal"] = {
+                "cbc:TaxAmount": {
+                    "_text": FloatFmt(
+                        details["total_included"] - details["total_excluded"],
+                        min_dp=2,
+                        max_dp=2,
+                    ),
+                    "currencyID": "AED",
+                }
+            }
+
+    def _ubl_add_invoice_line_node(self, vals):
+        result = super()._ubl_add_invoice_line_node(vals)
+        self._l10n_ae_add_line_aed_amounts(vals)
+        return result
+
+    def _ubl_add_credit_note_line_node(self, vals):
+        result = super()._ubl_add_credit_note_line_node(vals)
+        self._l10n_ae_add_line_aed_amounts(vals)
+        return result
+
     def _fill_document_values(self, vals):
         result = super()._fill_document_values(vals)
         invoice = vals["invoice"]
+        vals["document_node"]["cbc:UUID"] = {
+            "_text": invoice.l10n_ae_fiscal_uuid or None
+        }
+        template = dict(vals["document_node"]["_template"])
+        for name in ("cac:InvoiceLine", "cac:CreditNoteLine"):
+            if name in template:
+                template[name] = {
+                    **template[name],
+                    "cac:ItemPriceExtension": {
+                        "cbc:Amount": {},
+                        "cac:TaxTotal": TaxTotal,
+                    },
+                }
+        vals["document_node"]["_template"] = template
         flags = (
             invoice.l10n_ae_free_zone,
             invoice.l10n_ae_deemed_supply,

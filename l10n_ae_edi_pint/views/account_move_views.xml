@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<odoo>
+    <record id="account_move_form_uae_pint" model="ir.ui.view">
+        <field name="name">account.move.form.uae.pint</field>
+        <field name="model">account.move</field>
+        <field name="inherit_id" ref="l10n_ae_edi.account_move_form_uae_edi" />
+        <field name="arch" type="xml">
+            <xpath expr="//form/header" position="inside">
+                <button
+                    name="action_l10n_ae_validate_pint"
+                    type="object"
+                    string="Validate UAE E-Invoice"
+                    groups="account.group_account_invoice"
+                    invisible="country_code != 'AE' or move_type == 'entry'"
+                />
+            </xpath>
+        </field>
+    </record>
+</odoo>
