@@ -409,11 +409,12 @@ delivery or FTA reporting. These Alpha modules are not approved for
 production fiscal transmission.</p>
 <p>For an outbound self-billed purchase, use a native self-billing purchase
 journal and select a UAE Self-Billing Agreement in the invoice’s UAE
-tab. Accounting managers maintain buyer-role agreements for the company
-and commercial supplier, including reference, supply scope, validity
-dates and a reference to reviewed supplier onboarding evidence. Both
-parties need UAE VAT TRNs and eligible participant endpoints. Missing or
-expired agreements block automatic posting/queuing. Only tax
+tab. Accounting managers open <strong>Invoicing → Configuration → UAE
+Self-Billing Agreements</strong> to maintain buyer-role agreements for the
+company and commercial supplier, including reference, supply scope,
+validity dates and a reference to reviewed supplier onboarding evidence.
+Both parties need UAE VAT TRNs and eligible participant endpoints.
+Missing or expired agreements block automatic posting/queuing. Only tax
 invoices/credit notes are eligible; ordinary purchases and received
 documents do not emit. Invoice389 and credit261 preserve the company as
 buyer issuer, the partner as supplier and the selected agreement in
@@ -424,6 +425,9 @@ local role <strong>Supplier Receiving Self-Billing</strong>, referencing the kno
 buyer and reviewed onboarding evidence. Received accounting forms
 display the original agreement reference and process without enabling
 another outbound transmission.</p>
+<p>For prerequisites, UI steps, expected results and error handling, read
+the repository <a class="reference external" href="https://github.com/kmee/l10n-eua/blob/20.0-add-uae-edi/docs/user/scenarios-pt_BR.md">scenario based user
+manual</a>.</p>
 </div>
 <div class="section" id="known-issues-roadmap">
 <h1><a class="toc-backref" href="#toc-entry-2">Known issues / Roadmap</a></h1>

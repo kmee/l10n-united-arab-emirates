@@ -1,8 +1,8 @@
 Install only in an isolated Odoo 20.0 development database. Read the architecture and QA instructions before preparing synthetic documents. In the company's UAE E-Invoicing tab, confirm identity, select a sandbox ASP binding and optionally enable queuing on posting. An explicit invoice binding overrides the company default. The controlled external process sends committed intents; API acceptance does not confirm delivery or FTA reporting. These Alpha modules are not approved for production fiscal transmission.
 
 For an outbound self-billed purchase, use a native self-billing purchase journal and
-select a UAE Self-Billing Agreement in the invoice's UAE tab. Accounting managers
-maintain buyer-role agreements for the company and commercial supplier, including reference,
+select a UAE Self-Billing Agreement in the invoice's UAE tab. Accounting managers open **Invoicing → Configuration → UAE Self-Billing Agreements**
+to maintain buyer-role agreements for the company and commercial supplier, including reference,
 supply scope, validity dates and a reference to reviewed supplier onboarding evidence.
 Both parties need UAE VAT TRNs and eligible participant endpoints. Missing or expired
 agreements block automatic posting/queuing. Only tax invoices/credit notes are eligible;
@@ -14,3 +14,6 @@ For incoming buyer-issued self-billing, use a separate agreement with local role
 **Supplier Receiving Self-Billing**, referencing the known buyer and reviewed onboarding
 evidence. Received accounting forms display the original agreement reference and process
 without enabling another outbound transmission.
+
+For prerequisites, UI steps, expected results and error handling, read the repository
+[scenario based user manual](https://github.com/kmee/l10n-eua/blob/20.0-add-uae-edi/docs/user/scenarios-pt_BR.md).
