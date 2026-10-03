@@ -53,3 +53,12 @@ class TestUaeInvoiceIdentity(AccountTestInvoicingCommon):
         bill = self.init_invoice("in_invoice", amounts=[100], taxes=self.tax_purchase_a)
         with self.assertRaisesRegex(UserError, "self-billing purchase"):
             bill.action_l10n_ae_validate()
+
+    def test_self_billing_journal_without_agreement_cannot_authorize_emission(self):
+        self.env.company.write(
+            {"l10n_ae_tin": "1000000001", "l10n_ae_tin_confirmed": True}
+        )
+        bill = self.init_invoice("in_invoice", amounts=[100], taxes=self.tax_purchase_a)
+        bill.journal_id.is_self_billing = True
+        with self.assertRaisesRegex(UserError, "self-billing agreement"):
+            bill.action_l10n_ae_validate()

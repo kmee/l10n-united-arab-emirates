@@ -8,3 +8,6 @@ access_uae_attempt_accountant,UAE attempt accountant,l10n_ae.edi.attempt,account
 access_uae_attempt_invoice,UAE attempt invoice user,l10n_ae.edi.attempt,account.group_account_invoice,r,
 access_uae_event_accountant,UAE event accountant,l10n_ae.edi.event,account.group_account_readonly,r,
 access_uae_event_invoice,UAE event invoice user,l10n_ae.edi.event,account.group_account_invoice,r,
+access_uae_selfbilling_readonly,UAE self-billing agreement reader,l10n_ae.selfbilling.agreement,account.group_account_readonly,r,
+access_uae_selfbilling_invoice,UAE self-billing agreement invoice user,l10n_ae.selfbilling.agreement,account.group_account_invoice,r,
+access_uae_selfbilling_manager,UAE self-billing agreement manager,l10n_ae.selfbilling.agreement,account.group_account_manager,crud,

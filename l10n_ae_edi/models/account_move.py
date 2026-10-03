@@ -110,6 +110,12 @@ class AccountMove(models.Model):
         string="UAE Events Require Review",
     )
     l10n_ae_origin_system = fields.Char(default="odoo", required=True, copy=False)
+    l10n_ae_selfbilling_agreement_id = fields.Many2one(
+        "l10n_ae.selfbilling.agreement",
+        string="UAE Self-Billing Agreement",
+        check_company=True,
+        copy=False,
+    )
     l10n_ae_origin_document_id = fields.Char(
         default=lambda self: str(uuid.uuid4()), required=True, copy=False
     )
@@ -157,6 +163,7 @@ class AccountMove(models.Model):
             "l10n_ae_origin_system",
             "l10n_ae_origin_document_id",
             "l10n_ae_fiscal_uuid",
+            "l10n_ae_selfbilling_agreement_id",
         }
         received_fields = identity_fields | {
             "l10n_ae_document_category",
@@ -214,10 +221,25 @@ class AccountMove(models.Model):
                 or None,
             }
 
+        company_party = {**party(company.partner_id), "tin": company.l10n_ae_tin}
+        counterparty = party(partner)
+        agreement = self.l10n_ae_selfbilling_agreement_id
         return {
             "contract_version": "kmee-controlled-1",
-            "company": {**party(company.partner_id), "tin": company.l10n_ae_tin},
-            "counterparty": party(partner),
+            "company": company_party,
+            "counterparty": counterparty,
+            "issuer_role": "buyer" if self.is_self_billing else "supplier",
+            "supplier": counterparty if self.is_self_billing else company_party,
+            "buyer": company_party if self.is_self_billing else counterparty,
+            "selfbilling_agreement": {
+                "reference": agreement.name,
+                "start_date": fields.Date.to_string(agreement.start_date),
+                "end_date": fields.Date.to_string(agreement.end_date),
+                "scope": agreement.scope,
+                "onboarding_reference": agreement.onboarding_reference,
+            }
+            if self.is_self_billing
+            else None,
             "invoice_number": self.name,
             "issue_date": fields.Date.to_string(self.invoice_date),
             "document_category": self.l10n_ae_document_category,
@@ -378,6 +400,48 @@ class AccountMove(models.Model):
                         "identifier."
                     )
                 )
+            if move.is_self_billing:
+                if move.move_type not in ("in_invoice", "in_refund"):
+                    raise UserError(
+                        self.env._(
+                            "Outbound self-billing requires a purchase invoice "
+                            "or credit note."
+                        )
+                    )
+                if move.l10n_ae_document_category != "tax":
+                    raise UserError(
+                        self.env._("Self-billing supports tax documents only.")
+                    )
+                agreement = move.l10n_ae_selfbilling_agreement_id
+                issue_date = move.invoice_date
+                if (
+                    not agreement
+                    or not agreement.active
+                    or agreement.company_id != move.company_id
+                    or agreement.partner_id != move.partner_id.commercial_partner_id
+                    or not issue_date
+                    or issue_date < agreement.start_date
+                    or agreement.end_date
+                    and issue_date > agreement.end_date
+                ):
+                    raise UserError(
+                        self.env._(
+                            "Select an active self-billing agreement for this company, "
+                            "supplier and invoice date."
+                        )
+                    )
+                parties = (
+                    move.company_id.partner_id | move.partner_id.commercial_partner_id
+                )
+                if any(
+                    not re.fullmatch(r"[0-9]{15}", party.vat or "") for party in parties
+                ):
+                    raise UserError(
+                        self.env._(
+                            "Self-billing requires UAE VAT registration for both buyer "
+                            "and supplier. Review their 15-digit TRNs."
+                        )
+                    )
         return {
             "type": "ir.actions.client",
             "tag": "display_notification",
