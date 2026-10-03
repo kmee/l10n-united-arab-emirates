@@ -28,6 +28,11 @@
                         />
                         <field name="l10n_ae_transmission_id" readonly="True" />
                         <field name="l10n_ae_submission_state" readonly="True" />
+                        <field
+                            name="l10n_ae_received_document"
+                            readonly="True"
+                            invisible="not l10n_ae_received_document"
+                        />
                         <field name="l10n_ae_document_category" />
                         <field name="l10n_ae_fiscal_uuid" readonly="True" />
                         <field
