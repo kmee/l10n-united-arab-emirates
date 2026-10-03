@@ -16,6 +16,8 @@ class AccountEdiUblUae(models.AbstractModel):
         # Keep this adapter local; do not patch the deployed core.
         vals["currency_id"] = vals["currency"]
         vals["company_currency"] = vals["company"].currency_id
+        # OCB 20.0 still reads a removed flag; absence means normal tax nodes.
+        vals.setdefault("no_party_tax_scheme", False)
         return vals
 
     def _ubl_add_customization_id_node(self, vals):
