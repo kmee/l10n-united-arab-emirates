@@ -23,10 +23,12 @@ UAE Electronic Invoicing
 |badge1| |badge2| |badge3|
 
 Validate confirmed company TINs and Free Zone beneficiary presence.
-Prepare a frozen accounting snapshot with immutable business identity
-and company-scoped provider binding. Production preparation is disabled.
-The asynchronous executor and remaining fiscal validations are under
-development.
+Opt-in company policy creates a frozen accounting snapshot and
+transmission in the native posting transaction. A separate controlled
+worker validates PINT, persists attempts and sends to a loopback mock
+after commit. Authenticated controlled events preserve independent
+validation, delivery and tax-report evidence. Production preparation is
+disabled; the mock contract is KMEE's own.
 
 .. IMPORTANT::
    This is an alpha version, the data model and design can change at any time without warning.
@@ -42,17 +44,22 @@ Usage
 =====
 
 Install only in an isolated Odoo 20.0 development database. Read the
-repository architecture and QA instructions before preparing synthetic
-documents. These Alpha modules are not approved for production fiscal
-transmission.
+architecture and QA instructions before preparing synthetic documents.
+In the company's UAE E-Invoicing tab, confirm identity, select a sandbox
+ASP binding and optionally enable queuing on posting. An explicit
+invoice binding overrides the company default. The controlled external
+process sends committed intents; API acceptance does not confirm
+delivery or FTA reporting. These Alpha modules are not approved for
+production fiscal transmission.
 
 Known issues / Roadmap
 ======================
 
 Complete the accepted specification in the KMEE brain repository,
-including formal validation, durable asynchronous transport, independent
-fiscal status events, inbound/self-billing, multi-currency and release
-readiness.
+including operational scheduling/batch error handling/backoff, deployed
+authenticated event ingress and correction policy, inbound/self-billing,
+multi-currency, multiple credit references/advances, UUID assignment,
+Enterprise coexistence, accredited ASP contracts and release readiness.
 
 Bug Tracker
 ===========

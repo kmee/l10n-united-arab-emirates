@@ -1,1 +1,1 @@
-Complete the accepted specification in the KMEE brain repository, including formal validation, durable asynchronous transport, independent fiscal status events, inbound/self-billing, multi-currency and release readiness.
+Complete the accepted specification in the KMEE brain repository, including operational scheduling/batch error handling/backoff, deployed authenticated event ingress and correction policy, inbound/self-billing, multi-currency, multiple credit references/advances, UUID assignment, Enterprise coexistence, accredited ASP contracts and release readiness.

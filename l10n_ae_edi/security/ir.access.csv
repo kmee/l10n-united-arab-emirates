@@ -6,3 +6,5 @@ access_uae_transmission_accountant,UAE transmission accountant,l10n_ae.edi.trans
 access_uae_transmission_invoice,UAE transmission invoice user,l10n_ae.edi.transmission,account.group_account_invoice,r,
 access_uae_attempt_accountant,UAE attempt accountant,l10n_ae.edi.attempt,account.group_account_readonly,r,
 access_uae_attempt_invoice,UAE attempt invoice user,l10n_ae.edi.attempt,account.group_account_invoice,r,
+access_uae_event_accountant,UAE event accountant,l10n_ae.edi.event,account.group_account_readonly,r,
+access_uae_event_invoice,UAE event invoice user,l10n_ae.edi.event,account.group_account_invoice,r,

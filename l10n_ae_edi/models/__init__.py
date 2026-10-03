@@ -6,3 +6,4 @@ from . import account_move
 from . import edi_binding
 from . import edi_transmission
 from . import edi_attempt
+from . import edi_event

@@ -41,6 +41,16 @@
                             required="l10n_ae_free_zone"
                         />
                     </group>
+                    <group
+                        string="E-Invoice Confirmations"
+                        invisible="not l10n_ae_transmission_id"
+                    >
+                        <field name="l10n_ae_validation_c2_state" readonly="True" />
+                        <field name="l10n_ae_delivery_c3_state" readonly="True" />
+                        <field name="l10n_ae_reporting_c2_state" readonly="True" />
+                        <field name="l10n_ae_reporting_c3_state" readonly="True" />
+                        <field name="l10n_ae_event_review_required" readonly="True" />
+                    </group>
                 </page>
             </xpath>
         </field>

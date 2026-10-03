@@ -61,6 +61,26 @@ class AccountMove(models.Model):
         related="l10n_ae_transmission_id.submission_state",
         string="UAE Submission Status",
     )
+    l10n_ae_validation_c2_state = fields.Selection(
+        related="l10n_ae_transmission_id.validation_c2_state",
+        string="ASP Validation",
+    )
+    l10n_ae_delivery_c3_state = fields.Selection(
+        related="l10n_ae_transmission_id.delivery_c3_state",
+        string="Invoice Delivery",
+    )
+    l10n_ae_reporting_c2_state = fields.Selection(
+        related="l10n_ae_transmission_id.reporting_c2_state",
+        string="Supplier ASP Tax Report",
+    )
+    l10n_ae_reporting_c3_state = fields.Selection(
+        related="l10n_ae_transmission_id.reporting_c3_state",
+        string="Buyer ASP Tax Report",
+    )
+    l10n_ae_event_review_required = fields.Boolean(
+        related="l10n_ae_transmission_id.event_review_required",
+        string="UAE Events Require Review",
+    )
     l10n_ae_origin_system = fields.Char(default="odoo", required=True, copy=False)
     l10n_ae_origin_document_id = fields.Char(
         default=lambda self: str(uuid.uuid4()), required=True, copy=False

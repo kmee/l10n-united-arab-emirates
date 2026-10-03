@@ -58,29 +58,60 @@ class UaeEdiTransmission(models.Model):
         "l10n_ae.edi.attempt", "transmission_id", readonly=True
     )
     validation_c2_state = fields.Selection(
-        [("unknown", "Unknown"), ("pending", "Pending")],
+        [
+            ("unknown", "Unknown"),
+            ("pending", "Pending"),
+            ("passed", "Passed"),
+            ("rejected", "Rejected"),
+        ],
         default="unknown",
         readonly=True,
         required=True,
     )
     delivery_c3_state = fields.Selection(
-        [("unknown", "Unknown"), ("pending", "Pending")],
+        [
+            ("unknown", "Unknown"),
+            ("pending", "Pending"),
+            ("delivered", "Delivered"),
+            ("rejected", "Rejected"),
+        ],
         default="unknown",
         readonly=True,
         required=True,
     )
     reporting_c2_state = fields.Selection(
-        [("unknown", "Unknown"), ("pending", "Pending")],
+        [
+            ("unknown", "Unknown"),
+            ("pending", "Pending"),
+            ("confirmed", "Confirmed"),
+            ("rejected", "Rejected"),
+        ],
         default="unknown",
         readonly=True,
         required=True,
     )
     reporting_c3_state = fields.Selection(
-        [("unknown", "Unknown"), ("pending", "Pending")],
+        [
+            ("unknown", "Unknown"),
+            ("pending", "Pending"),
+            ("confirmed", "Confirmed"),
+            ("rejected", "Rejected"),
+        ],
         default="unknown",
         readonly=True,
         required=True,
     )
+
+    event_ids = fields.One2many("l10n_ae.edi.event", "transmission_id", readonly=True)
+
+    event_review_required = fields.Boolean(readonly=True, copy=False)
+
+    def _mark_controlled_event_review(self):
+        return super().write({"event_review_required": True})
+
+    def _apply_controlled_event(self, event):
+        self.ensure_one()
+        return super().write({event.dimension: event.fact_state})
 
     def _validate_controlled_document(self):
         raise UserError(
@@ -214,6 +245,8 @@ class UaeEdiTransmission(models.Model):
             "lease_until",
             "claim_token",
             "attempt_ids",
+            "event_ids",
+            "event_review_required",
             "validation_c2_state",
             "delivery_c3_state",
             "reporting_c2_state",
