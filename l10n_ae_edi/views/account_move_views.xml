@@ -65,6 +65,24 @@
                             required="l10n_ae_free_zone"
                         />
                     </group>
+                    <group string="Reviewed Fiscal Exchange Rate to AED">
+                        <field
+                            name="l10n_ae_tax_exchange_rate"
+                            readonly="l10n_ae_transmission_id or l10n_ae_received_document"
+                        />
+                        <field
+                            name="l10n_ae_tax_exchange_date"
+                            readonly="l10n_ae_transmission_id or l10n_ae_received_document"
+                        />
+                        <field
+                            name="l10n_ae_tax_exchange_source"
+                            readonly="l10n_ae_transmission_id or l10n_ae_received_document"
+                        />
+                        <label
+                            for="l10n_ae_tax_exchange_rate"
+                            string="For foreign currency: AED per one unit; preserve the reviewed source value."
+                        />
+                    </group>
                     <group
                         string="Amounts Declared by the Sender"
                         invisible="not l10n_ae_received_document"

@@ -50,6 +50,17 @@ class AccountMove(models.Model):
         copy=False,
         currency_field="l10n_ae_received_currency_id",
     )
+    l10n_ae_tax_exchange_rate = fields.Char(
+        string="Reviewed AED Exchange Rate",
+        copy=False,
+        help=(
+            "AED per one unit of the document currency, preserving the source decimals."
+        ),
+    )
+    l10n_ae_tax_exchange_date = fields.Date(string="AED Exchange Rate Date", copy=False)
+    l10n_ae_tax_exchange_source = fields.Char(
+        string="AED Exchange Rate Source", copy=False
+    )
 
     @api.model_create_multi
     def create(self, vals_list):
@@ -183,6 +194,9 @@ class AccountMove(models.Model):
             "l10n_ae_origin_document_id",
             "l10n_ae_fiscal_uuid",
             "l10n_ae_selfbilling_agreement_id",
+            "l10n_ae_tax_exchange_rate",
+            "l10n_ae_tax_exchange_date",
+            "l10n_ae_tax_exchange_source",
         }
         received_fields = identity_fields | {
             "l10n_ae_received_agreement_snapshot",
@@ -277,6 +291,15 @@ class AccountMove(models.Model):
             else None,
             "process": "selfbilling" if self.is_self_billing else "billing",
             "currency": self.currency_id.name,
+            "tax_exchange": {
+                "source_currency": self.currency_id.name,
+                "target_currency": "AED",
+                "rate": self.l10n_ae_tax_exchange_rate,
+                "date": fields.Date.to_string(self.l10n_ae_tax_exchange_date),
+                "source": self.l10n_ae_tax_exchange_source,
+            }
+            if self.currency_id.name != "AED"
+            else None,
             "origin": {
                 "system": self.l10n_ae_origin_system,
                 "document_id": self.l10n_ae_origin_document_id,
@@ -420,6 +443,29 @@ class AccountMove(models.Model):
                     self.env._(
                         "IBR-007-AE: a Free Zone transaction requires a beneficiary "
                         "identifier."
+                    )
+                )
+            if move.currency_id.name != "AED" and not (
+                move.l10n_ae_tax_exchange_rate
+                and move.l10n_ae_tax_exchange_date
+                and (move.l10n_ae_tax_exchange_source or "").strip()
+            ):
+                raise UserError(
+                    self.env._(
+                        "Record the reviewed AED exchange rate, its date and source "
+                        "before preparing a foreign-currency e-invoice."
+                    )
+                )
+            if move.currency_id.name != "AED" and (
+                not re.fullmatch(
+                    r"[0-9]+(?:\.[0-9]{1,6})?", move.l10n_ae_tax_exchange_rate
+                )
+                or Decimal(move.l10n_ae_tax_exchange_rate) <= 0
+            ):
+                raise UserError(
+                    self.env._(
+                        "The AED exchange rate must be a positive decimal with at "
+                        "most six decimal places; preserve the reviewed source value."
                     )
                 )
             if move.is_self_billing:
