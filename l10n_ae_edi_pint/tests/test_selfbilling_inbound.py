@@ -340,3 +340,49 @@ class TestUaeSelfBillingInbound(AccountTestInvoicingCommon):
         self.assertTrue(inbox.action_process(), inbox.diagnostic)
         self.assertEqual(inbox.move_id.l10n_ae_selfbilling_agreement_id, agreement)
         self.assertEqual(inbox.original_xml.content, content)
+
+    def test_sender_prepaid_credit_does_not_claim_a_local_payment_in_the_history(self):
+        source, _agreement, binding = self._selfbilling_fixture()
+        inbox_model = self.env["l10n_ae.edi.inbox"]
+        original = inbox_model.receive_controlled_document(
+            binding.id,
+            "prepaid-original",
+            source.preview_l10n_ae_pint().encode(),
+        )
+        self.assertTrue(original.action_process(), original.diagnostic)
+        buyer_agreement = source.l10n_ae_selfbilling_agreement_id
+        credit = source.copy(
+            {
+                "move_type": "in_refund",
+                "invoice_date": source.invoice_date,
+                "reversed_entry_id": source.id,
+                "l10n_ae_selfbilling_agreement_id": buyer_agreement.id,
+                "l10n_ae_credit_reason": "DL8.61.1.C",
+                "l10n_ae_fiscal_uuid": "eeeeeeec-7777-4777-8777-777777777777",
+            }
+        )
+        credit.invoice_line_ids.price_unit = 40
+        credit.action_post()
+        payments = self.env["account.payment"].search_count(
+            [("company_id", "=", self.env.company.id)]
+        )
+        inbox = inbox_model.receive_controlled_document(
+            binding.id,
+            "prepaid-credit",
+            credit.preview_l10n_ae_pint().encode(),
+        )
+        self.assertTrue(inbox.action_process(), inbox.diagnostic)
+        refund = inbox.move_id
+        self.assertEqual(refund.l10n_ae_received_prepaid_amount, 42)
+        self.assertEqual(refund.l10n_ae_received_payable_amount, 0)
+        self.assertEqual(refund.state, "draft")
+        self.assertEqual(
+            self.env["account.payment"].search_count(
+                [("company_id", "=", self.env.company.id)]
+            ),
+            payments,
+        )
+        history = " ".join(str(body) for body in refund.message_ids.mapped("body"))
+        self.assertNotIn("A payment of", history)
+        self.assertIn("The sender declares a prepaid amount", history)
+        self.assertIn("Review it against local accounting", history)

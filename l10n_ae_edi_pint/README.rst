@@ -22,11 +22,14 @@ UAE PINT Electronic Invoicing
 
 |badge1| |badge2| |badge3|
 
-Extend the public Odoo UBL/PINT generator for AE identifiers, six
-document categories and eight transaction bits. Freeze the generated XML
-at preparation. This is an initial serializer: formal XSD/Schematron
-conformance and additional UAE fields are pending. It does not submit to
-Peppol or the FTA.
+Extend the public Community UBL/PINT generator for UAE identifiers and
+document processes. Freeze the generated XML at preparation and validate
+it using pinned UBL XSD plus shared and UAE Schematron rules. Reviewed
+incoming AED billing and self-billing documents use the public UBL21
+importer with existing counterparties and taxes, protected original
+evidence and economic accounting roles. Additional scenario fields,
+foreign currency and the full conformance matrix remain under
+development. This module does not submit directly to Peppol or the FTA.
 
 .. IMPORTANT::
    This is an alpha version, the data model and design can change at any time without warning.
@@ -82,13 +85,25 @@ credit needs one matching original self-billed sale. The agreement
 reference at receipt remains available after later agreement changes.
 Posting received sales never emits them again.
 
+When the sender declares a prepaid amount, the accounting history
+identifies it as a remote declaration for review. Receiving does not
+create a local payment. Confirm any local settlement through the usual
+accounting review and posting process.
+
+The repository `scenario based user
+manual <https://github.com/kmee/l10n-eua/blob/20.0-add-uae-edi/docs/user/scenarios-pt_BR.md>`__
+distinguishes tested user journeys from workflows still to implement.
+
 Known issues / Roadmap
 ======================
 
 Complete the accepted specification in the KMEE brain repository,
-including formal validation, durable asynchronous transport, independent
-fiscal status events, inbound/self-billing, multi-currency and release
-readiness.
+including all UAE transaction scenarios, foreign currency, full fiscal
+identity and ingestion, multiple credit references and advances, billing
+reconciliation, operational receiving, migration and release readiness.
+Current offline validation and controlled receiving checkpoints provide
+partial evidence; they do not complete the full acceptance catalogue or
+accredited ASP homologation.
 
 Bug Tracker
 ===========

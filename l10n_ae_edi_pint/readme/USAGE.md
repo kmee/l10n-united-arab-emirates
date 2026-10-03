@@ -28,3 +28,10 @@ buyer. Existing matching billing drafts are reused without replacing their lines
 origin identifiers; differences remain in review. A received self-billed credit needs
 one matching original self-billed sale. The agreement reference at receipt remains
 available after later agreement changes. Posting received sales never emits them again.
+
+When the sender declares a prepaid amount, the accounting history identifies it as a
+remote declaration for review. Receiving does not create a local payment. Confirm any
+local settlement through the usual accounting review and posting process.
+
+The repository [scenario based user manual](https://github.com/kmee/l10n-eua/blob/20.0-add-uae-edi/docs/user/scenarios-pt_BR.md)
+distinguishes tested user journeys from workflows still to implement.

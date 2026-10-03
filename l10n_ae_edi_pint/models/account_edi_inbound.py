@@ -2,6 +2,7 @@
 # License AGPL-3.0 or later (https://www.gnu.org/licenses/agpl).
 from odoo import models
 from odoo.exceptions import UserError
+from odoo.tools import formatLang
 
 
 class AccountEdiUblUaeInbound(models.AbstractModel):
@@ -78,6 +79,19 @@ class AccountEdiUblUaeInbound(models.AbstractModel):
     def _import_attachments(self, invoice, tree):
         # pylint: disable=method-required-super
         return self.env["ir.attachment"]
+
+    def _import_prepaid_amount(self, invoice, tree, xpath, qty_factor):
+        # pylint: disable=method-required-super
+        amount = float(tree.findtext(xpath) or 0)
+        if invoice.currency_id.is_zero(amount):
+            return []
+        return [
+            self.env._(
+                "The sender declares a prepaid amount of %(amount)s. "
+                "Review it against local accounting.",
+                amount=formatLang(self.env, amount, currency_obj=invoice.currency_id),
+            )
+        ]
 
     def _get_tax_nodes(self, tree):
         # pylint: disable=method-required-super
