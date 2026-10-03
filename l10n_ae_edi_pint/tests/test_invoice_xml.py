@@ -1,6 +1,7 @@
 # Copyright 2026 KMEE
 # License AGPL-3.0 or later (https://www.gnu.org/licenses/agpl).
 import json
+from decimal import Decimal
 
 from lxml import etree
 
@@ -491,6 +492,402 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
                 "additional_identifiers": {"AE_TL": "SYNTH-TRADE-0002"},
             }
         )
+
+    def test_usd_invoice_preserves_the_quote_and_unrounded_line_aed_amounts(self):
+        usd = self.env.ref("base.USD")
+        usd.active = True
+        self.env["res.currency.rate"].create(
+            {
+                "currency_id": usd.id,
+                "company_id": self.env.company.id,
+                "name": "2019-01-01",
+                "rate": 1 / 3.6725,
+            }
+        )
+        invoice = self.init_invoice(
+            "out_invoice",
+            amounts=[100],
+            taxes=self.tax_sale_a,
+            currency=usd,
+            post=True,
+        )
+        invoice.write(
+            {
+                "l10n_ae_tax_exchange_rate": "3.672500",
+                "l10n_ae_tax_exchange_date": invoice.invoice_date,
+                "l10n_ae_tax_exchange_source": "SYNTH-USD-AED-2019-01-01",
+                "l10n_ae_fiscal_uuid": "ddddddda-1111-4111-8111-111111111111",
+            }
+        )
+        tree = etree.fromstring(invoice.preview_l10n_ae_pint().encode())
+        self.assertEqual(tree.findtext("cbc:TaxCurrencyCode", namespaces=NS), "AED")
+        exchange = tree.find("cac:TaxExchangeRate", NS)
+        self.assertIsNotNone(exchange)
+        self.assertEqual(
+            exchange.findtext("cbc:SourceCurrencyCode", namespaces=NS), "USD"
+        )
+        self.assertEqual(
+            exchange.findtext("cbc:TargetCurrencyCode", namespaces=NS), "AED"
+        )
+        self.assertEqual(
+            exchange.findtext("cbc:CalculationRate", namespaces=NS), "3.672500"
+        )
+        self.assertEqual(
+            Decimal(
+                tree.findtext(
+                    "cac:InvoiceLine/cac:ItemPriceExtension/cbc:Amount", namespaces=NS
+                )
+            ),
+            Decimal("385.612500"),
+        )
+        self.assertEqual(
+            Decimal(
+                tree.findtext(
+                    "cac:InvoiceLine/cac:ItemPriceExtension/cac:TaxTotal/cbc:TaxAmount",
+                    namespaces=NS,
+                )
+            ),
+            Decimal("18.362500"),
+        )
+        self.assertEqual(
+            tree.findtext(
+                "cac:TaxTotal/cbc:TaxAmount[@currencyID='AED']", namespaces=NS
+            ),
+            "18.36",
+        )
+        self.assertEqual(
+            tree.findtext(
+                "cac:AdditionalDocumentReference[cbc:DocumentTypeCode='aedtotal-incl-vat']/cbc:DocumentDescription",
+                namespaces=NS,
+            ),
+            "385.61",
+        )
+        self.assertEqual(invoice.amount_total, 105)
+        report = invoice.validate_l10n_ae_pint()
+        self.assertTrue(report["valid"], report)
+
+    def test_invalid_aed_quotes_are_rejected_without_silent_rate_rounding(self):
+        usd = self.env.ref("base.USD")
+        usd.active = True
+        invoice = self.init_invoice(
+            "out_invoice",
+            amounts=[100],
+            taxes=self.tax_sale_a,
+            currency=usd,
+            post=True,
+        )
+        invoice.write(
+            {
+                "l10n_ae_tax_exchange_date": invoice.invoice_date,
+                "l10n_ae_tax_exchange_source": "SYNTH-INVALID-QUOTE",
+            }
+        )
+        for value in ("0", "-1", "NaN", "Infinity", "1E-5", "3.6725001"):
+            with self.subTest(value=value):
+                invoice.l10n_ae_tax_exchange_rate = value
+                with self.assertRaisesRegex(UserError, "positive decimal.*six"):
+                    invoice.preview_l10n_ae_pint()
+
+    def test_prepared_foreign_invoice_freezes_exchange_value_date_source_and_xml(self):
+        usd = self.env.ref("base.USD")
+        usd.active = True
+        rate = self.env["res.currency.rate"].create(
+            {
+                "currency_id": usd.id,
+                "company_id": self.env.company.id,
+                "name": "2019-01-01",
+                "rate": 1 / 3.6725,
+            }
+        )
+        invoice = self.init_invoice(
+            "out_invoice",
+            amounts=[100],
+            taxes=self.tax_sale_a,
+            currency=usd,
+            post=True,
+        )
+        invoice.write(
+            {
+                "l10n_ae_tax_exchange_rate": "3.672500",
+                "l10n_ae_tax_exchange_date": invoice.invoice_date,
+                "l10n_ae_tax_exchange_source": "SYNTH-FROZEN-QUOTE",
+                "l10n_ae_fiscal_uuid": "ddddddda-2222-4222-8222-222222222222",
+                "l10n_ae_binding_id": self.env["l10n_ae.edi.binding"]
+                .create({"name": "FX quote"})
+                .id,
+            }
+        )
+        invoice.action_l10n_ae_prepare()
+        transmission = invoice.l10n_ae_transmission_id
+        frozen = transmission.xml_content
+        self.assertEqual(
+            json.loads(transmission.payload)["tax_exchange"],
+            {
+                "source_currency": "USD",
+                "target_currency": "AED",
+                "rate": "3.672500",
+                "date": "2019-01-01",
+                "source": "SYNTH-FROZEN-QUOTE",
+            },
+        )
+        for field, value in (
+            ("l10n_ae_tax_exchange_rate", "3.700000"),
+            ("l10n_ae_tax_exchange_date", "2019-01-02"),
+            ("l10n_ae_tax_exchange_source", "changed source"),
+        ):
+            with self.subTest(field=field), self.assertRaisesRegex(UserError, "frozen"):
+                invoice.write({field: value})
+        rate.rate = 1 / 3.7
+        self.assertEqual(invoice.preview_l10n_ae_pint(), frozen)
+        self.assertEqual(transmission.xml_content, frozen)
+
+    def test_an_inverted_quote_cannot_prepare_a_different_aed_accounting_obligation(
+        self,
+    ):
+        usd = self.env.ref("base.USD")
+        usd.active = True
+        self.env["res.currency.rate"].create(
+            {
+                "currency_id": usd.id,
+                "company_id": self.env.company.id,
+                "name": "2019-01-01",
+                "rate": 1 / 3.6725,
+            }
+        )
+        invoice = self.init_invoice(
+            "out_invoice",
+            amounts=[100],
+            taxes=self.tax_sale_a,
+            currency=usd,
+            post=True,
+        )
+        invoice.write(
+            {
+                "l10n_ae_tax_exchange_rate": "0.272294",
+                "l10n_ae_tax_exchange_date": invoice.invoice_date,
+                "l10n_ae_tax_exchange_source": "SYNTH-WRONG-DIRECTION",
+                "l10n_ae_fiscal_uuid": "ddddddda-3333-4333-8333-333333333333",
+                "l10n_ae_binding_id": self.env["l10n_ae.edi.binding"]
+                .create({"name": "FX mismatch"})
+                .id,
+            }
+        )
+        with self.assertRaisesRegex(UserError, "AED.*accounting"):
+            invoice.action_l10n_ae_prepare()
+        self.assertFalse(invoice.l10n_ae_transmission_id)
+        self.assertEqual(invoice.amount_total, 105)
+        self.assertEqual(invoice.amount_total_signed, 385.61)
+
+    def test_foreign_currency_cannot_emit_without_a_reviewed_aed_exchange_quote(self):
+        usd = self.env.ref("base.USD")
+        usd.active = True
+        invoice = self.init_invoice(
+            "out_invoice",
+            amounts=[100],
+            taxes=self.tax_sale_a,
+            currency=usd,
+            post=True,
+        )
+        with self.assertRaisesRegex(UserError, "AED exchange rate"):
+            invoice.preview_l10n_ae_pint()
+
+    def test_company_eur_ledger_does_not_replace_usd_to_aed_fiscal_currency(self):
+        eur = self.env.ref("base.EUR")
+        usd = self.env.ref("base.USD")
+        eur.active = usd.active = True
+        data = self.setup_other_company(
+            name="Synthetic EUR accounting company",
+            currency_id=eur.id,
+        )
+        company = data["company"]
+        company.write({"l10n_ae_tin": "1000000007", "l10n_ae_tin_confirmed": True})
+        company.partner_id.write(
+            {
+                "vat": "100000000700003",
+                "street": "Synthetic supplier street",
+                "city": "Dubai",
+                "state_id": self.env.ref("base.state_ae_du").id,
+                "routing_scheme": "0235",
+                "routing_endpoint": "1000000007",
+                "l10n_ae_registration_type": "TL",
+                "l10n_ae_registration_authority": "Synthetic EUR Ledger Authority",
+                "additional_identifiers": {"AE_TL": "SYNTH-EUR-LEDGER-7"},
+            }
+        )
+        self.env["res.currency.rate"].create(
+            {
+                "currency_id": usd.id,
+                "company_id": company.id,
+                "name": "2019-01-01",
+                "rate": 1 / 0.90,
+            }
+        )
+        invoice = (
+            self.env["account.move"]
+            .with_company(company)
+            .create(
+                {
+                    "move_type": "out_invoice",
+                    "partner_id": self.partner_a.id,
+                    "currency_id": usd.id,
+                    "invoice_date": "2019-01-01",
+                    "invoice_line_ids": [
+                        (
+                            0,
+                            0,
+                            {
+                                "name": "Synthetic EUR ledger service",
+                                "price_unit": 100,
+                                "account_id": data["default_account_revenue"].id,
+                                "tax_ids": [(6, 0, company.account_sale_tax_id.ids)],
+                            },
+                        )
+                    ],
+                    "l10n_ae_tax_exchange_rate": "3.672500",
+                    "l10n_ae_tax_exchange_date": "2019-01-01",
+                    "l10n_ae_tax_exchange_source": "SYNTH-SEPARATE-FISCAL-QUOTE",
+                    "l10n_ae_fiscal_uuid": "ddddddda-4444-4444-8444-444444444444",
+                }
+            )
+        )
+        invoice.action_post()
+        self.assertEqual(invoice.amount_total, 105)
+        self.assertEqual(invoice.amount_total_signed, 94.50)
+        tree = etree.fromstring(invoice.preview_l10n_ae_pint().encode())
+        self.assertEqual(tree.findtext("cbc:TaxCurrencyCode", namespaces=NS), "AED")
+        self.assertEqual(
+            tree.findtext(
+                "cac:TaxTotal/cbc:TaxAmount[@currencyID='AED']", namespaces=NS
+            ),
+            "18.36",
+        )
+        self.assertIsNone(
+            tree.find("cac:TaxTotal/cbc:TaxAmount[@currencyID='EUR']", NS)
+        )
+        self.assertEqual(
+            tree.findtext(
+                "cac:AdditionalDocumentReference[cbc:DocumentTypeCode='aedtotal-incl-vat']/cbc:DocumentDescription",
+                namespaces=NS,
+            ),
+            "385.61",
+        )
+        report = invoice.validate_l10n_ae_pint()
+        self.assertTrue(report["valid"], report)
+
+    def test_settled_usd_credit_preserves_aed_gross_and_original_reference(self):
+        usd = self.env.ref("base.USD")
+        usd.active = True
+        self.env["res.currency.rate"].create(
+            {
+                "currency_id": usd.id,
+                "company_id": self.env.company.id,
+                "name": "2019-01-01",
+                "rate": 1 / 3.6725,
+            }
+        )
+        original = self.init_invoice(
+            "out_invoice",
+            amounts=[100],
+            taxes=self.tax_sale_a,
+            currency=usd,
+            post=True,
+        )
+        reversal = (
+            self.env["account.move.reversal"]
+            .with_context(
+                active_model="account.move",
+                active_ids=original.ids,
+            )
+            .create(
+                {
+                    "reason": "Synthetic USD partial credit",
+                    "move_ids": [(6, 0, original.ids)],
+                    "journal_id": original.journal_id.id,
+                }
+            )
+        )
+        reversal.refund_moves()
+        credit = reversal.new_move_ids
+        credit.invoice_line_ids.price_unit = 40
+        credit.write(
+            {
+                "l10n_ae_credit_reason": "DL8.61.1.C",
+                "l10n_ae_tax_exchange_rate": "3.672500",
+                "l10n_ae_tax_exchange_date": credit.invoice_date,
+                "l10n_ae_tax_exchange_source": "SYNTH-CREDIT-REVIEWED-QUOTE",
+                "l10n_ae_fiscal_uuid": "ddddddda-5555-4555-8555-555555555555",
+            }
+        )
+        credit.action_post()
+        self.assertEqual(credit.amount_total, 42)
+        self.assertEqual(credit.amount_residual, 0)
+        tree = etree.fromstring(credit.preview_l10n_ae_pint().encode())
+        self.assertEqual(
+            tree.findtext("cac:LegalMonetaryTotal/cbc:PayableAmount", namespaces=NS),
+            "0.00",
+        )
+        self.assertEqual(
+            tree.findtext(
+                "cac:AdditionalDocumentReference[cbc:DocumentTypeCode='aedtotal-incl-vat']/cbc:DocumentDescription",
+                namespaces=NS,
+            ),
+            "154.25",
+        )
+        self.assertEqual(
+            tree.findtext(
+                "cac:TaxTotal/cbc:TaxAmount[@currencyID='AED']", namespaces=NS
+            ),
+            "7.35",
+        )
+        self.assertEqual(
+            tree.findtext(
+                "cac:BillingReference/cac:InvoiceDocumentReference/cbc:ID",
+                namespaces=NS,
+            ),
+            original.name,
+        )
+        report = credit.validate_l10n_ae_pint()
+        self.assertTrue(report["valid"], report)
+
+    def test_fractional_usd_vat_divergence_requires_review_without_a_rounding_patch(
+        self,
+    ):
+        usd = self.env.ref("base.USD")
+        usd.active = True
+        self.env["res.currency.rate"].create(
+            {
+                "currency_id": usd.id,
+                "company_id": self.env.company.id,
+                "name": "2019-01-01",
+                "rate": 1 / 3.6725,
+            }
+        )
+        invoice = self.init_invoice(
+            "out_invoice",
+            amounts=[1.23, 1.23, 1.23],
+            taxes=self.tax_sale_a,
+            currency=usd,
+            post=True,
+        )
+        invoice.write(
+            {
+                "l10n_ae_tax_exchange_rate": "3.672500",
+                "l10n_ae_tax_exchange_date": invoice.invoice_date,
+                "l10n_ae_tax_exchange_source": "SYNTH-FRACTIONAL-ROUNDING-REVIEW",
+                "l10n_ae_fiscal_uuid": "ddddddda-6666-4666-8666-666666666666",
+                "l10n_ae_binding_id": self.env["l10n_ae.edi.binding"]
+                .create({"name": "Fractional VAT review"})
+                .id,
+            }
+        )
+        original_totals = (invoice.amount_total, invoice.amount_tax_signed)
+        with self.assertRaisesRegex(UserError, "AED.*accounting"):
+            invoice.action_l10n_ae_prepare()
+        self.assertFalse(invoice.l10n_ae_transmission_id)
+        self.assertEqual(
+            (invoice.amount_total, invoice.amount_tax_signed), original_totals
+        )
+        self.assertEqual(invoice.amount_tax, 0.18)
 
     def test_standard_tax_invoice_uses_ae_profile_and_core_accounting_totals(self):
         invoice = self.init_invoice(

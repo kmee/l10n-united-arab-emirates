@@ -1,8 +1,10 @@
 # Copyright 2026 KMEE
 # License AGPL-3.0 or later (https://www.gnu.org/licenses/agpl).
-from odoo import fields, models
+from decimal import ROUND_HALF_UP, Decimal
 
-from odoo.addons.account_edi_ubl_cii.models.account_edi_common import FloatFmt
+from odoo import fields, models
+from odoo.exceptions import UserError
+
 from odoo.addons.account_edi_ubl_cii.tools.ubl_21_common import CustomerParty, TaxTotal
 
 
@@ -44,6 +46,24 @@ class AccountEdiUblUae(models.AbstractModel):
         process = "selfbilling" if vals["invoice"].is_self_billing else "billing"
         vals["document_node"]["cbc:ProfileID"]["_text"] = f"urn:peppol:bis:{process}"
         return result
+
+    def _ubl_add_tax_currency_code_node(self, vals):
+        result = super()._ubl_add_tax_currency_code_node(vals)
+        vals["document_node"]["cbc:TaxCurrencyCode"] = {
+            "_text": "AED" if vals["currency"].name != "AED" else None
+        }
+        return result
+
+    def _l10n_ae_exchange_rate(self, vals):
+        if vals["currency"].name == "AED":
+            return Decimal(1)
+        return Decimal(vals["invoice"].l10n_ae_tax_exchange_rate)
+
+    def _l10n_ae_decimal_text(self, value):
+        text = format(value, "f")
+        integer, _point, fraction = text.partition(".")
+        fraction = fraction.rstrip("0")
+        return integer + "." + fraction.ljust(2, "0")
 
     def _ubl_add_invoice_type_code_node(self, vals):
         result = super()._ubl_add_invoice_type_code_node(vals)
@@ -132,13 +152,16 @@ class AccountEdiUblUae(models.AbstractModel):
         return result
 
     def _l10n_ae_add_line_aed_amounts(self, vals):
-        if vals["company"].currency_id.name != "AED":
-            # Such output remains nonconformant until an explicit AED policy exists.
-            return
         details = vals["line_vals"]["base_line"]["tax_details"]
+        rate = self._l10n_ae_exchange_rate(vals)
+        gross = Decimal(str(details["raw_total_included_currency"])) * rate
+        vat = (
+            Decimal(str(details["raw_total_included_currency"]))
+            - Decimal(str(details["raw_total_excluded_currency"]))
+        ) * rate
         extension = vals["line_node"]["cac:ItemPriceExtension"] = {
             "cbc:Amount": {
-                "_text": FloatFmt(details["total_included"], min_dp=2, max_dp=2),
+                "_text": self._l10n_ae_decimal_text(gross),
                 "currencyID": "AED",
             }
         }
@@ -146,11 +169,7 @@ class AccountEdiUblUae(models.AbstractModel):
         if not categories or any(node["cbc:ID"]["_text"] != "E" for node in categories):
             extension["cac:TaxTotal"] = {
                 "cbc:TaxAmount": {
-                    "_text": FloatFmt(
-                        details["total_included"] - details["total_excluded"],
-                        min_dp=2,
-                        max_dp=2,
-                    ),
+                    "_text": self._l10n_ae_decimal_text(vat),
                     "currencyID": "AED",
                 }
             }
@@ -174,6 +193,78 @@ class AccountEdiUblUae(models.AbstractModel):
         vals["document_node"]["cbc:UUID"] = {
             "_text": invoice.l10n_ae_fiscal_uuid or None
         }
+        currency = vals["currency"].name
+        document = vals["document_node"]
+        document["cac:TaxTotal"] = [
+            node
+            for node in document["cac:TaxTotal"]
+            if node["cbc:TaxAmount"]["currencyID"] == currency
+        ]
+        if currency != "AED":
+            rate = self._l10n_ae_exchange_rate(vals)
+            document["cac:TaxExchangeRate"] = {
+                "cbc:SourceCurrencyCode": {"_text": currency},
+                "cbc:TargetCurrencyCode": {"_text": "AED"},
+                "cbc:CalculationRate": {"_text": invoice.l10n_ae_tax_exchange_rate},
+            }
+            vat = (
+                sum(
+                    Decimal(str(node["cbc:TaxAmount"]["_text"]))
+                    for node in document["cac:TaxTotal"]
+                )
+                * rate
+            )
+            gross = (
+                Decimal(
+                    str(
+                        document["cac:LegalMonetaryTotal"]["cbc:TaxInclusiveAmount"][
+                            "_text"
+                        ]
+                    )
+                )
+                * rate
+            )
+            if invoice.company_id.currency_id.name == "AED":
+                quantum = Decimal("0.01")
+                expected = (
+                    (gross, invoice.amount_total_signed),
+                    (vat, invoice.amount_tax_signed),
+                )
+                for fiscal_amount, signed_accounting_amount in expected:
+                    accounting_amount = Decimal(
+                        str(-invoice.direction_sign * signed_accounting_amount)
+                    )
+                    if fiscal_amount.quantize(
+                        quantum, rounding=ROUND_HALF_UP
+                    ) != accounting_amount.quantize(quantum, rounding=ROUND_HALF_UP):
+                        raise UserError(
+                            self.env._(
+                                "The fiscal AED amounts do not match accounting. "
+                                "Review the exchange rate and rounding before "
+                                "preparing the e-invoice."
+                            )
+                        )
+            document["cac:TaxTotal"].append(
+                {
+                    "cbc:TaxAmount": {
+                        "_text": format(
+                            vat.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP), "f"
+                        ),
+                        "currencyID": "AED",
+                    }
+                }
+            )
+            document.setdefault("cac:AdditionalDocumentReference", []).append(
+                {
+                    "cbc:ID": {"_text": "AED"},
+                    "cbc:DocumentTypeCode": {"_text": "aedtotal-incl-vat"},
+                    "cbc:DocumentDescription": {
+                        "_text": format(
+                            gross.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP), "f"
+                        )
+                    },
+                }
+            )
         if (
             self._is_document(vals, "credit_note", "self_credit_note")
             and invoice.l10n_ae_credit_reason

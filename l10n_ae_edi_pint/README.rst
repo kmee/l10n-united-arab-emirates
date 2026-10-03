@@ -94,6 +94,15 @@ The repository `scenario based user
 manual <https://github.com/kmee/l10n-eua/blob/20.0-add-uae-edi/docs/user/scenarios-pt_BR.md>`__
 distinguishes tested user journeys from workflows still to implement.
 
+For foreign-currency emission, enter the reviewed AED-per-document-unit
+quote, its date and source in **UAE E-Invoicing** before checking or
+posting. The quote must be positive, use a decimal point and have at
+most six decimal places. The frozen evidence preserves it and the
+converted AED line/header values. A mismatch against an AED ledger
+blocks preparation for accounting review. The rate source/date are human
+references; automatic CBUAE acquisition and full tax-point/rounding
+policy remain pending.
+
 Known issues / Roadmap
 ======================
 
