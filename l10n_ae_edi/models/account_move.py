@@ -16,11 +16,20 @@ class AccountMove(models.Model):
     l10n_ae_received_document = fields.Boolean(
         string="Received UAE Document", readonly=True, copy=False
     )
+    l10n_ae_received_currency_id = fields.Many2one(
+        "res.currency", string="Received Document Currency", readonly=True, copy=False
+    )
     l10n_ae_received_prepaid_amount = fields.Monetary(
-        string="Received Declared Prepaid Amount", readonly=True, copy=False
+        string="Received Declared Prepaid Amount",
+        readonly=True,
+        copy=False,
+        currency_field="l10n_ae_received_currency_id",
     )
     l10n_ae_received_payable_amount = fields.Monetary(
-        string="Received Declared Payable Amount", readonly=True, copy=False
+        string="Received Declared Payable Amount",
+        readonly=True,
+        copy=False,
+        currency_field="l10n_ae_received_currency_id",
     )
 
     @api.model_create_multi
@@ -150,7 +159,9 @@ class AccountMove(models.Model):
             "l10n_ae_fiscal_uuid",
         }
         received_fields = identity_fields | {
+            "l10n_ae_document_category",
             "l10n_ae_credit_reason",
+            "l10n_ae_received_currency_id",
             "l10n_ae_received_prepaid_amount",
             "l10n_ae_received_payable_amount",
         }
