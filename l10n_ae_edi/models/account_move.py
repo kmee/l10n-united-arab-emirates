@@ -121,7 +121,8 @@ class AccountMove(models.Model):
     l10n_ae_fiscal_uuid = fields.Char(
         string="UAE Fiscal UUID",
         copy=False,
-        help="UUID assigned by the ASP or by an explicitly agreed issuance mechanism.",
+        help="Fiscal UUID supplied by the ASP. Local assignment is available "
+        "only in controlled simulation.",
     )
     l10n_ae_credit_reason = fields.Selection(
         [
@@ -408,36 +409,52 @@ class AccountMove(models.Model):
                         "Only the controlled sandbox contract is currently available."
                     )
                 )
-            snapshot = self._l10n_ae_snapshot()
-            xml_content = self._l10n_ae_prepare_xml()
-            payload = json.dumps(
-                snapshot, ensure_ascii=False, sort_keys=True, separators=(",", ":")
-            )
-            # This narrow elevation creates evidence only after checking the
-            # operator's invoice access; the evidence itself is read-only.
-            transmission = (
-                self.env["l10n_ae.edi.transmission"]
-                .sudo()
-                .create(
-                    {
-                        "move_id": self.id,
-                        "company_id": self.company_id.id,
-                        "binding_id": binding.id,
-                        "provider": binding.provider,
-                        "environment": binding.environment,
-                        "process": snapshot["process"],
-                        "origin_system": self.l10n_ae_origin_system,
-                        "origin_document_id": self.l10n_ae_origin_document_id,
-                        "payload": payload,
-                        "payload_hash": hashlib.sha256(payload.encode()).hexdigest(),
-                        "xml_content": xml_content,
-                        "xml_hash": hashlib.sha256(xml_content.encode()).hexdigest()
-                        if xml_content
-                        else False,
-                    }
+            with self.env.cr.savepoint():
+                uuid_source = "supplied" if self.l10n_ae_fiscal_uuid else None
+                if (
+                    not self.l10n_ae_fiscal_uuid
+                    and binding.fiscal_uuid_policy == "controlled_local"
+                ):
+                    self.l10n_ae_fiscal_uuid = str(uuid.uuid4())
+                    uuid_source = "controlled_local"
+                snapshot = self._l10n_ae_snapshot()
+                snapshot["fiscal_uuid_assignment"] = {
+                    "policy": binding.fiscal_uuid_policy,
+                    "source": uuid_source,
+                    "environment": binding.environment,
+                    "simulation": True,
+                }
+                xml_content = self._l10n_ae_prepare_xml()
+                payload = json.dumps(
+                    snapshot, ensure_ascii=False, sort_keys=True, separators=(",", ":")
                 )
-            )
-            self.l10n_ae_transmission_id = transmission
+                # This narrow elevation creates evidence only after checking the
+                # operator's invoice access; the evidence itself is read-only.
+                transmission = (
+                    self.env["l10n_ae.edi.transmission"]
+                    .sudo()
+                    .create(
+                        {
+                            "move_id": self.id,
+                            "company_id": self.company_id.id,
+                            "binding_id": binding.id,
+                            "provider": binding.provider,
+                            "environment": binding.environment,
+                            "process": snapshot["process"],
+                            "origin_system": self.l10n_ae_origin_system,
+                            "origin_document_id": self.l10n_ae_origin_document_id,
+                            "payload": payload,
+                            "payload_hash": hashlib.sha256(
+                                payload.encode()
+                            ).hexdigest(),
+                            "xml_content": xml_content,
+                            "xml_hash": hashlib.sha256(xml_content.encode()).hexdigest()
+                            if xml_content
+                            else False,
+                        }
+                    )
+                )
+                self.l10n_ae_transmission_id = transmission
         return {
             "type": "ir.actions.act_window",
             "res_model": "l10n_ae.edi.transmission",

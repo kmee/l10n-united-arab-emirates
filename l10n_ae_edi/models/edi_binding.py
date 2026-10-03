@@ -25,6 +25,27 @@ class UaeEdiBinding(models.Model):
         required=True,
         default="controlled",
     )
+    fiscal_uuid_policy = fields.Selection(
+        [
+            ("supplied", "Externally Supplied UUID"),
+            ("controlled_local", "Local UUID for Controlled Simulation"),
+        ],
+        required=True,
+        default="supplied",
+        help="Local UUID assignment is available only in the controlled sandbox. "
+        "Production UUID allocation requires a verified ASP contract.",
+    )
+
+    @api.constrains("fiscal_uuid_policy", "environment")
+    def _check_fiscal_uuid_policy(self):
+        if any(
+            binding.fiscal_uuid_policy == "controlled_local"
+            and binding.environment != "sandbox"
+            for binding in self
+        ):
+            raise ValidationError(
+                self.env._("Local UUID assignment requires the controlled sandbox.")
+            )
 
     _one_production_asp = models.UniqueIndex(
         "(company_id) WHERE active IS TRUE AND environment = 'production'",

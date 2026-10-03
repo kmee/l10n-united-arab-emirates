@@ -45,3 +45,28 @@ class TestUaeProviderBinding(AccountTestInvoicingCommon):
             binding.with_user(user).with_context(
                 allowed_company_ids=self.env.company.ids
             ).read(["name"])
+
+    def test_controlled_local_uuid_assignment_cannot_be_enabled_in_production(self):
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {
+                "name": "Explicit UUID simulation",
+                "fiscal_uuid_policy": "controlled_local",
+            }
+        )
+        with (
+            self.assertRaisesRegex(ValidationError, "controlled sandbox"),
+            self.cr.savepoint(),
+        ):
+            binding.environment = "production"
+        self.assertEqual(binding.environment, "sandbox")
+        with (
+            self.assertRaisesRegex(ValidationError, "controlled sandbox"),
+            self.cr.savepoint(),
+        ):
+            self.env["l10n_ae.edi.binding"].create(
+                {
+                    "name": "Invalid local production UUID",
+                    "environment": "production",
+                    "fiscal_uuid_policy": "controlled_local",
+                }
+            )
