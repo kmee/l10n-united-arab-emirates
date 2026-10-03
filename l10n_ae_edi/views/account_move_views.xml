@@ -58,11 +58,15 @@
                             invisible="move_type not in ('out_refund', 'in_refund')"
                             readonly="l10n_ae_received_document"
                         />
-                        <field name="l10n_ae_free_zone" />
+                        <field
+                            name="l10n_ae_free_zone"
+                            readonly="l10n_ae_transmission_id or l10n_ae_received_document"
+                        />
                         <field
                             name="l10n_ae_beneficiary_id"
                             invisible="not l10n_ae_free_zone"
                             required="l10n_ae_free_zone"
+                            readonly="l10n_ae_transmission_id or l10n_ae_received_document"
                         />
                     </group>
                     <group

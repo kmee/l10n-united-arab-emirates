@@ -9,6 +9,17 @@ from decimal import Decimal
 from odoo import api, fields, models
 from odoo.exceptions import UserError
 
+UAE_TRANSACTION_FLAG_FIELDS = (
+    "l10n_ae_free_zone",
+    "l10n_ae_deemed_supply",
+    "l10n_ae_margin_scheme",
+    "l10n_ae_summary",
+    "l10n_ae_continuous_supply",
+    "l10n_ae_disclosed_agent",
+    "l10n_ae_ecommerce",
+    "l10n_ae_exports",
+)
+
 
 class AccountMove(models.Model):
     _inherit = "account.move"
@@ -215,7 +226,10 @@ class AccountMove(models.Model):
             "l10n_ae_tax_exchange_rate",
             "l10n_ae_tax_exchange_date",
             "l10n_ae_tax_exchange_source",
-        }
+            "l10n_ae_beneficiary_id",
+            "l10n_ae_document_category",
+            "l10n_ae_credit_reason",
+        } | set(UAE_TRANSACTION_FLAG_FIELDS)
         received_fields = identity_fields | {
             "l10n_ae_received_agreement_snapshot",
             "l10n_ae_received_process",
@@ -245,6 +259,12 @@ class AccountMove(models.Model):
                 )
             )
         return super().write(vals)
+
+    def _l10n_ae_transaction_flags(self):
+        self.ensure_one()
+        return "".join(
+            "1" if self[name] else "0" for name in UAE_TRANSACTION_FLAG_FIELDS
+        )
 
     def _l10n_ae_snapshot(self):
         self.ensure_one()
@@ -301,6 +321,8 @@ class AccountMove(models.Model):
             "invoice_number": self.name,
             "issue_date": fields.Date.to_string(self.invoice_date),
             "document_category": self.l10n_ae_document_category,
+            "transaction_flags": self._l10n_ae_transaction_flags(),
+            "beneficiary_id": self.l10n_ae_beneficiary_id or None,
             "fiscal_uuid": self.l10n_ae_fiscal_uuid or None,
             "credit_reason": self.l10n_ae_credit_reason or None,
             "preceding_invoice": {
