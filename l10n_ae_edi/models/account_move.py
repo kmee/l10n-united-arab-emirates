@@ -31,6 +31,11 @@ class AccountMove(models.Model):
     )
     l10n_ae_ecommerce = fields.Boolean(string="Supply Through E-Commerce", copy=False)
     l10n_ae_exports = fields.Boolean(string="Exports", copy=False)
+    l10n_ae_fiscal_uuid = fields.Char(
+        string="UAE Fiscal UUID",
+        copy=False,
+        help="UUID assigned by the ASP or by an explicitly agreed issuance mechanism.",
+    )
     l10n_ae_binding_id = fields.Many2one(
         "l10n_ae.edi.binding", string="UAE ASP Binding", check_company=True, copy=False
     )
@@ -50,6 +55,7 @@ class AccountMove(models.Model):
             "l10n_ae_transmission_id",
             "l10n_ae_origin_system",
             "l10n_ae_origin_document_id",
+            "l10n_ae_fiscal_uuid",
         }
         if identity_fields.intersection(vals) and self.filtered(
             "l10n_ae_transmission_id"
@@ -80,6 +86,18 @@ class AccountMove(models.Model):
                 "city": record.city or None,
                 "zip": record.zip or None,
                 "country": record.country_id.code or None,
+                "subdivision": record.state_id.name or None,
+                "endpoint_scheme": record.routing_scheme or None
+                if "routing_scheme" in record._fields
+                else None,
+                "endpoint": record.routing_endpoint or None
+                if "routing_endpoint" in record._fields
+                else None,
+                "legal_registration": record._l10n_ae_legal_registration_number()
+                or None,
+                "legal_registration_type": record.l10n_ae_registration_type or None,
+                "legal_registration_authority": record.l10n_ae_registration_authority
+                or None,
             }
 
         return {
@@ -89,6 +107,7 @@ class AccountMove(models.Model):
             "invoice_number": self.name,
             "issue_date": fields.Date.to_string(self.invoice_date),
             "document_category": self.l10n_ae_document_category,
+            "fiscal_uuid": self.l10n_ae_fiscal_uuid or None,
             "process": "selfbilling" if self.is_self_billing else "billing",
             "currency": self.currency_id.name,
             "origin": {

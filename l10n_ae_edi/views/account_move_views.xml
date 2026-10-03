@@ -9,7 +9,7 @@
                 <button
                     name="action_l10n_ae_validate"
                     type="object"
-                    string="Validate UAE E-Invoice"
+                    string="Check UAE Data"
                     groups="account.group_account_invoice"
                     invisible="country_code != 'AE' or move_type == 'entry'"
                 />
@@ -22,6 +22,7 @@
                 >
                     <group>
                         <field name="l10n_ae_document_category" />
+                        <field name="l10n_ae_fiscal_uuid" readonly="True" />
                         <field name="l10n_ae_free_zone" />
                         <field
                             name="l10n_ae_beneficiary_id"
