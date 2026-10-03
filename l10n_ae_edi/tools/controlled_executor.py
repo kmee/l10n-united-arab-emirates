@@ -120,3 +120,42 @@ class ControlledExecutor:
             )
             cursor.commit()
             return result
+
+    def run_pending(self, binding_id, limit=20):
+        """Dispatch committed intents from one company/provider route."""
+        if not isinstance(limit, int) or not 1 <= limit <= 200:
+            raise ValueError("The controlled batch limit must be between 1 and 200.")
+        with self.registry.cursor() as cursor:
+            env = api.Environment(
+                cursor, self.uid, {"allowed_company_ids": [self.company_id]}
+            )
+            if not env.user.has_group("account.group_account_manager"):
+                raise AccessError(
+                    env._("Only accounting managers can execute UAE sending.")
+                )
+            binding = env["l10n_ae.edi.binding"].browse(binding_id).exists()
+            binding.ensure_one()
+            binding.check_access("read")
+            if binding.company_id.id != self.company_id:
+                raise AccessError(env._("The UAE binding belongs to another company."))
+            transmission_ids = (
+                env["l10n_ae.edi.transmission"]
+                .search(
+                    [
+                        ("company_id", "=", self.company_id),
+                        ("binding_id", "=", binding_id),
+                        "|",
+                        ("submission_state", "in", ["queued", "unknown"]),
+                        "&",
+                        ("submission_state", "=", "sending"),
+                        ("lease_until", "<=", self.clock()),
+                    ],
+                    limit=limit,
+                    order="id",
+                )
+                .ids
+            )
+        return [
+            {"transmission_id": record_id, "result": self.run_once(record_id)}
+            for record_id in transmission_ids
+        ]

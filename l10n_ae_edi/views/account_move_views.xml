@@ -21,6 +21,13 @@
                     invisible="country_code != 'AE'"
                 >
                     <group>
+                        <field
+                            name="l10n_ae_binding_id"
+                            domain="[('company_id', '=', company_id), ('environment', '=', 'sandbox')]"
+                            readonly="l10n_ae_transmission_id"
+                        />
+                        <field name="l10n_ae_transmission_id" readonly="True" />
+                        <field name="l10n_ae_submission_state" readonly="True" />
                         <field name="l10n_ae_document_category" />
                         <field name="l10n_ae_fiscal_uuid" readonly="True" />
                         <field

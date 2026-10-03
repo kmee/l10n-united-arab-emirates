@@ -1,6 +1,6 @@
 # Copyright 2026 KMEE
 # License AGPL-3.0 or later (https://www.gnu.org/licenses/agpl).
-from odoo import fields, models
+from odoo import api, fields, models
 
 
 class ResCompany(models.Model):
@@ -18,12 +18,30 @@ class ResCompany(models.Model):
         string="TIN Confirmed During Onboarding",
         copy=False,
     )
+    l10n_ae_edi_auto_prepare = fields.Boolean(
+        string="Queue UAE E-Invoices on Posting",
+        help=(
+            "Create a frozen transmission with the posted invoice. "
+            "Sending runs after commit."
+        ),
+        copy=False,
+    )
+    l10n_ae_edi_binding_id = fields.Many2one(
+        "l10n_ae.edi.binding",
+        string="Default UAE ASP Binding",
+        check_company=True,
+        copy=False,
+    )
     l10n_ae_registration_type = fields.Selection(
         related="partner_id.l10n_ae_registration_type", readonly=False
     )
     l10n_ae_registration_authority = fields.Char(
         related="partner_id.l10n_ae_registration_authority", readonly=False
     )
+
+    @api.constrains("l10n_ae_edi_binding_id")
+    def _check_l10n_ae_default_binding_company(self):
+        self._check_company(["l10n_ae_edi_binding_id"])
 
     def write(self, vals):
         if "l10n_ae_tin" in vals and "l10n_ae_tin_confirmed" not in vals:

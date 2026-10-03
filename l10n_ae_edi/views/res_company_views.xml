@@ -12,6 +12,11 @@
                         <field name="l10n_ae_tin_confirmed" />
                         <field name="l10n_ae_registration_type" />
                         <field name="l10n_ae_registration_authority" />
+                        <field
+                            name="l10n_ae_edi_binding_id"
+                            domain="[('company_id', '=', id), ('environment', '=', 'sandbox')]"
+                        />
+                        <field name="l10n_ae_edi_auto_prepare" />
                         <div class="text-muted" colspan="2">
                             Add the matching legal registration number in General Information
                             using the additional identifiers next to TRN.

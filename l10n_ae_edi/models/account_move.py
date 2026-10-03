@@ -57,10 +57,39 @@ class AccountMove(models.Model):
         readonly=True,
         copy=False,
     )
+    l10n_ae_submission_state = fields.Selection(
+        related="l10n_ae_transmission_id.submission_state",
+        string="UAE Submission Status",
+    )
     l10n_ae_origin_system = fields.Char(default="odoo", required=True, copy=False)
     l10n_ae_origin_document_id = fields.Char(
         default=lambda self: str(uuid.uuid4()), required=True, copy=False
     )
+
+    def _post(self, soft=True):
+        candidates = self.filtered(
+            lambda move: (
+                move.company_id.country_id.code == "AE"
+                and move.company_id.l10n_ae_edi_auto_prepare
+                and (
+                    move.move_type in ("out_invoice", "out_refund")
+                    or move.move_type in ("in_invoice", "in_refund")
+                    and move.is_self_billing
+                )
+                and (
+                    not soft
+                    or not move.date
+                    or move.date <= fields.Date.context_today(move)
+                )
+            )
+        )
+        candidates.action_l10n_ae_validate()
+        posted = super()._post(soft=soft)
+        for move in posted & candidates:
+            if not move.l10n_ae_binding_id:
+                move.l10n_ae_binding_id = move.company_id.l10n_ae_edi_binding_id
+            move.with_company(move.company_id).action_l10n_ae_prepare()
+        return posted
 
     def write(self, vals):
         if vals.get("state") in ("draft", "cancel") and self.filtered(
