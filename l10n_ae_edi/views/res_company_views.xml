@@ -10,6 +10,12 @@
                     <group>
                         <field name="l10n_ae_tin" />
                         <field name="l10n_ae_tin_confirmed" />
+                        <field name="l10n_ae_registration_type" />
+                        <field name="l10n_ae_registration_authority" />
+                        <div class="text-muted" colspan="2">
+                            Add the matching legal registration number in General Information
+                            using the additional identifiers next to TRN.
+                        </div>
                     </group>
                 </page>
             </xpath>
