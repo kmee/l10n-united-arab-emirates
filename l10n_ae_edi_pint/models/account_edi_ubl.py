@@ -77,6 +77,15 @@ class AccountEdiUblUae(models.AbstractModel):
             ]
         return result
 
+    def _ubl_add_party_tax_scheme_nodes(self, vals):
+        result = super()._ubl_add_party_tax_scheme_nodes(vals)
+        partner = vals["party_vals"]["partner"].commercial_partner_id
+        if partner.country_code == "AE" and not partner.vat:
+            # The generic PINT fallback may present the routing TIN as a VAT ID.
+            # UAE TIN and VAT TRN are separate identities, including non-registrants.
+            vals["party_node"]["cac:PartyTaxScheme"] = []
+        return result
+
     def _ubl_add_party_legal_entity_nodes(self, vals):
         result = super()._ubl_add_party_legal_entity_nodes(vals)
         partner = vals["party_vals"]["partner"].commercial_partner_id

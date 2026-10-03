@@ -166,6 +166,62 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         report = credit.validate_l10n_ae_pint()
         self.assertTrue(report["valid"], report)
 
+    def test_commercial_invoice_without_supplier_vat_passes_official_rules(self):
+        self.env.company.partner_id.vat = False
+        outside_scope = self.tax_sale_a.copy(
+            {
+                "name": "Synthetic Out of Scope",
+                "amount": 0,
+                "ubl_cii_tax_category_code": "O",
+            }
+        )
+        invoice = self.init_invoice("out_invoice", amounts=[100], taxes=outside_scope)
+        invoice.write(
+            {
+                "l10n_ae_document_category": "commercial",
+                "l10n_ae_fiscal_uuid": "77777777-7777-4777-8777-777777777777",
+            }
+        )
+        invoice.action_post()
+        xml = etree.fromstring(invoice.preview_l10n_ae_pint().encode())
+        self.assertEqual(xml.findtext("cbc:InvoiceTypeCode", namespaces=NS), "480")
+        self.assertEqual(
+            xml.findtext(
+                "cac:InvoiceLine/cac:Item/cac:ClassifiedTaxCategory/cbc:ID",
+                namespaces=NS,
+            ),
+            "O",
+        )
+        self.assertEqual(
+            xml.findtext("cac:LegalMonetaryTotal/cbc:PayableAmount", namespaces=NS),
+            "100.00",
+        )
+        self.assertIsNone(
+            xml.find(
+                "cac:AccountingSupplierParty/cac:Party/cac:PartyTaxScheme/cbc:CompanyID",
+                NS,
+            )
+        )
+        report = invoice.validate_l10n_ae_pint()
+        self.assertTrue(report["valid"], report)
+
+    def test_tax_invoice_without_supplier_vat_is_rejected_instead_of_using_tin(self):
+        self.env.company.partner_id.vat = False
+        invoice = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
+        )
+        invoice.l10n_ae_fiscal_uuid = "88888888-8888-4888-8888-888888888888"
+        report = invoice.validate_l10n_ae_pint()
+        self.assertFalse(report["valid"])
+        self.assertIn(
+            "ibr-134-ae",
+            [
+                failure["code"]
+                for layer in report["layers"]
+                for failure in layer["failures"]
+            ],
+        )
+
     def test_formal_action_reports_missing_uuid_as_a_normative_diagnostic(self):
         invoice = self.init_invoice(
             "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
