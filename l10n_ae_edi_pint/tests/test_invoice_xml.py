@@ -1623,6 +1623,8 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
                         }
                     )
                 invoice.l10n_ae_document_category = category
+                if root == "CreditNote":
+                    invoice.l10n_ae_credit_reason = "DL8.61.1.C"
                 invoice.action_post()
                 xml = etree.fromstring(invoice.preview_l10n_ae_pint().encode())
                 self.assertEqual(etree.QName(xml).localname, root)
