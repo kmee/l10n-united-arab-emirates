@@ -65,7 +65,10 @@
                             required="l10n_ae_free_zone"
                         />
                     </group>
-                    <group string="Reviewed Fiscal Exchange Rate to AED">
+                    <group
+                        string="Reviewed Fiscal Exchange Rate to AED"
+                        invisible="l10n_ae_received_document"
+                    >
                         <field
                             name="l10n_ae_tax_exchange_rate"
                             readonly="l10n_ae_transmission_id or l10n_ae_received_document"
@@ -90,6 +93,10 @@
                         <field name="l10n_ae_received_currency_id" />
                         <field name="l10n_ae_received_prepaid_amount" />
                         <field name="l10n_ae_received_payable_amount" />
+                        <field name="l10n_ae_received_fiscal_currency_id" />
+                        <field name="l10n_ae_received_tax_exchange_rate" />
+                        <field name="l10n_ae_received_tax_amount" />
+                        <field name="l10n_ae_received_tax_inclusive_amount" />
                         <label
                             for="l10n_ae_received_payable_amount"
                             string="Review these declared amounts; local payments are not imported."

@@ -50,6 +50,24 @@ class AccountMove(models.Model):
         copy=False,
         currency_field="l10n_ae_received_currency_id",
     )
+    l10n_ae_received_fiscal_currency_id = fields.Many2one(
+        "res.currency", string="Received Fiscal Currency", readonly=True, copy=False
+    )
+    l10n_ae_received_tax_exchange_rate = fields.Char(
+        string="Received Declared AED Exchange Rate", readonly=True, copy=False
+    )
+    l10n_ae_received_tax_amount = fields.Monetary(
+        string="Received Declared AED VAT",
+        readonly=True,
+        copy=False,
+        currency_field="l10n_ae_received_fiscal_currency_id",
+    )
+    l10n_ae_received_tax_inclusive_amount = fields.Monetary(
+        string="Received Declared AED Gross Amount",
+        readonly=True,
+        copy=False,
+        currency_field="l10n_ae_received_fiscal_currency_id",
+    )
     l10n_ae_tax_exchange_rate = fields.Char(
         string="Reviewed AED Exchange Rate",
         copy=False,
@@ -206,6 +224,10 @@ class AccountMove(models.Model):
             "l10n_ae_received_currency_id",
             "l10n_ae_received_prepaid_amount",
             "l10n_ae_received_payable_amount",
+            "l10n_ae_received_fiscal_currency_id",
+            "l10n_ae_received_tax_exchange_rate",
+            "l10n_ae_received_tax_amount",
+            "l10n_ae_received_tax_inclusive_amount",
         }
         if received_fields.intersection(vals) and self.filtered(
             "l10n_ae_received_document"
