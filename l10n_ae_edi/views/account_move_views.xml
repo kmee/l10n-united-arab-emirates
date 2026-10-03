@@ -23,6 +23,10 @@
                     <group>
                         <field name="l10n_ae_document_category" />
                         <field name="l10n_ae_fiscal_uuid" readonly="True" />
+                        <field
+                            name="l10n_ae_credit_reason"
+                            invisible="move_type not in ('out_refund', 'in_refund')"
+                        />
                         <field name="l10n_ae_free_zone" />
                         <field
                             name="l10n_ae_beneficiary_id"

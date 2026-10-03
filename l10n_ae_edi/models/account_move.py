@@ -36,6 +36,18 @@ class AccountMove(models.Model):
         copy=False,
         help="UUID assigned by the ASP or by an explicitly agreed issuance mechanism.",
     )
+    l10n_ae_credit_reason = fields.Selection(
+        [
+            ("DL8.61.1.A", "Cancelled Supply"),
+            ("DL8.61.1.B", "Changed Supply Tax Treatment"),
+            ("DL8.61.1.C", "Changed Consideration"),
+            ("DL8.61.1.D", "Returned Supply and Consideration"),
+            ("DL8.61.1.E", "Incorrect Tax Amount or Treatment"),
+            ("VD", "Volume Discount"),
+        ],
+        string="UAE Credit Note Reason",
+        copy=False,
+    )
     l10n_ae_binding_id = fields.Many2one(
         "l10n_ae.edi.binding", string="UAE ASP Binding", check_company=True, copy=False
     )
@@ -108,6 +120,15 @@ class AccountMove(models.Model):
             "issue_date": fields.Date.to_string(self.invoice_date),
             "document_category": self.l10n_ae_document_category,
             "fiscal_uuid": self.l10n_ae_fiscal_uuid or None,
+            "credit_reason": self.l10n_ae_credit_reason or None,
+            "preceding_invoice": {
+                "number": self.reversed_entry_id.name,
+                "issue_date": fields.Date.to_string(
+                    self.reversed_entry_id.invoice_date
+                ),
+            }
+            if self.reversed_entry_id
+            else None,
             "process": "selfbilling" if self.is_self_billing else "billing",
             "currency": self.currency_id.name,
             "origin": {
