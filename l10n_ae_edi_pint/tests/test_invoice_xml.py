@@ -2,8 +2,9 @@
 # License AGPL-3.0 or later (https://www.gnu.org/licenses/agpl).
 from lxml import etree
 
-from odoo.exceptions import UserError
+from odoo.exceptions import AccessError, UserError
 from odoo.tests import tagged
+from odoo.tests.common import new_test_user
 
 from odoo.addons.account.tests.common import AccountTestInvoicingCommon
 
@@ -15,6 +16,148 @@ NS = {
 
 @tagged("post_install", "-at_install")
 class TestUaeInvoiceXml(AccountTestInvoicingCommon):
+    def _received_test_xml(self):
+        source = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
+        )
+        source.l10n_ae_fiscal_uuid = "abcdefab-2222-4222-8222-222222222222"
+        tree = etree.fromstring(source.preview_l10n_ae_pint().encode())
+        supplier = tree.find("cac:AccountingSupplierParty", NS)
+        customer = tree.find("cac:AccountingCustomerParty", NS)
+        supplier_party, customer_party = supplier[0], customer[0]
+        supplier.remove(supplier_party)
+        customer.remove(customer_party)
+        supplier.append(customer_party)
+        customer.append(supplier_party)
+        return tree
+
+    def test_received_supplier_endpoint_must_match_the_known_vat_partner(self):
+        tree = self._received_test_xml()
+        tree.find(
+            "cac:AccountingSupplierParty/cac:Party/cbc:EndpointID", NS
+        ).text = "1000000009"
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {"name": "Incoming endpoint check"}
+        )
+        inbox = self.env["l10n_ae.edi.inbox"].receive_controlled_document(
+            binding.id, "supplier-mismatch", etree.tostring(tree)
+        )
+        inbox.action_process()
+        self.assertEqual(inbox.state, "review")
+        self.assertFalse(inbox.move_id)
+        self.assertIn("supplier", inbox.diagnostic)
+
+    def test_received_identical_xml_with_another_remote_id_reuses_the_bill(self):
+        content = etree.tostring(self._received_test_xml())
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {"name": "Incoming duplicate check"}
+        )
+        inbox_model = self.env["l10n_ae.edi.inbox"]
+        first = inbox_model.receive_controlled_document(
+            binding.id, "remote-first", content
+        )
+        second = inbox_model.receive_controlled_document(
+            binding.id, "remote-second", content
+        )
+        first.action_process()
+        second.action_process()
+        self.assertEqual(first.state, "processed", first.diagnostic)
+        self.assertEqual(second.state, "processed", second.diagnostic)
+        self.assertEqual(first.move_id, second.move_id)
+
+    def test_unsafe_received_xml_is_preserved_without_creating_a_bill(self):
+        content = b'<!DOCTYPE Invoice [<!ENTITY ex SYSTEM "file:///etc/passwd">]><Invoice>&ex;</Invoice>'
+        binding = self.env["l10n_ae.edi.binding"].create({"name": "Incoming XML check"})
+        inbox = self.env["l10n_ae.edi.inbox"].receive_controlled_document(
+            binding.id, "unsafe-xml", content
+        )
+        inbox.action_process()
+        self.assertEqual(inbox.original_xml.content, content)
+        self.assertEqual(inbox.state, "review")
+        self.assertFalse(inbox.move_id)
+        with self.assertRaises(UserError):
+            inbox.write({"original_xml": False})
+        with self.assertRaises(UserError):
+            inbox.sudo().unlink()
+
+    def test_readonly_accountant_cannot_receive_or_process_documents(self):
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {"name": "Incoming access check"}
+        )
+        reader = new_test_user(
+            self.env,
+            login="uae-inbox-readonly",
+            groups="account.group_account_readonly",
+        )
+        inbox = self.env["l10n_ae.edi.inbox"].receive_controlled_document(
+            binding.id, "read-only", b"<Invoice/>"
+        )
+        with self.assertRaises(AccessError):
+            inbox.with_user(reader).action_process()
+        with self.assertRaises(AccessError):
+            self.env["l10n_ae.edi.inbox"].with_user(reader).receive_controlled_document(
+                binding.id, "read-only-2", b"<Invoice/>"
+            )
+
+    def test_received_identity_with_changed_bytes_preserves_both_for_review(self):
+        binding = self.env["l10n_ae.edi.binding"].create({"name": "Inbound replay ASP"})
+        inbox_model = self.env["l10n_ae.edi.inbox"]
+        first = inbox_model.receive_controlled_document(
+            binding.id, "same-id", b"<original/>"
+        )
+        repeated = inbox_model.receive_controlled_document(
+            binding.id, "same-id", b"<original/>"
+        )
+        self.assertEqual(first, repeated)
+        changed = inbox_model.receive_controlled_document(
+            binding.id, "same-id", b"<changed/>"
+        )
+        self.assertNotEqual(first, changed)
+        self.assertEqual(first.original_xml.content, b"<original/>")
+        self.assertEqual(changed.original_xml.content, b"<changed/>")
+        self.assertEqual(first.state, "review")
+        self.assertEqual(changed.state, "review")
+        self.assertFalse(changed.action_process())
+        self.assertIn("identity", changed.diagnostic)
+
+    def test_received_invoice_creates_one_draft_bill_for_the_known_supplier(self):
+        source = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
+        )
+        source.l10n_ae_fiscal_uuid = "abcdefab-1111-4111-8111-111111111111"
+        tree = etree.fromstring(source.preview_l10n_ae_pint().encode())
+        supplier = tree.find("cac:AccountingSupplierParty", NS)
+        customer = tree.find("cac:AccountingCustomerParty", NS)
+        supplier_party, customer_party = supplier[0], customer[0]
+        supplier.remove(supplier_party)
+        customer.remove(customer_party)
+        supplier.append(customer_party)
+        customer.append(supplier_party)
+        content = etree.tostring(tree)
+        binding = self.env["l10n_ae.edi.binding"].create({"name": "Inbound test ASP"})
+        inbox = self.env["l10n_ae.edi.inbox"].receive_controlled_document(
+            binding.id, "received-invoice-1", content
+        )
+        inbox.action_process()
+        bill = inbox.move_id
+        self.assertEqual(inbox.state, "processed", inbox.diagnostic)
+        self.assertEqual(bill.move_type, "in_invoice")
+        self.assertEqual(bill.state, "draft")
+        self.assertEqual(bill.partner_id, self.partner_a)
+        self.assertEqual(bill.company_id, self.env.company)
+        self.assertEqual(bill.amount_untaxed, 100)
+        self.assertEqual(bill.amount_tax, 5)
+        self.assertEqual(bill.amount_total, 105)
+        self.assertEqual(bill.ref, source.name)
+        self.assertTrue(bill.l10n_ae_received_document)
+        with self.assertRaisesRegex(UserError, "received"):
+            bill.write({"l10n_ae_fiscal_uuid": "ffffffff-ffff-4fff-8fff-ffffffffffff"})
+        inbox.action_process()
+        self.assertEqual(inbox.move_id, bill)
+        bill.action_post()
+        with self.assertRaisesRegex(UserError, "received"):
+            bill.action_l10n_ae_prepare()
+
     @classmethod
     @AccountTestInvoicingCommon.setup_country("ae")
     def setUpClass(cls):

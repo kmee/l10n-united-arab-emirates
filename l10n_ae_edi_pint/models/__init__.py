@@ -3,3 +3,5 @@
 from . import account_edi_ubl
 from . import account_move
 from . import edi_transmission
+from . import account_edi_inbound
+from . import edi_inbox

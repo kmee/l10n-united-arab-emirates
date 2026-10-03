@@ -10,7 +10,11 @@
     "website": "https://github.com/kmee/l10n-eua",
     "license": "AGPL-3",
     "depends": ["l10n_ae_edi", "account_edi_ubl_cii"],
-    "data": ["views/account_move_views.xml"],
+    "data": [
+        "security/ir.access.csv",
+        "security/inbox_security.xml",
+        "views/account_move_views.xml",
+    ],
     "external_dependencies": {
         "python": ["packaging", "lxml>=5.2,<7", "saxonche>=13.0,<14"]
     },
