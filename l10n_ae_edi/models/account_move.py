@@ -507,6 +507,15 @@ class AccountMove(models.Model):
                         "preparing an e-invoice."
                     )
                 )
+            if move.move_type in ("out_refund", "in_refund") and not (
+                move.l10n_ae_credit_reason
+            ):
+                raise UserError(
+                    self.env._(
+                        "Select the official UAE credit note reason before preparing "
+                        "the e-invoice. Free text does not replace the fiscal code."
+                    )
+                )
             if move.l10n_ae_free_zone and not move.l10n_ae_beneficiary_id:
                 raise UserError(
                     self.env._(

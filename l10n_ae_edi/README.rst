@@ -72,9 +72,20 @@ buyer and reviewed onboarding evidence. Received accounting forms
 display the original agreement reference and process without enabling
 another outbound transmission.
 
+For an outgoing UAE sale adjustment, select the official **UAE Credit
+Note Reason** in the native **Credit Note** wizard, then use **Reverse**
+to create a draft. Review any partial quantities/prices and original
+reference before checking and posting. The code is also editable in the
+draft's UAE tab. Free-text reason alone does not satisfy the emission
+check; automatic preparation blocks posting until an official code is
+selected. Received documents and ordinary vendor reversals do not use
+this outbound wizard field.
+
 For prerequisites, UI steps, expected results and error handling, read
-the repository `scenario based user
-manual <https://github.com/kmee/l10n-eua/blob/20.0-add-uae-edi/docs/user/scenarios-pt_BR.md>`__.
+the repository scenario based user manual in
+`English <https://github.com/kmee/l10n-eua/blob/20.0-add-uae-edi/docs/user/scenarios-en.md>`__
+or
+`Português <https://github.com/kmee/l10n-eua/blob/20.0-add-uae-edi/docs/user/scenarios-pt_BR.md>`__.
 
 Known issues / Roadmap
 ======================
