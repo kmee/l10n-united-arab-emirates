@@ -283,18 +283,8 @@ class AccountEdiUblUae(models.AbstractModel):
                     },
                 }
         vals["document_node"]["_template"] = template
-        flags = (
-            invoice.l10n_ae_free_zone,
-            invoice.l10n_ae_deemed_supply,
-            invoice.l10n_ae_margin_scheme,
-            invoice.l10n_ae_summary,
-            invoice.l10n_ae_continuous_supply,
-            invoice.l10n_ae_disclosed_agent,
-            invoice.l10n_ae_ecommerce,
-            invoice.l10n_ae_exports,
-        )
         vals["document_node"]["cbc:ProfileExecutionID"] = {
-            "_text": "".join("1" if flag else "0" for flag in flags)
+            "_text": invoice._l10n_ae_transaction_flags()
         }
         if invoice.l10n_ae_free_zone:
             vals["document_node"]["cac:BuyerCustomerParty"] = {

@@ -189,6 +189,98 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         customer.append(supplier_party)
         return tree
 
+    def test_received_free_zone_preserves_beneficiary_without_changing_vat(self):
+        source = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
+        )
+        source.write(
+            {
+                "l10n_ae_free_zone": True,
+                "l10n_ae_beneficiary_id": "1000000003",
+                "l10n_ae_fiscal_uuid": "aaaaaaae-1111-4111-8111-111111111111",
+            }
+        )
+        content = etree.tostring(self._received_test_xml(source))
+        binding = self.env["l10n_ae.edi.binding"].create({"name": "Received Free Zone"})
+        inbox_model = self.env["l10n_ae.edi.inbox"]
+        inbox = inbox_model.receive_controlled_document(
+            binding.id, "received-free-zone", content
+        )
+        self.assertTrue(inbox.action_process(), inbox.diagnostic)
+        bill = inbox.move_id
+        self.assertEqual((bill.move_type, bill.state), ("in_invoice", "draft"))
+        self.assertTrue(bill.l10n_ae_free_zone)
+        self.assertEqual(bill.l10n_ae_beneficiary_id, "1000000003")
+        self.assertEqual(
+            (bill.amount_untaxed, bill.amount_tax, bill.amount_total), (100, 5, 105)
+        )
+        self.assertEqual(inbox.original_xml.content, content)
+        self.assertEqual(
+            inbox_model.receive_controlled_document(
+                binding.id, "received-free-zone", content
+            ),
+            inbox,
+        )
+        for values in (
+            {"l10n_ae_free_zone": False},
+            {"l10n_ae_beneficiary_id": "1000000004"},
+            {"l10n_ae_exports": True},
+        ):
+            with self.assertRaisesRegex(UserError, "received"):
+                bill.write(values)
+        self.env.company.write(
+            {"l10n_ae_edi_auto_prepare": True, "l10n_ae_edi_binding_id": binding.id}
+        )
+        bill.action_post()
+        self.assertFalse(bill.l10n_ae_transmission_id)
+
+    def test_duplicate_received_beneficiary_requires_review_without_selecting_first(
+        self,
+    ):
+        source = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
+        )
+        source.write(
+            {
+                "l10n_ae_free_zone": True,
+                "l10n_ae_beneficiary_id": "1000000003",
+                "l10n_ae_fiscal_uuid": "aaaaaaae-2222-4222-8222-222222222222",
+            }
+        )
+        original = etree.tostring(self._received_test_xml(source))
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {"name": "Ambiguous received beneficiary"}
+        )
+        before = self.env["account.move"].search_count(
+            [("move_type", "=", "in_invoice")]
+        )
+        for index, path in enumerate(
+            (
+                "cac:BuyerCustomerParty/cac:Party/cac:PartyIdentification",
+                "cac:BuyerCustomerParty/cac:Party",
+                "cac:BuyerCustomerParty",
+            )
+        ):
+            tree = etree.fromstring(original)
+            node = tree.find(path, NS)
+            node.addnext(etree.fromstring(etree.tostring(node)))
+            content = etree.tostring(tree)
+            inbox = self.env["l10n_ae.edi.inbox"].receive_controlled_document(
+                binding.id, f"ambiguous-beneficiary-{index}", content
+            )
+            with self.subTest(path=path):
+                self.assertFalse(inbox.action_process())
+                self.assertEqual(inbox.state, "review")
+                self.assertIn("beneficiary", inbox.diagnostic)
+                self.assertFalse(inbox.move_id)
+                self.assertEqual(inbox.original_xml.content, content)
+                self.assertEqual(
+                    self.env["account.move"].search_count(
+                        [("move_type", "=", "in_invoice")]
+                    ),
+                    before,
+                )
+
     def test_received_fx_header_discrepancies_stay_in_review_without_a_draft(self):
         original, _rate, _source = self._foreign_received_fixture()
         binding = self.env["l10n_ae.edi.binding"].create(
@@ -1601,6 +1693,46 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
             ),
             "synthetic-beneficiary",
         )
+
+    def test_prepared_free_zone_document_freezes_scenario_and_beneficiary_facts(self):
+        invoice = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
+        )
+        invoice.write(
+            {
+                "l10n_ae_free_zone": True,
+                "l10n_ae_beneficiary_id": "1000000003",
+                "l10n_ae_fiscal_uuid": "aaaaaaad-1111-4111-8111-111111111111",
+                "l10n_ae_binding_id": self.env["l10n_ae.edi.binding"]
+                .create({"name": "Free Zone snapshot"})
+                .id,
+            }
+        )
+        invoice.action_l10n_ae_prepare()
+        transmission = invoice.l10n_ae_transmission_id
+        snapshot = json.loads(transmission.payload)
+        self.assertEqual(snapshot.get("transaction_flags"), "10000000")
+        self.assertEqual(snapshot.get("beneficiary_id"), "1000000003")
+        original = transmission.xml_content
+        report = invoice.validate_l10n_ae_pint()
+        self.assertTrue(report["valid"], report)
+        for name, value in (
+            ("l10n_ae_free_zone", False),
+            ("l10n_ae_deemed_supply", True),
+            ("l10n_ae_margin_scheme", True),
+            ("l10n_ae_summary", True),
+            ("l10n_ae_continuous_supply", True),
+            ("l10n_ae_disclosed_agent", True),
+            ("l10n_ae_ecommerce", True),
+            ("l10n_ae_exports", True),
+            ("l10n_ae_beneficiary_id", "1000000004"),
+            ("l10n_ae_document_category", "commercial"),
+        ):
+            with self.subTest(field=name), self.assertRaisesRegex(UserError, "frozen"):
+                invoice.write({name: value})
+        self.assertEqual(invoice.preview_l10n_ae_pint(), original)
+        self.assertEqual(invoice.amount_tax, 5)
+        self.assertEqual(invoice.amount_total, 105)
 
     def test_prepared_xml_survives_later_customer_address_changes(self):
         invoice = self.init_invoice(

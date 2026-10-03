@@ -238,6 +238,63 @@ class TestUaeSelfBillingInbound(AccountTestInvoicingCommon):
         self.assertEqual(inbox.move_id, existing)
         self.assertEqual(inbox.original_xml.content, content)
 
+    def test_selfbilling_reconciliation_requires_matching_free_zone_and_beneficiary(
+        self,
+    ):
+        source, agreement, binding = self._selfbilling_fixture()
+        source.write(
+            {"l10n_ae_free_zone": True, "l10n_ae_beneficiary_id": "1000000003"}
+        )
+        existing = self.init_invoice(
+            "out_invoice",
+            partner=self.buyer.partner_id,
+            invoice_date=source.invoice_date,
+            amounts=[100],
+            taxes=self.tax_sale_a,
+        )
+        existing.write(
+            {
+                "ref": source.name,
+                "l10n_ae_origin_system": "internal-billing",
+                "l10n_ae_origin_document_id": "SYNTH-FREEZONE-RECONCILIATION",
+                "l10n_ae_free_zone": True,
+                "l10n_ae_beneficiary_id": "1000000004",
+            }
+        )
+        content = source.preview_l10n_ae_pint().encode()
+        inbox = self.env["l10n_ae.edi.inbox"].receive_controlled_document(
+            binding.id, "freezone-existing-sale", content
+        )
+        before = self.env["account.move"].search_count(
+            [("move_type", "=", "out_invoice")]
+        )
+        self.assertFalse(inbox.action_process())
+        self.assertIn("scenario and beneficiary", inbox.diagnostic)
+        self.assertEqual(existing.l10n_ae_beneficiary_id, "1000000004")
+        self.assertFalse(existing.l10n_ae_received_document)
+        existing.write({"l10n_ae_free_zone": False, "l10n_ae_beneficiary_id": False})
+        self.assertFalse(inbox.action_process())
+        self.assertIn("scenario and beneficiary", inbox.diagnostic)
+        self.assertFalse(existing.l10n_ae_free_zone)
+        self.assertFalse(existing.l10n_ae_received_document)
+        self.assertFalse(inbox.move_id)
+        self.assertEqual(
+            self.env["account.move"].search_count([("move_type", "=", "out_invoice")]),
+            before,
+        )
+        existing.write(
+            {"l10n_ae_free_zone": True, "l10n_ae_beneficiary_id": "1000000003"}
+        )
+        self.assertTrue(inbox.action_process(), inbox.diagnostic)
+        self.assertEqual(inbox.move_id, existing)
+        self.assertEqual(existing.l10n_ae_selfbilling_agreement_id, agreement)
+        self.assertEqual(existing.l10n_ae_beneficiary_id, "1000000003")
+        self.assertEqual(
+            existing.l10n_ae_origin_document_id, "SYNTH-FREEZONE-RECONCILIATION"
+        )
+        self.assertEqual((existing.amount_tax, existing.amount_total), (5, 105))
+        self.assertEqual(inbox.original_xml.content, content)
+
     def test_received_agreement_evidence_survives_later_contract_changes(self):
         source, agreement, binding = self._selfbilling_fixture()
         inbox = self.env["l10n_ae.edi.inbox"].receive_controlled_document(

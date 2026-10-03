@@ -187,6 +187,7 @@ class UaeEdiInbox(models.Model):
         if hashlib.sha256(content).hexdigest() != self.xml_hash:
             raise UserError(self.env._("Received XML failed its integrity check."))
         tree = parse_invoice_xml(content)
+        beneficiary_id = self._received_beneficiary_id(tree)
         directory = os.environ.get("KMEE_UAE_NORMATIVE_DIR")
         if not directory:
             raise UserError(
@@ -208,9 +209,10 @@ class UaeEdiInbox(models.Model):
             or customization == "urn:peppol:pint:billing-1@ae-1"
             and type_code in (("381", "81") if is_credit else ("380", "480"))
         )
+        transaction_flags = tree.findtext("./{*}ProfileExecutionID")
         if (
             not supported
-            or tree.findtext("./{*}ProfileExecutionID") != "00000000"
+            or transaction_flags not in ("00000000", "10000000")
             or tree.findall("./{*}AllowanceCharge")
             or not is_credit
             and float(tree.findtext("./{*}LegalMonetaryTotal/{*}PrepaidAmount") or 0)
@@ -315,6 +317,8 @@ class UaeEdiInbox(models.Model):
             "l10n_ae_origin_system": "controlled-inbound",
             "l10n_ae_origin_document_id": f"{self.binding_id.id}:{self.remote_id}",
             "l10n_ae_fiscal_uuid": tree.findtext("./{*}UUID"),
+            "l10n_ae_free_zone": transaction_flags == "10000000",
+            "l10n_ae_beneficiary_id": beneficiary_id,
             "l10n_ae_received_currency_id": currency.id,
             **fiscal_values,
             "l10n_ae_received_prepaid_amount": float(
@@ -372,6 +376,22 @@ class UaeEdiInbox(models.Model):
             }
         )
         return move
+
+    def _received_beneficiary_id(self, tree):
+        nodes = tree.findall("./{*}BuyerCustomerParty")
+        if not nodes:
+            return False
+        for child in ("Party", "PartyIdentification", "ID"):
+            if len(nodes) != 1:
+                raise UserError(
+                    self.env._("The received beneficiary structure requires review.")
+                )
+            nodes = nodes[0].findall("./{*}" + child)
+        if len(nodes) != 1:
+            raise UserError(
+                self.env._("The received beneficiary structure requires review.")
+            )
+        return nodes[0].text or False
 
     def _received_fiscal_values(self, tree, currency_code):
         def amount(xpath):
@@ -610,6 +630,17 @@ class UaeEdiInbox(models.Model):
                 )
             )
         expected = parse_invoice_xml(candidate.preview_l10n_ae_pint().encode())
+        if candidate._l10n_ae_transaction_flags() != tree.findtext(
+            "./{*}ProfileExecutionID"
+        ) or (
+            candidate.l10n_ae_beneficiary_id or False
+        ) != self._received_beneficiary_id(tree):
+            raise UserError(
+                self.env._(
+                    "The existing billing document's scenario and beneficiary "
+                    "require review."
+                )
+            )
         if self._fiscal_lines_signature(expected) != self._fiscal_lines_signature(tree):
             raise UserError(
                 self.env._(
