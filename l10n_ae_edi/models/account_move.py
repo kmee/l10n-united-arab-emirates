@@ -383,6 +383,14 @@ class AccountMove(models.Model):
     def action_l10n_ae_prepare(self):
         self.ensure_one()
         self.check_access("write")
+        # Serialize first preparation before looking at a possibly cached empty
+        # reference. A stale PostgreSQL snapshot is retried at Odoo's request
+        # boundary, never by committing or retrying part of a business action.
+        self.flush_recordset()
+        self.env.cr.execute(
+            "SELECT id FROM account_move WHERE id = %s FOR UPDATE", [self.id]
+        )
+        self.invalidate_recordset()
         if not self.l10n_ae_transmission_id:
             self.action_l10n_ae_validate()
             if self.state != "posted":
