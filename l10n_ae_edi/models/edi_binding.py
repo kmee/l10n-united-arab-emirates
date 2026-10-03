@@ -30,6 +30,7 @@ class UaeEdiBinding(models.Model):
             ("supplied", "Externally Supplied UUID"),
             ("controlled_local", "Local UUID for Controlled Simulation"),
         ],
+        string="Fiscal UUID Policy",
         required=True,
         default="supplied",
         help="Local UUID assignment is available only in the controlled sandbox. "
