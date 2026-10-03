@@ -13,8 +13,21 @@ class AccountMove(models.Model):
     _inherit = "account.move"
 
     def preview_l10n_ae_pint(self):
-        """Preview XML without submitting or claiming formal conformance."""
+        """Read frozen XML when prepared; otherwise preview without submitting."""
         self.ensure_one()
+        self.check_access("read")
+        transmission = self.l10n_ae_transmission_id
+        if transmission:
+            if not transmission.xml_content:
+                raise UserError(
+                    self.env._("No frozen XML is available for this transmission.")
+                )
+            content = transmission.xml_content.encode("utf-8")
+            if hashlib.sha256(content).hexdigest() != transmission.xml_hash:
+                raise UserError(
+                    self.env._("The frozen UAE XML failed its integrity check.")
+                )
+            return transmission.xml_content
         self.action_l10n_ae_validate()
         content, errors = self.env["account.edi.ubl.kmee_ae"]._export_invoice(self)
         if errors:
@@ -33,19 +46,7 @@ class AccountMove(models.Model):
             raise UserError(
                 self.env._("Configure the offline UAE normative resource directory.")
             )
-        transmission = self.l10n_ae_transmission_id
-        if transmission:
-            if not transmission.xml_content:
-                raise UserError(
-                    self.env._("No frozen XML is available for this transmission.")
-                )
-            content = transmission.xml_content.encode("utf-8")
-            if hashlib.sha256(content).hexdigest() != transmission.xml_hash:
-                raise UserError(
-                    self.env._("The frozen UAE XML failed its integrity check.")
-                )
-        else:
-            content = self.preview_l10n_ae_pint().encode("utf-8")
+        content = self.preview_l10n_ae_pint().encode("utf-8")
         try:
             return OfflinePintValidator(directory).validate(content)
         except ValidationUnavailable as error:

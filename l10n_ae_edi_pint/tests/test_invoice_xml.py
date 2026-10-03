@@ -210,6 +210,7 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         self.assertIn(
             "Synthetic buyer street", invoice.l10n_ae_transmission_id.xml_content
         )
+        self.assertEqual(invoice.preview_l10n_ae_pint(), expected)
 
     def test_formal_validation_reads_frozen_xml_after_master_data_changes(self):
         invoice = self.init_invoice(
