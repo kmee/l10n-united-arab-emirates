@@ -8,3 +8,9 @@ The original evidence cannot be edited, and a received document cannot be emitte
 
 This inbox currently receives from the separately configured KMEE loopback mock worker.
 It does not connect to an accredited provider sandbox or constitute FTA acceptance.
+
+Received tax credit notes in AED can become draft supplier refunds when their single
+preceding invoice reference matches an existing supplier bill. The declared credit
+reason, prepaid amount and payable amount remain available for review. Processing does
+not post, reconcile or import payments. Missing or ambiguous references stay in the
+received-document review inbox with their original XML.

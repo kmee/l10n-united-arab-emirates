@@ -11,7 +11,7 @@
                     type="object"
                     string="Validate UAE E-Invoice"
                     groups="account.group_account_invoice"
-                    invisible="country_code != 'AE' or move_type == 'entry'"
+                    invisible="country_code != 'AE' or move_type == 'entry' or l10n_ae_received_document"
                 />
             </xpath>
         </field>

@@ -192,13 +192,20 @@ class UaeEdiInbox(models.Model):
             )
         report = OfflinePintValidator(directory).validate(content)
         self.env["account.move"]._l10n_ae_check_pint_report(report)
+        is_credit = tree.tag == (
+            "{urn:oasis:names:specification:ubl:schema:xsd:CreditNote-2}CreditNote"
+        )
+        type_code = tree.findtext(
+            "./{*}CreditNoteTypeCode" if is_credit else "./{*}InvoiceTypeCode"
+        )
         if (
             tree.findtext("./{*}CustomizationID") != "urn:peppol:pint:billing-1@ae-1"
-            or tree.findtext("./{*}InvoiceTypeCode") != "380"
+            or type_code != ("381" if is_credit else "380")
             or tree.findtext("./{*}ProfileExecutionID") != "00000000"
             or tree.findtext("./{*}DocumentCurrencyCode") != "AED"
             or tree.findall("./{*}AllowanceCharge")
-            or float(tree.findtext("./{*}LegalMonetaryTotal/{*}PrepaidAmount") or 0)
+            or not is_credit
+            and float(tree.findtext("./{*}LegalMonetaryTotal/{*}PrepaidAmount") or 0)
             != 0
         ):
             raise UserError(
@@ -260,16 +267,53 @@ class UaeEdiInbox(models.Model):
             {
                 "company_id": self.company_id.id,
                 "journal_id": journal.id,
-                "move_type": "in_invoice",
+                "move_type": "in_refund" if is_credit else "in_invoice",
+                "l10n_ae_credit_reason": tree.findtext(
+                    "./{*}DiscrepancyResponse/{*}ResponseCode"
+                )
+                if is_credit
+                else False,
                 "l10n_ae_origin_system": "controlled-inbound",
                 "l10n_ae_origin_document_id": f"{self.binding_id.id}:{self.remote_id}",
                 "l10n_ae_fiscal_uuid": tree.findtext("./{*}UUID"),
+                "l10n_ae_received_prepaid_amount": float(
+                    tree.findtext("./{*}LegalMonetaryTotal/{*}PrepaidAmount") or 0
+                ),
+                "l10n_ae_received_payable_amount": float(
+                    tree.findtext("./{*}LegalMonetaryTotal/{*}PayableAmount")
+                ),
             }
         )
         move._l10n_ae_mark_received()
         self.env["account.edi.ubl.kmee_ae.inbound"]._import_invoice_ubl_cii(
             move, {"xml_tree": tree, "attachment": False}, new=True
         )
+        if is_credit:
+            references = tree.findall(
+                "./{*}BillingReference/{*}InvoiceDocumentReference"
+            )
+            if len(references) != 1:
+                raise UserError(
+                    self.env._("This received credit requires reference review.")
+                )
+            domain = [
+                ("company_id", "=", self.company_id.id),
+                ("partner_id", "=", move.partner_id.id),
+                ("move_type", "=", "in_invoice"),
+                ("ref", "=", references[0].findtext("./{*}ID")),
+                ("currency_id", "=", move.currency_id.id),
+                ("state", "!=", "cancel"),
+            ]
+            if date := references[0].findtext("./{*}IssueDate"):
+                domain.append(("invoice_date", "=", date))
+            original = self.env["account.move"].search(domain, limit=2)
+            if len(original) != 1:
+                raise UserError(
+                    self.env._(
+                        "The received credit's original supplier bill requires review."
+                    )
+                )
+            move.reversed_entry_id = original
         expected = [
             ("TaxExclusiveAmount", move.amount_untaxed),
             ("TaxInclusiveAmount", move.amount_total),

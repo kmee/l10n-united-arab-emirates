@@ -16,11 +16,12 @@ NS = {
 
 @tagged("post_install", "-at_install")
 class TestUaeInvoiceXml(AccountTestInvoicingCommon):
-    def _received_test_xml(self):
-        source = self.init_invoice(
-            "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
-        )
-        source.l10n_ae_fiscal_uuid = "abcdefab-2222-4222-8222-222222222222"
+    def _received_test_xml(self, source=None):
+        if source is None:
+            source = self.init_invoice(
+                "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
+            )
+            source.l10n_ae_fiscal_uuid = "abcdefab-2222-4222-8222-222222222222"
         tree = etree.fromstring(source.preview_l10n_ae_pint().encode())
         supplier = tree.find("cac:AccountingSupplierParty", NS)
         customer = tree.find("cac:AccountingCustomerParty", NS)
@@ -30,6 +31,77 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         supplier.append(customer_party)
         customer.append(supplier_party)
         return tree
+
+    def test_received_partial_credit_links_the_supplier_bill_and_preserves_reason(self):
+        original = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
+        )
+        original.l10n_ae_fiscal_uuid = "aaaaaaab-1111-4111-8111-111111111111"
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {"name": "Incoming supplier adjustment"}
+        )
+        inbox_model = self.env["l10n_ae.edi.inbox"]
+        received = inbox_model.receive_controlled_document(
+            binding.id,
+            "original-bill",
+            etree.tostring(self._received_test_xml(original)),
+        )
+        self.assertTrue(received.action_process(), received.diagnostic)
+        bill = received.move_id
+        reversal = (
+            self.env["account.move.reversal"]
+            .with_context(active_model="account.move", active_ids=original.ids)
+            .create(
+                {
+                    "reason": "Synthetic consideration adjustment",
+                    "move_ids": [(6, 0, original.ids)],
+                    "journal_id": original.journal_id.id,
+                }
+            )
+        )
+        reversal.refund_moves()
+        credit = reversal.new_move_ids
+        credit.invoice_line_ids.write({"price_unit": 40})
+        credit.write(
+            {
+                "l10n_ae_credit_reason": "DL8.61.1.C",
+                "l10n_ae_fiscal_uuid": "aaaaaaab-2222-4222-8222-222222222222",
+            }
+        )
+        credit.action_post()
+        content = etree.tostring(self._received_test_xml(credit))
+        inbox = inbox_model.receive_controlled_document(
+            binding.id, "partial-credit", content
+        )
+        self.assertTrue(inbox.action_process(), inbox.diagnostic)
+        refund = inbox.move_id
+        self.assertEqual(refund.move_type, "in_refund")
+        self.assertEqual(refund.state, "draft")
+        self.assertEqual(refund.partner_id, self.partner_a)
+        self.assertEqual(refund.reversed_entry_id, bill)
+        self.assertEqual(refund.l10n_ae_credit_reason, "DL8.61.1.C")
+        self.assertEqual(refund.amount_untaxed, 40)
+        self.assertEqual(refund.amount_tax, 2)
+        self.assertEqual(refund.amount_total, 42)
+        self.assertEqual(refund.l10n_ae_received_prepaid_amount, 42)
+        self.assertEqual(refund.l10n_ae_received_payable_amount, 0)
+        self.assertEqual(bill.amount_total, 105)
+        self.assertEqual(bill.state, "draft")
+        self.assertEqual(inbox.original_xml.content, content)
+        self.assertTrue(refund.l10n_ae_received_document)
+        self.assertFalse(refund.l10n_ae_transmission_id)
+        self.assertTrue(inbox.action_process())
+        self.assertEqual(inbox.move_id, refund)
+        with self.assertRaisesRegex(UserError, "received"):
+            refund.write({"l10n_ae_received_payable_amount": 1})
+        with self.assertRaisesRegex(UserError, "received"):
+            refund.write({"l10n_ae_credit_reason": "DL8.61.1.A"})
+        self.env.company.write(
+            {"l10n_ae_edi_auto_prepare": True, "l10n_ae_edi_binding_id": binding.id}
+        )
+        refund.action_post()
+        self.assertFalse(refund.l10n_ae_transmission_id)
+        self.assertEqual(bill.state, "draft")
 
     def test_received_supplier_endpoint_must_match_the_known_vat_partner(self):
         tree = self._received_test_xml()
@@ -46,6 +118,45 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         self.assertEqual(inbox.state, "review")
         self.assertFalse(inbox.move_id)
         self.assertIn("supplier", inbox.diagnostic)
+
+    def test_received_credit_with_a_wrong_original_date_stays_in_review(self):
+        original = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
+        )
+        original.l10n_ae_fiscal_uuid = "bbbbbbba-1111-4111-8111-111111111111"
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {"name": "Incoming credit reference review"}
+        )
+        inbox_model = self.env["l10n_ae.edi.inbox"]
+        received = inbox_model.receive_controlled_document(
+            binding.id,
+            "original-bill",
+            etree.tostring(self._received_test_xml(original)),
+        )
+        self.assertTrue(received.action_process(), received.diagnostic)
+        credit = self.init_invoice("out_refund", amounts=[40], taxes=self.tax_sale_a)
+        credit.write(
+            {
+                "reversed_entry_id": original.id,
+                "l10n_ae_credit_reason": "DL8.61.1.C",
+                "l10n_ae_fiscal_uuid": "bbbbbbba-2222-4222-8222-222222222222",
+            }
+        )
+        credit.action_post()
+        tree = self._received_test_xml(credit)
+        tree.find(
+            "cac:BillingReference/cac:InvoiceDocumentReference/cbc:IssueDate", NS
+        ).text = "2000-01-01"
+        content = etree.tostring(tree)
+        inbox = inbox_model.receive_controlled_document(
+            binding.id, "wrong-date", content
+        )
+        self.assertFalse(inbox.action_process())
+        self.assertEqual(inbox.state, "review")
+        self.assertFalse(inbox.move_id)
+        self.assertEqual(inbox.original_xml.content, content)
+        self.assertIn("original supplier bill", inbox.diagnostic)
+        self.assertEqual(received.move_id.amount_total, 105)
 
     def test_received_identical_xml_with_another_remote_id_reuses_the_bill(self):
         content = etree.tostring(self._received_test_xml())
