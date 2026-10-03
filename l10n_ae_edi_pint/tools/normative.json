@@ -1,0 +1,307 @@
+{
+  "archives": [
+    {
+      "members": {
+        "xsd/common/CCTS_CCT_SchemaModule-2.1.xsd": "ubl-2.1/xsd/common/CCTS_CCT_SchemaModule-2.1.xsd",
+        "xsd/common/UBL-CommonAggregateComponents-2.1.xsd": "ubl-2.1/xsd/common/UBL-CommonAggregateComponents-2.1.xsd",
+        "xsd/common/UBL-CommonBasicComponents-2.1.xsd": "ubl-2.1/xsd/common/UBL-CommonBasicComponents-2.1.xsd",
+        "xsd/common/UBL-CommonExtensionComponents-2.1.xsd": "ubl-2.1/xsd/common/UBL-CommonExtensionComponents-2.1.xsd",
+        "xsd/common/UBL-CommonSignatureComponents-2.1.xsd": "ubl-2.1/xsd/common/UBL-CommonSignatureComponents-2.1.xsd",
+        "xsd/common/UBL-ExtensionContentDataType-2.1.xsd": "ubl-2.1/xsd/common/UBL-ExtensionContentDataType-2.1.xsd",
+        "xsd/common/UBL-QualifiedDataTypes-2.1.xsd": "ubl-2.1/xsd/common/UBL-QualifiedDataTypes-2.1.xsd",
+        "xsd/common/UBL-SignatureAggregateComponents-2.1.xsd": "ubl-2.1/xsd/common/UBL-SignatureAggregateComponents-2.1.xsd",
+        "xsd/common/UBL-SignatureBasicComponents-2.1.xsd": "ubl-2.1/xsd/common/UBL-SignatureBasicComponents-2.1.xsd",
+        "xsd/common/UBL-UnqualifiedDataTypes-2.1.xsd": "ubl-2.1/xsd/common/UBL-UnqualifiedDataTypes-2.1.xsd",
+        "xsd/common/UBL-XAdESv132-2.1.xsd": "ubl-2.1/xsd/common/UBL-XAdESv132-2.1.xsd",
+        "xsd/common/UBL-XAdESv141-2.1.xsd": "ubl-2.1/xsd/common/UBL-XAdESv141-2.1.xsd",
+        "xsd/common/UBL-xmldsig-core-schema-2.1.xsd": "ubl-2.1/xsd/common/UBL-xmldsig-core-schema-2.1.xsd",
+        "xsd/maindoc/UBL-CreditNote-2.1.xsd": "ubl-2.1/xsd/maindoc/UBL-CreditNote-2.1.xsd",
+        "xsd/maindoc/UBL-Invoice-2.1.xsd": "ubl-2.1/xsd/maindoc/UBL-Invoice-2.1.xsd"
+      },
+      "name": "ubl-2.1",
+      "sha256": "60b80d76394a8a2add90723ecb8e0e2e9d826775de9749df37a72d60703f86ed",
+      "size": 57926016,
+      "url": "https://docs.oasis-open.org/ubl/os-UBL-2.1/UBL-2.1.zip"
+    },
+    {
+      "members": {
+        "trn-creditnote/example/Disclosed agent billing tax credit note.xml": "pint-ae/trn-creditnote/example/Disclosed agent billing tax credit note.xml",
+        "trn-creditnote/example/Standard tax credit Note.xml": "pint-ae/trn-creditnote/example/Standard tax credit Note.xml",
+        "trn-creditnote/example/Volume-discount-credit-note.xml": "pint-ae/trn-creditnote/example/Volume-discount-credit-note.xml",
+        "trn-creditnote/schematron/PINT-UBL-validation-preprocessed.xslt": "pint-ae/trn-creditnote/schematron/PINT-UBL-validation-preprocessed.xslt",
+        "trn-creditnote/schematron/PINT-jurisdiction-aligned-rules.xslt": "pint-ae/trn-creditnote/schematron/PINT-jurisdiction-aligned-rules.xslt",
+        "trn-invoice/example/Buyer-PAS-identifier.xml": "pint-ae/trn-invoice/example/Buyer-PAS-identifier.xml",
+        "trn-invoice/example/Commercial invoice.xml": "pint-ae/trn-invoice/example/Commercial invoice.xml",
+        "trn-invoice/example/Continuous.supplies.xml": "pint-ae/trn-invoice/example/Continuous.supplies.xml",
+        "trn-invoice/example/Deemed.supply.-.predefined.endpoint.xml": "pint-ae/trn-invoice/example/Deemed.supply.-.predefined.endpoint.xml",
+        "trn-invoice/example/Disclosed.agent.billing.xml": "pint-ae/trn-invoice/example/Disclosed.agent.billing.xml",
+        "trn-invoice/example/Doc-level-allowance-AE-category.xml": "pint-ae/trn-invoice/example/Doc-level-allowance-AE-category.xml",
+        "trn-invoice/example/Doc-level-allowance-E-category.xml": "pint-ae/trn-invoice/example/Doc-level-allowance-E-category.xml",
+        "trn-invoice/example/Doc-level-allowance-O-category.xml": "pint-ae/trn-invoice/example/Doc-level-allowance-O-category.xml",
+        "trn-invoice/example/Doc-level-allowance-Z-category.xml": "pint-ae/trn-invoice/example/Doc-level-allowance-Z-category.xml",
+        "trn-invoice/example/Doc-level-charge-AE-category.xml": "pint-ae/trn-invoice/example/Doc-level-charge-AE-category.xml",
+        "trn-invoice/example/Doc-level-charge-E-category.xml": "pint-ae/trn-invoice/example/Doc-level-charge-E-category.xml",
+        "trn-invoice/example/Doc-level-charge-O-category.xml": "pint-ae/trn-invoice/example/Doc-level-charge-O-category.xml",
+        "trn-invoice/example/Doc-level-charge-Z-category.xml": "pint-ae/trn-invoice/example/Doc-level-charge-Z-category.xml",
+        "trn-invoice/example/Exports.-.predefined.endpoint.xml": "pint-ae/trn-invoice/example/Exports.-.predefined.endpoint.xml",
+        "trn-invoice/example/Exports.xml": "pint-ae/trn-invoice/example/Exports.xml",
+        "trn-invoice/example/Margin scheme.xml": "pint-ae/trn-invoice/example/Margin scheme.xml",
+        "trn-invoice/example/Seller-PAS-identifier.xml": "pint-ae/trn-invoice/example/Seller-PAS-identifier.xml",
+        "trn-invoice/example/Seller-TIN-identifier.xml": "pint-ae/trn-invoice/example/Seller-TIN-identifier.xml",
+        "trn-invoice/example/Standard invoice Mandatory fields.xml": "pint-ae/trn-invoice/example/Standard invoice Mandatory fields.xml",
+        "trn-invoice/example/Standard tax invoice.xml": "pint-ae/trn-invoice/example/Standard tax invoice.xml",
+        "trn-invoice/example/Standard.invoice.-.Extensive.xml": "pint-ae/trn-invoice/example/Standard.invoice.-.Extensive.xml",
+        "trn-invoice/example/Standard.tax.invoice.-.predefined.endpoint.xml": "pint-ae/trn-invoice/example/Standard.tax.invoice.-.predefined.endpoint.xml",
+        "trn-invoice/example/Summary tax invoice.xml": "pint-ae/trn-invoice/example/Summary tax invoice.xml",
+        "trn-invoice/example/Supply involving free trade zone.xml": "pint-ae/trn-invoice/example/Supply involving free trade zone.xml",
+        "trn-invoice/example/Supply through e-commerce.xml": "pint-ae/trn-invoice/example/Supply through e-commerce.xml",
+        "trn-invoice/example/Supply under Reverse charge mechanism.xml": "pint-ae/trn-invoice/example/Supply under Reverse charge mechanism.xml",
+        "trn-invoice/example/Zero rated supplies.xml": "pint-ae/trn-invoice/example/Zero rated supplies.xml",
+        "trn-invoice/schematron/PINT-UBL-validation-preprocessed.xslt": "pint-ae/trn-invoice/schematron/PINT-UBL-validation-preprocessed.xslt",
+        "trn-invoice/schematron/PINT-jurisdiction-aligned-rules.xslt": "pint-ae/trn-invoice/schematron/PINT-jurisdiction-aligned-rules.xslt"
+      },
+      "name": "pint-ae",
+      "sha256": "1e8b0bd595c672ac9d6fc886ddd0eb8027cb39a1d26bebdcb1ada37b7eee491f",
+      "size": 1019347,
+      "url": "https://docs.peppol.eu/poac/ae/pint-ae/resources.zip"
+    },
+    {
+      "members": {
+        "trn-creditnote/example/Self billing tax credit note.xml": "pint-ae-sb/trn-creditnote/example/Self billing tax credit note.xml",
+        "trn-creditnote/schematron/PINT-UBL-validation-preprocessed.xslt": "pint-ae-sb/trn-creditnote/schematron/PINT-UBL-validation-preprocessed.xslt",
+        "trn-creditnote/schematron/PINT-jurisdiction-aligned-rules.xslt": "pint-ae-sb/trn-creditnote/schematron/PINT-jurisdiction-aligned-rules.xslt",
+        "trn-invoice/example/Self Billing.xml": "pint-ae-sb/trn-invoice/example/Self Billing.xml",
+        "trn-invoice/schematron/PINT-UBL-validation-preprocessed.xslt": "pint-ae-sb/trn-invoice/schematron/PINT-UBL-validation-preprocessed.xslt",
+        "trn-invoice/schematron/PINT-jurisdiction-aligned-rules.xslt": "pint-ae-sb/trn-invoice/schematron/PINT-jurisdiction-aligned-rules.xslt"
+      },
+      "name": "pint-ae-sb",
+      "sha256": "7e6e58f120132dd2d2a6acf21b4a9318f0d07f2685c30ff282fae0e2a6613d15",
+      "size": 784521,
+      "url": "https://docs.peppol.eu/poac/ae/pint-ae-sb/resources.zip"
+    }
+  ],
+  "digest_origin": "Locally observed HTTPS bytes; not supplier-signed checksums.",
+  "files": {
+    "pint-ae-sb/trn-creditnote/example/Self billing tax credit note.xml": {
+      "sha256": "3b2c5cfd5740223cbbe309a5658bd1576014f21a9903b9e7f9905aeb18774142",
+      "size": 9980
+    },
+    "pint-ae-sb/trn-creditnote/schematron/PINT-UBL-validation-preprocessed.xslt": {
+      "sha256": "e238b45bafe65038b846a9d8173054ab315ae0a709dc65f17b5de9d38303f037",
+      "size": 243710
+    },
+    "pint-ae-sb/trn-creditnote/schematron/PINT-jurisdiction-aligned-rules.xslt": {
+      "sha256": "da931f161362fe26bb9f5a1e519cd44758e5cba977584800b806c09bcf1b807b",
+      "size": 200074
+    },
+    "pint-ae-sb/trn-invoice/example/Self Billing.xml": {
+      "sha256": "c4eb75ebaf957f4b09be5a2ba44a29f350a2f55f90fc24f43309b704e62d4e0e",
+      "size": 10663
+    },
+    "pint-ae-sb/trn-invoice/schematron/PINT-UBL-validation-preprocessed.xslt": {
+      "sha256": "e238b45bafe65038b846a9d8173054ab315ae0a709dc65f17b5de9d38303f037",
+      "size": 243710
+    },
+    "pint-ae-sb/trn-invoice/schematron/PINT-jurisdiction-aligned-rules.xslt": {
+      "sha256": "da931f161362fe26bb9f5a1e519cd44758e5cba977584800b806c09bcf1b807b",
+      "size": 200074
+    },
+    "pint-ae/trn-creditnote/example/Disclosed agent billing tax credit note.xml": {
+      "sha256": "2cab1b170b670a19b41997e44d616b8f04ed5c107dbc99ffb2651103dbb01ffd",
+      "size": 10158
+    },
+    "pint-ae/trn-creditnote/example/Standard tax credit Note.xml": {
+      "sha256": "cbfdeacf83a17bf611d47b8ce29d9619eccafc19bad4757c7af4e01e38c82a17",
+      "size": 9944
+    },
+    "pint-ae/trn-creditnote/example/Volume-discount-credit-note.xml": {
+      "sha256": "2da27c48b45605aba947fc09e6f7314ed4caebf6b247b1dedf6961c4979f8e1e",
+      "size": 10119
+    },
+    "pint-ae/trn-creditnote/schematron/PINT-UBL-validation-preprocessed.xslt": {
+      "sha256": "b6557c207f1cccaebf32b67ae0d50b309192751b58ddd22fa5af90c6d45f7d16",
+      "size": 243710
+    },
+    "pint-ae/trn-creditnote/schematron/PINT-jurisdiction-aligned-rules.xslt": {
+      "sha256": "da931f161362fe26bb9f5a1e519cd44758e5cba977584800b806c09bcf1b807b",
+      "size": 200074
+    },
+    "pint-ae/trn-invoice/example/Buyer-PAS-identifier.xml": {
+      "sha256": "1e335448bdef21d1890e6d428aa12b66288d425c7699009f49da3b61adf5a587",
+      "size": 5645
+    },
+    "pint-ae/trn-invoice/example/Commercial invoice.xml": {
+      "sha256": "c9231834d9113c36b2de575d9ca28afb2eabe340230b02b6bcc9e521c77b1c7a",
+      "size": 5470
+    },
+    "pint-ae/trn-invoice/example/Continuous.supplies.xml": {
+      "sha256": "8d49a4afdab47151e3ea58bb8972b7525e490b1b8b031d05ecd84268d8350412",
+      "size": 9279
+    },
+    "pint-ae/trn-invoice/example/Deemed.supply.-.predefined.endpoint.xml": {
+      "sha256": "ca672c9a9dbbad402e0fea38075edea612cecf42c43c150cd2b344fd652bfee9",
+      "size": 7329
+    },
+    "pint-ae/trn-invoice/example/Disclosed.agent.billing.xml": {
+      "sha256": "41b5a956988fde1e1d9850e245dbbf5f64458be642fcc860c11826065069086b",
+      "size": 7179
+    },
+    "pint-ae/trn-invoice/example/Doc-level-allowance-AE-category.xml": {
+      "sha256": "09fc0ab12627b1d7145ac85d7cfa4fb95f7128b988ab6174e6da40a5ff3f551c",
+      "size": 6446
+    },
+    "pint-ae/trn-invoice/example/Doc-level-allowance-E-category.xml": {
+      "sha256": "95642dcf67501b19b6d935e980a64fe0cbea7feec08dd430d006564224c03b5f",
+      "size": 6130
+    },
+    "pint-ae/trn-invoice/example/Doc-level-allowance-O-category.xml": {
+      "sha256": "330265af30c1b2770f1dcb2e1884ba663ed852e24bcf9e588b16aa51f36c927b",
+      "size": 6130
+    },
+    "pint-ae/trn-invoice/example/Doc-level-allowance-Z-category.xml": {
+      "sha256": "c8169130c934244b1e6bd1e535bbc3236c14f10e039ee773eec0a79d3124a5ad",
+      "size": 6199
+    },
+    "pint-ae/trn-invoice/example/Doc-level-charge-AE-category.xml": {
+      "sha256": "033badbbaf312113ea5f0a3d4caaa63145a84da94e98c8db4a13345133b432a2",
+      "size": 6450
+    },
+    "pint-ae/trn-invoice/example/Doc-level-charge-E-category.xml": {
+      "sha256": "a67e272b990ac9065048aabd8e8f551f5e11cf5a3d4961926d6569d358ac839d",
+      "size": 6126
+    },
+    "pint-ae/trn-invoice/example/Doc-level-charge-O-category.xml": {
+      "sha256": "a369e5bc59e35fcbb5102bab022af8ba89746378579b8cdbc16a135b7152a619",
+      "size": 6133
+    },
+    "pint-ae/trn-invoice/example/Doc-level-charge-Z-category.xml": {
+      "sha256": "39dd969605a03c911a90bbe2da638c4a68d4250fb2b89e18b19b321d174adcca",
+      "size": 6203
+    },
+    "pint-ae/trn-invoice/example/Exports.-.predefined.endpoint.xml": {
+      "sha256": "6414615bf143e1d63a97f725215be78dd704a2777324fc397b51cbf597400e23",
+      "size": 7919
+    },
+    "pint-ae/trn-invoice/example/Exports.xml": {
+      "sha256": "1ff14a0c5184452f815efeb22992f761c12bf8d1a1c05c3a6af3de5c1c490d60",
+      "size": 7838
+    },
+    "pint-ae/trn-invoice/example/Margin scheme.xml": {
+      "sha256": "731188b6b676fc09b24605eec06caf5f2c21efcfa4e1393d796fcd466e1ebaf3",
+      "size": 6223
+    },
+    "pint-ae/trn-invoice/example/Seller-PAS-identifier.xml": {
+      "sha256": "57674a5059b9cf09d03b258be967fcae3b18c36f1e7452cfff5436a7175f6492",
+      "size": 5646
+    },
+    "pint-ae/trn-invoice/example/Seller-TIN-identifier.xml": {
+      "sha256": "a4020cc088636c5437f32fa4afe969ef6bffcd912f5eeb8f5e6656b9ca75ea07",
+      "size": 5840
+    },
+    "pint-ae/trn-invoice/example/Standard invoice Mandatory fields.xml": {
+      "sha256": "b2de2b711a08f753c00f302d4b730b2b3b86e1852561623a4fd003576342c651",
+      "size": 5242
+    },
+    "pint-ae/trn-invoice/example/Standard tax invoice.xml": {
+      "sha256": "e585cfa7267d74f825619d31d427adb0096a01a3b4b3a03fc61caa376ad8f582",
+      "size": 10432
+    },
+    "pint-ae/trn-invoice/example/Standard.invoice.-.Extensive.xml": {
+      "sha256": "1e44829036d618c969cd62d808d87b96d22f0f6a19cca35999de6f6e9850c05a",
+      "size": 33603
+    },
+    "pint-ae/trn-invoice/example/Standard.tax.invoice.-.predefined.endpoint.xml": {
+      "sha256": "a6f4aae738636b5c2b402a37df330a87848de97d9aa3d05115ae994c4ee466b6",
+      "size": 10432
+    },
+    "pint-ae/trn-invoice/example/Summary tax invoice.xml": {
+      "sha256": "79f699a8f1045fb696990b7a317dca07a2d0abcaba7d8222afc76d3e4c60604c",
+      "size": 12169
+    },
+    "pint-ae/trn-invoice/example/Supply involving free trade zone.xml": {
+      "sha256": "0af67683eabd235266b5a8139174f31f0681ed8454f35f7dda1df95f31db87b2",
+      "size": 7590
+    },
+    "pint-ae/trn-invoice/example/Supply through e-commerce.xml": {
+      "sha256": "561ea0a3498afc0103c71617fdedecc83b52ade14ef27d28856569dccbeedcda",
+      "size": 10410
+    },
+    "pint-ae/trn-invoice/example/Supply under Reverse charge mechanism.xml": {
+      "sha256": "f2e749671c7f1c28f9999388c545c815ec72c19771e951b92945da200794dc26",
+      "size": 6536
+    },
+    "pint-ae/trn-invoice/example/Zero rated supplies.xml": {
+      "sha256": "652749ac0e790aed9ca544d0ba1b08da9542fbd23e416baf85e1bcb1b43cc5bb",
+      "size": 5583
+    },
+    "pint-ae/trn-invoice/schematron/PINT-UBL-validation-preprocessed.xslt": {
+      "sha256": "b6557c207f1cccaebf32b67ae0d50b309192751b58ddd22fa5af90c6d45f7d16",
+      "size": 243710
+    },
+    "pint-ae/trn-invoice/schematron/PINT-jurisdiction-aligned-rules.xslt": {
+      "sha256": "da931f161362fe26bb9f5a1e519cd44758e5cba977584800b806c09bcf1b807b",
+      "size": 200074
+    },
+    "ubl-2.1/xsd/common/CCTS_CCT_SchemaModule-2.1.xsd": {
+      "sha256": "dd546e4809df86b6445589f69f0d6c9df162840ae386574ddfc1da7638103e15",
+      "size": 45268
+    },
+    "ubl-2.1/xsd/common/UBL-CommonAggregateComponents-2.1.xsd": {
+      "sha256": "939172ad8dd057cd403e7f763f6532184dd5ed4b9de24c42ebb35db4792ba613",
+      "size": 2420444
+    },
+    "ubl-2.1/xsd/common/UBL-CommonBasicComponents-2.1.xsd": {
+      "sha256": "bd4ad043ee1d9da1c7f8018dabf739cfafdfb59143d0d16b9ef769e6b7c408a7",
+      "size": 219895
+    },
+    "ubl-2.1/xsd/common/UBL-CommonExtensionComponents-2.1.xsd": {
+      "sha256": "ad7a4e490978adfbcfc5ec0bb20941cf11ac960ccf0c4de8791a7c731a8dbe87",
+      "size": 9491
+    },
+    "ubl-2.1/xsd/common/UBL-CommonSignatureComponents-2.1.xsd": {
+      "sha256": "3db472305f029bba5c1ae157bfd0178f715c3f9b94bd8e6c557dbce5e88da874",
+      "size": 5548
+    },
+    "ubl-2.1/xsd/common/UBL-ExtensionContentDataType-2.1.xsd": {
+      "sha256": "fcee77a11870208e6377ea6311b9f2a050bca24bdad8606ea02d71e9f9e72f8d",
+      "size": 4314
+    },
+    "ubl-2.1/xsd/common/UBL-QualifiedDataTypes-2.1.xsd": {
+      "sha256": "7dcb156e610239c97ae70940cf4653b88e48c3595bf5f56a2204a32e2893e6cf",
+      "size": 3590
+    },
+    "ubl-2.1/xsd/common/UBL-SignatureAggregateComponents-2.1.xsd": {
+      "sha256": "17bb6b62d709b4fd81449a37655af36aa6a1276ad4fdb1b2e249a5ed4b7c2172",
+      "size": 7784
+    },
+    "ubl-2.1/xsd/common/UBL-SignatureBasicComponents-2.1.xsd": {
+      "sha256": "cef924d7ba3d1d8ade14469325cde1364f8c174e46f0198ec02da8e9e748a489",
+      "size": 4207
+    },
+    "ubl-2.1/xsd/common/UBL-UnqualifiedDataTypes-2.1.xsd": {
+      "sha256": "09052d406b4293e2a5f9c2bfee6df10ad4d8d5f0b36e24a6349d7f7936d89eb6",
+      "size": 27300
+    },
+    "ubl-2.1/xsd/common/UBL-XAdESv132-2.1.xsd": {
+      "sha256": "a4f726bcf8cc3f7d9ffa4dab99e005535a8e8b60dced1e5d94578d2e05afa96e",
+      "size": 21664
+    },
+    "ubl-2.1/xsd/common/UBL-XAdESv141-2.1.xsd": {
+      "sha256": "1fa4625e9cefcb7a9abb5ac1b64315547450031eece8a55bd584e4ba4b79dbc1",
+      "size": 1316
+    },
+    "ubl-2.1/xsd/common/UBL-xmldsig-core-schema-2.1.xsd": {
+      "sha256": "101909c9f06456d61ddcc4fb982f1d40dc357b439f393b1a2eb46e42acd60809",
+      "size": 10750
+    },
+    "ubl-2.1/xsd/maindoc/UBL-CreditNote-2.1.xsd": {
+      "sha256": "a54651b1225052f811bf2ba01346f13f2454e7cc3e0be290c91dd680dc7b7b1a",
+      "size": 57697
+    },
+    "ubl-2.1/xsd/maindoc/UBL-Invoice-2.1.xsd": {
+      "sha256": "40fae8cb436f3a9506d7acce65ba162caef3b0bed4d5cbc0992b2153ded4edf4",
+      "size": 60178
+    }
+  },
+  "version": "kmee-pint-ae-1.0.4-ubl-2.1"
+}

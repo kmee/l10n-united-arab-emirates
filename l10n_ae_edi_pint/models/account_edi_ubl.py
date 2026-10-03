@@ -10,6 +10,16 @@ class AccountEdiUblUae(models.AbstractModel):
     _inherit = "account.edi.ubl_pint"
     _description = "UAE PINT Billing"
 
+    def _export_invoice(self, invoice):
+        result = super()._export_invoice(invoice)
+        if isinstance(result, dict):
+            # OCB's pinned API returns export values instead of XML/errors.
+            self._validate_taxes(invoice.invoice_line_ids.tax_ids)
+            content = self._etree_to_string(self._vals_to_etree(result))
+            errors = {value for value in result["constraints"].values() if value}
+            return content, errors
+        return result
+
     def _init_invoice_export_values(self, invoice):
         vals = super()._init_invoice_export_values(invoice)
         # Pinned public 20.0 mixes new and legacy currency keys in UBL/PINT.
