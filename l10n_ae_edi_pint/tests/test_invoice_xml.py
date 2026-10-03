@@ -19,6 +19,160 @@ NS = {
 
 @tagged("post_install", "-at_install")
 class TestUaeInvoiceXml(AccountTestInvoicingCommon):
+    def _foreign_received_fixture(self):
+        usd = self.env.ref("base.USD")
+        usd.active = True
+        rate = self.env["res.currency.rate"].create(
+            {
+                "currency_id": usd.id,
+                "company_id": self.env.company.id,
+                "name": "2019-01-01",
+                "rate": 1 / 3.6725,
+            }
+        )
+        source = self.init_invoice(
+            "out_invoice",
+            amounts=[100],
+            taxes=self.tax_sale_a,
+            currency=usd,
+            post=True,
+        )
+        source.write(
+            {
+                "l10n_ae_tax_exchange_rate": "3.672500",
+                "l10n_ae_tax_exchange_date": source.invoice_date,
+                "l10n_ae_tax_exchange_source": "SYNTH-RECEIVED-FISCAL-QUOTE",
+                "l10n_ae_fiscal_uuid": "aaaaaaac-1111-4111-8111-111111111111",
+            }
+        )
+        return self._received_test_xml(source), rate, source
+
+    def test_received_usd_partial_credit_preserves_aed_facts_and_original_reference(
+        self,
+    ):
+        tree, _rate, source = self._foreign_received_fixture()
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {"name": "Incoming USD credit"}
+        )
+        inbox_model = self.env["l10n_ae.edi.inbox"]
+        original = inbox_model.receive_controlled_document(
+            binding.id,
+            "usd-credit-original",
+            etree.tostring(tree),
+        )
+        self.assertTrue(original.action_process(), original.diagnostic)
+        credit = source.copy(
+            {
+                "move_type": "out_refund",
+                "invoice_date": source.invoice_date,
+                "reversed_entry_id": source.id,
+                "l10n_ae_credit_reason": "DL8.61.1.C",
+                "l10n_ae_fiscal_uuid": "aaaaaaac-5555-4555-8555-555555555555",
+                "l10n_ae_tax_exchange_rate": "3.672500",
+                "l10n_ae_tax_exchange_date": source.invoice_date,
+                "l10n_ae_tax_exchange_source": "SYNTH-RECEIVED-CREDIT-QUOTE",
+            }
+        )
+        credit.invoice_line_ids.price_unit = 40
+        credit.action_post()
+        content = etree.tostring(self._received_test_xml(credit))
+        incoming = inbox_model.receive_controlled_document(
+            binding.id, "usd-credit", content
+        )
+        self.assertTrue(incoming.action_process(), incoming.diagnostic)
+        refund = incoming.move_id
+        self.assertEqual((refund.move_type, refund.state), ("in_refund", "draft"))
+        self.assertEqual((refund.currency_id.name, refund.amount_total), ("USD", 42))
+        self.assertEqual(refund.reversed_entry_id, original.move_id)
+        self.assertEqual(refund.l10n_ae_credit_reason, "DL8.61.1.C")
+        self.assertEqual(refund.l10n_ae_received_tax_exchange_rate, "3.672500")
+        self.assertEqual(
+            (
+                refund.l10n_ae_received_tax_amount,
+                refund.l10n_ae_received_tax_inclusive_amount,
+            ),
+            (7.35, 154.25),
+        )
+        self.assertEqual(incoming.original_xml.content, content)
+        self.assertFalse(refund.l10n_ae_tax_exchange_rate)
+        self.assertFalse(refund.l10n_ae_transmission_id)
+
+    def test_received_inactive_document_currency_stays_in_review(self):
+        tree, _rate, _source = self._foreign_received_fixture()
+        self.env.ref("base.CHF").active = False
+        tree.find("cbc:DocumentCurrencyCode", NS).text = "CHF"
+        tree.find("cac:TaxExchangeRate/cbc:SourceCurrencyCode", NS).text = "CHF"
+        for node in tree.xpath("//*[@currencyID='USD']"):
+            node.set("currencyID", "CHF")
+        binding = self.env["l10n_ae.edi.binding"].create({"name": "Inactive CHF"})
+        inbox = self.env["l10n_ae.edi.inbox"].receive_controlled_document(
+            binding.id,
+            "inactive-chf",
+            etree.tostring(tree),
+        )
+        self.assertFalse(inbox.action_process())
+        self.assertEqual(inbox.state, "review")
+        self.assertIn("document currency", inbox.diagnostic)
+        self.assertFalse(inbox.move_id)
+        self.assertFalse(self.env.ref("base.CHF").active)
+
+    def test_received_usd_bill_preserves_sender_aed_facts_separately_from_local_review(
+        self,
+    ):
+        tree, rate, _source = self._foreign_received_fixture()
+        content = etree.tostring(tree)
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {"name": "Incoming USD evidence"}
+        )
+        inbox = self.env["l10n_ae.edi.inbox"].receive_controlled_document(
+            binding.id,
+            "received-usd-1",
+            content,
+        )
+        self.assertTrue(inbox.action_process(), inbox.diagnostic)
+        bill = inbox.move_id
+        self.assertEqual(bill.currency_id, self.env.ref("base.USD"))
+        self.assertEqual(
+            (bill.move_type, bill.state, bill.amount_total),
+            ("in_invoice", "draft", 105),
+        )
+        self.assertEqual(bill.l10n_ae_received_currency_id, self.env.ref("base.USD"))
+        self.assertEqual(bill.l10n_ae_received_payable_amount, 105)
+        self.assertEqual(bill.l10n_ae_received_tax_exchange_rate, "3.672500")
+        self.assertEqual(
+            bill.l10n_ae_received_fiscal_currency_id, self.env.ref("base.AED")
+        )
+        self.assertEqual(
+            (
+                bill.l10n_ae_received_tax_amount,
+                bill.l10n_ae_received_tax_inclusive_amount,
+            ),
+            (18.36, 385.61),
+        )
+        self.assertFalse(bill.l10n_ae_tax_exchange_rate)
+        self.assertFalse(bill.l10n_ae_tax_exchange_date)
+        self.assertFalse(bill.l10n_ae_tax_exchange_source)
+        self.assertEqual(inbox.original_xml.content, content)
+        for name, value in (
+            ("l10n_ae_received_tax_exchange_rate", "3.700000"),
+            ("l10n_ae_received_fiscal_currency_id", self.env.ref("base.USD").id),
+            ("l10n_ae_received_tax_amount", 19),
+            ("l10n_ae_received_tax_inclusive_amount", 400),
+        ):
+            with self.subTest(name=name), self.assertRaisesRegex(UserError, "received"):
+                bill.write({name: value})
+        rate.rate = 1 / 3.7
+        self.assertEqual(bill.l10n_ae_received_tax_exchange_rate, "3.672500")
+        self.assertEqual(bill.l10n_ae_received_tax_amount, 18.36)
+        self.env.company.write(
+            {
+                "l10n_ae_edi_auto_prepare": True,
+                "l10n_ae_edi_binding_id": binding.id,
+            }
+        )
+        bill.action_post()
+        self.assertFalse(bill.l10n_ae_transmission_id)
+
     def _received_test_xml(self, source=None):
         if source is None:
             source = self.init_invoice(
@@ -34,6 +188,137 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         supplier.append(customer_party)
         customer.append(supplier_party)
         return tree
+
+    def test_received_fx_header_discrepancies_stay_in_review_without_a_draft(self):
+        original, _rate, _source = self._foreign_received_fixture()
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {"name": "Incoming FX arithmetic"}
+        )
+        cases = (
+            ("cac:TaxTotal/cbc:TaxAmount[@currencyID='AED']", "19.00"),
+            (
+                "cac:AdditionalDocumentReference[cbc:DocumentTypeCode='aedtotal-incl-vat']/cbc:DocumentDescription",
+                "385.62",
+            ),
+            ("cac:TaxExchangeRate/cbc:CalculationRate", "0"),
+            ("cac:TaxExchangeRate/cbc:CalculationRate", "3.700000"),
+            (
+                "cac:AdditionalDocumentReference[cbc:DocumentTypeCode='aedtotal-incl-vat']/cbc:DocumentDescription",
+                "not-a-number",
+            ),
+            (
+                "cac:AdditionalDocumentReference[cbc:DocumentTypeCode='aedtotal-incl-vat']/cbc:DocumentDescription",
+                "NaN",
+            ),
+        )
+        before = self.env["account.move"].search_count([])
+        for index, (xpath, value) in enumerate(cases):
+            with self.subTest(index=index):
+                tree = etree.fromstring(etree.tostring(original))
+                tree.find("cbc:UUID", NS).text = f"aaaaaaac-2222-4222-8222-{index:012d}"
+                tree.find(xpath, NS).text = value
+                content = etree.tostring(tree)
+                inbox = self.env["l10n_ae.edi.inbox"].receive_controlled_document(
+                    binding.id,
+                    f"bad-fx-header-{index}",
+                    content,
+                )
+                self.assertFalse(inbox.action_process())
+                self.assertEqual(inbox.state, "review")
+                self.assertFalse(inbox.move_id)
+                self.assertIn("fiscal AED", inbox.diagnostic)
+                self.assertEqual(inbox.original_xml.content, content)
+                self.assertEqual(self.env["account.move"].search_count([]), before)
+
+    def test_received_fx_line_currency_and_conversion_require_review(self):
+        original, _rate, _source = self._foreign_received_fixture()
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {"name": "Incoming FX line arithmetic"}
+        )
+        cases = (
+            ("cac:InvoiceLine/cac:ItemPriceExtension/cbc:Amount", "385.62", None),
+            (
+                "cac:InvoiceLine/cac:ItemPriceExtension/cac:TaxTotal/cbc:TaxAmount",
+                "18.37",
+                None,
+            ),
+            ("cac:InvoiceLine/cac:ItemPriceExtension/cbc:Amount", None, "USD"),
+            (
+                "cac:InvoiceLine/cac:ItemPriceExtension/cac:TaxTotal/cbc:TaxAmount",
+                None,
+                "USD",
+            ),
+        )
+        for index, (xpath, value, currency) in enumerate(cases):
+            with self.subTest(index=index):
+                tree = etree.fromstring(etree.tostring(original))
+                tree.find("cbc:UUID", NS).text = f"aaaaaaac-3333-4333-8333-{index:012d}"
+                node = tree.find(xpath, NS)
+                if value:
+                    node.text = value
+                if currency:
+                    node.set("currencyID", currency)
+                content = etree.tostring(tree)
+                inbox = self.env["l10n_ae.edi.inbox"].receive_controlled_document(
+                    binding.id,
+                    f"bad-fx-line-{index}",
+                    content,
+                )
+                self.assertFalse(inbox.action_process())
+                self.assertEqual(inbox.state, "review")
+                self.assertFalse(inbox.move_id)
+                self.assertIn("fiscal AED", inbox.diagnostic)
+                self.assertEqual(inbox.original_xml.content, content)
+
+    def test_received_fractional_quantity_retains_unrounded_aed_line_values(self):
+        tree, _rate, _source = self._foreign_received_fixture()
+        # Independently worked incoming vector, not derived from the local emitter:
+        # 10 * 1.00001 = 10.0001 USD; VAT .500005; gross 10.500105.
+        # Raw AED gross 38.5616356125 / VAT 1.8362683625; headers38.56/1.84.
+        values = {
+            "cbc:UUID": "aaaaaaac-4444-4444-8444-444444444444",
+            "cac:InvoiceLine/cbc:InvoicedQuantity": "1.00001",
+            "cac:InvoiceLine/cbc:LineExtensionAmount": "10.00",
+            "cac:InvoiceLine/cac:Price/cbc:PriceAmount": "10.0",
+            "cac:InvoiceLine/cac:Price/cac:AllowanceCharge/cbc:BaseAmount": "10.0",
+            "cac:InvoiceLine/cac:ItemPriceExtension/cbc:Amount": "38.5616356125",
+            "cac:InvoiceLine/cac:ItemPriceExtension/cac:TaxTotal/cbc:TaxAmount": (
+                "1.8362683625"
+            ),
+            "cac:TaxTotal/cbc:TaxAmount[@currencyID='USD']": "0.50",
+            "cac:TaxTotal/cbc:TaxAmount[@currencyID='AED']": "1.84",
+            "cac:TaxTotal/cac:TaxSubtotal/cbc:TaxableAmount": "10.00",
+            "cac:TaxTotal/cac:TaxSubtotal/cbc:TaxAmount": "0.50",
+            "cac:LegalMonetaryTotal/cbc:LineExtensionAmount": "10.00",
+            "cac:LegalMonetaryTotal/cbc:TaxExclusiveAmount": "10.00",
+            "cac:LegalMonetaryTotal/cbc:TaxInclusiveAmount": "10.50",
+            "cac:LegalMonetaryTotal/cbc:PayableAmount": "10.50",
+            (
+                "cac:AdditionalDocumentReference"
+                "[cbc:DocumentTypeCode='aedtotal-incl-vat']/cbc:DocumentDescription"
+            ): "38.56",
+        }
+        for xpath, value in values.items():
+            tree.find(xpath, NS).text = value
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {"name": "Incoming fractional quantity"}
+        )
+        inbox = self.env["l10n_ae.edi.inbox"].receive_controlled_document(
+            binding.id,
+            "fractional-quantity",
+            etree.tostring(tree),
+        )
+        self.assertTrue(inbox.action_process(), inbox.diagnostic)
+        bill = inbox.move_id
+        self.assertEqual(bill.invoice_line_ids.quantity, 1.00001)
+        self.assertEqual(bill.amount_total, 10.50)
+        self.assertEqual(
+            (
+                bill.l10n_ae_received_tax_amount,
+                bill.l10n_ae_received_tax_inclusive_amount,
+            ),
+            (1.84, 38.56),
+        )
 
     def test_received_partial_credit_links_the_supplier_bill_and_preserves_reason(self):
         original = self.init_invoice(

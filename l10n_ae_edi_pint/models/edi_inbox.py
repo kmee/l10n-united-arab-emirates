@@ -3,7 +3,7 @@
 import hashlib
 import os
 import re
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 
 from odoo import api, fields, models
 from odoo.exceptions import AccessError, UserError
@@ -211,7 +211,6 @@ class UaeEdiInbox(models.Model):
         if (
             not supported
             or tree.findtext("./{*}ProfileExecutionID") != "00000000"
-            or tree.findtext("./{*}DocumentCurrencyCode") != "AED"
             or tree.findall("./{*}AllowanceCharge")
             or not is_credit
             and float(tree.findtext("./{*}LegalMonetaryTotal/{*}PrepaidAmount") or 0)
@@ -220,6 +219,15 @@ class UaeEdiInbox(models.Model):
             raise UserError(
                 self.env._("This received UAE scenario requires review before import.")
             )
+        currency_code = tree.findtext("./{*}DocumentCurrencyCode")
+        currency = self.env["res.currency"].search(
+            [("name", "=", currency_code), ("active", "=", True)], limit=1
+        )
+        if not currency:
+            raise UserError(
+                self.env._("The received document currency requires review.")
+            )
+        fiscal_values = self._received_fiscal_values(tree, currency_code)
         recipient_role = "AccountingSupplier" if selfbilling else "AccountingCustomer"
         endpoint = tree.find(f"./{{*}}{recipient_role}Party/{{*}}Party/{{*}}EndpointID")
         if (
@@ -307,7 +315,8 @@ class UaeEdiInbox(models.Model):
             "l10n_ae_origin_system": "controlled-inbound",
             "l10n_ae_origin_document_id": f"{self.binding_id.id}:{self.remote_id}",
             "l10n_ae_fiscal_uuid": tree.findtext("./{*}UUID"),
-            "l10n_ae_received_currency_id": self.env.ref("base.AED").id,
+            "l10n_ae_received_currency_id": currency.id,
+            **fiscal_values,
             "l10n_ae_received_prepaid_amount": float(
                 tree.findtext("./{*}LegalMonetaryTotal/{*}PrepaidAmount") or 0
             ),
@@ -363,6 +372,123 @@ class UaeEdiInbox(models.Model):
             }
         )
         return move
+
+    def _received_fiscal_values(self, tree, currency_code):
+        def amount(xpath):
+            return self._received_fiscal_amount(xpath, tree)
+
+        try:
+            quantum = Decimal("0.01")
+            rate_text = tree.findtext("./{*}TaxExchangeRate/{*}CalculationRate")
+            rate = Decimal(1)
+            vat = amount("./{*}TaxTotal/{*}TaxAmount[@currencyID='AED']")
+            gross = amount("./{*}LegalMonetaryTotal/{*}TaxInclusiveAmount")
+            if currency_code != "AED":
+                if not re.fullmatch(r"[0-9]+(?:\.[0-9]{1,6})?", rate_text or ""):
+                    raise ValueError("invalid_fiscal_rate")
+                rate = Decimal(rate_text)
+                if rate <= 0:
+                    raise ValueError("nonpositive_fiscal_rate")
+                gross_path = (
+                    "./{*}AdditionalDocumentReference"
+                    "[{*}DocumentTypeCode='aedtotal-incl-vat']/{*}DocumentDescription"
+                )
+                declared_gross = amount(gross_path)
+                if not re.fullmatch(
+                    r"-?[0-9]+(?:\.[0-9]{1,2})?", tree.findtext(gross_path) or ""
+                ):
+                    raise ValueError("invalid_fiscal_gross")
+                document_vat = amount(
+                    f"./{{*}}TaxTotal/{{*}}TaxAmount[@currencyID='{currency_code}']"
+                )
+                if vat != (document_vat * rate).quantize(
+                    quantum, rounding=ROUND_HALF_UP
+                ):
+                    raise ValueError("fiscal_vat_mismatch")
+                if declared_gross != (gross * rate).quantize(
+                    quantum, rounding=ROUND_HALF_UP
+                ):
+                    raise ValueError("fiscal_gross_mismatch")
+                gross = declared_gross
+            self._check_received_fiscal_lines(tree, rate)
+        except (InvalidOperation, ValueError) as error:
+            raise UserError(
+                self.env._(
+                    "Received fiscal AED amounts or exchange rate require review."
+                )
+            ) from error
+        return {
+            "l10n_ae_received_fiscal_currency_id": self.env.ref("base.AED").id,
+            "l10n_ae_received_tax_exchange_rate": rate_text
+            if currency_code != "AED"
+            else False,
+            "l10n_ae_received_tax_amount": float(vat),
+            "l10n_ae_received_tax_inclusive_amount": float(gross),
+        }
+
+    @staticmethod
+    def _received_fiscal_amount(xpath, parent):
+        nodes = parent.findall(xpath)
+        if len(nodes) != 1:
+            raise ValueError("ambiguous_fiscal_amount")
+        value = Decimal(nodes[0].text or "")
+        if not value.is_finite():
+            raise ValueError("nonfinite_fiscal_amount")
+        return value
+
+    def _check_received_fiscal_lines(self, tree, rate):
+        amount = self._received_fiscal_amount
+        precision = Decimal("0.000001")
+        lines = tree.findall("./{*}InvoiceLine") + tree.findall("./{*}CreditNoteLine")
+        for line in lines:
+            categories = line.findall("./{*}Item/{*}ClassifiedTaxCategory")
+            if len(categories) != 1:
+                raise ValueError("ambiguous_line_tax_category")
+            code = categories[0].findtext("./{*}ID")
+            quantity_path = (
+                "./{*}InvoicedQuantity"
+                if line.find("./{*}InvoicedQuantity") is not None
+                else "./{*}CreditedQuantity"
+            )
+            base_quantity = (
+                amount("./{*}Price/{*}BaseQuantity", line)
+                if line.find("./{*}Price/{*}BaseQuantity") is not None
+                else Decimal(1)
+            )
+            if base_quantity <= 0:
+                raise ValueError("nonpositive_price_base_quantity")
+            net = (
+                amount("./{*}Price/{*}PriceAmount", line)
+                * amount(quantity_path, line)
+                / base_quantity
+            )
+            for adjustment in line.findall("./{*}AllowanceCharge"):
+                adjustment_amount = amount("./{*}Amount", adjustment)
+                net += (
+                    adjustment_amount
+                    if adjustment.findtext("./{*}ChargeIndicator") in {"true", "1"}
+                    else -adjustment_amount
+                )
+            tax = (
+                net * Decimal(categories[0].findtext("./{*}Percent") or "0") / 100
+                if code == "S"
+                else Decimal(0)
+            )
+            gross_node = line.find("./{*}ItemPriceExtension/{*}Amount")
+            if gross_node is None or gross_node.get("currencyID") != "AED":
+                raise ValueError("invalid_line_fiscal_currency")
+            if amount("./{*}ItemPriceExtension/{*}Amount", line).quantize(
+                precision
+            ) != ((net + tax) * rate).quantize(precision):
+                raise ValueError("line_fiscal_gross_mismatch")
+            if code != "E":
+                vat_node = line.find("./{*}ItemPriceExtension/{*}TaxTotal/{*}TaxAmount")
+                if vat_node is None or vat_node.get("currencyID") != "AED":
+                    raise ValueError("invalid_line_fiscal_vat_currency")
+                if amount(
+                    "./{*}ItemPriceExtension/{*}TaxTotal/{*}TaxAmount", line
+                ).quantize(precision) != (tax * rate).quantize(precision):
+                    raise ValueError("line_fiscal_vat_mismatch")
 
     def _resolve_received_selfbilling_agreement(self, tree):
         importer = self.env["account.edi.ubl.kmee_ae.inbound"]

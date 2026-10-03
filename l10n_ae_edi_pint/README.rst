@@ -103,6 +103,14 @@ blocks preparation for accounting review. The rate source/date are human
 references; automatic CBUAE acquisition and full tax-point/rounding
 policy remain pending.
 
+For a received foreign-currency bill, review **Amounts Declared by the
+Sender** in the UAE tab. Document currency, declared exchange rate,
+fiscal AED VAT and gross amounts remain protected. They do not set the
+local reviewed quote or create a payment. Currency must already be
+active; inconsistent fiscal values stay in the inbox for review. Worked
+USD invoice/partial-credit vectors are tested; full combinations remain
+pending.
+
 Known issues / Roadmap
 ======================
 
