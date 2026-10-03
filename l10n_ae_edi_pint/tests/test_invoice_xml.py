@@ -99,6 +99,36 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
                 binding.id, "read-only-2", b"<Invoice/>"
             )
 
+    def test_received_document_bytes_are_isolated_from_other_companies(self):
+        other = (
+            self.env["res.company"]
+            .with_context(install_demo=True)
+            .create({"name": "Other received-document entity"})
+        )
+        foreign_binding = (
+            self.env["l10n_ae.edi.binding"]
+            .sudo()
+            .create({"name": "Other receiving ASP", "company_id": other.id})
+        )
+        foreign = (
+            self.env["l10n_ae.edi.inbox"]
+            .sudo()
+            .receive_controlled_document(
+                foreign_binding.id, "foreign-original", b"<Invoice/>"
+            )
+        )
+        reader = new_test_user(
+            self.env,
+            login="uae-inbox-company-reader",
+            groups="account.group_account_readonly",
+            company_id=self.env.company.id,
+            company_ids=[(6, 0, self.env.company.ids)],
+        )
+        with self.assertRaises(AccessError):
+            foreign.with_user(reader).with_context(
+                allowed_company_ids=self.env.company.ids
+            ).read(["original_xml"])
+
     def test_received_identity_with_changed_bytes_preserves_both_for_review(self):
         binding = self.env["l10n_ae.edi.binding"].create({"name": "Inbound replay ASP"})
         inbox_model = self.env["l10n_ae.edi.inbox"]

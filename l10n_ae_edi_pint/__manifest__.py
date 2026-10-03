@@ -14,6 +14,7 @@
         "security/ir.access.csv",
         "security/inbox_security.xml",
         "views/account_move_views.xml",
+        "views/edi_inbox_views.xml",
     ],
     "external_dependencies": {
         "python": ["packaging", "lxml>=5.2,<7", "saxonche>=13.0,<14"]

@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<odoo>
+    <record id="edi_inbox_form" model="ir.ui.view">
+        <field name="name">l10n_ae.edi.inbox.form</field>
+        <field name="model">l10n_ae.edi.inbox</field>
+        <field name="arch" type="xml">
+            <form
+                string="Received UAE Document"
+                create="false"
+                edit="false"
+                delete="false"
+            >
+                <header>
+                    <button
+                        name="action_process"
+                        type="object"
+                        string="Process Received Document"
+                        groups="account.group_account_manager"
+                        invisible="move_id or identity_conflict"
+                    />
+                    <button
+                        name="action_open_move"
+                        type="object"
+                        string="Open Supplier Bill"
+                        invisible="not move_id"
+                    />
+                    <field
+                        name="state"
+                        widget="statusbar"
+                        statusbar_visible="received,review,processed"
+                    />
+                </header>
+                <sheet>
+                    <group>
+                        <field name="remote_id" />
+                        <field name="company_id" groups="base.group_multi_company" />
+                        <field name="binding_id" />
+                        <field name="received_at" />
+                        <field name="original_xml" />
+                        <field name="xml_hash" />
+                        <field name="move_id" />
+                        <field name="identity_conflict" />
+                    </group>
+                    <group string="Review Diagnostic" invisible="not diagnostic">
+                        <field name="diagnostic" nolabel="1" />
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+    <record id="edi_inbox_list" model="ir.ui.view">
+        <field name="name">l10n_ae.edi.inbox.list</field>
+        <field name="model">l10n_ae.edi.inbox</field>
+        <field name="arch" type="xml">
+            <list
+                create="false"
+                edit="false"
+                delete="false"
+                decoration-warning="state == 'review'"
+            >
+                <field name="remote_id" />
+                <field name="company_id" groups="base.group_multi_company" />
+                <field name="binding_id" />
+                <field name="received_at" />
+                <field name="state" />
+                <field name="move_id" />
+            </list>
+        </field>
+    </record>
+    <record id="edi_inbox_action" model="ir.actions.act_window">
+        <field name="name">Received UAE Documents</field>
+        <field name="res_model">l10n_ae.edi.inbox</field>
+        <field name="view_mode">list,form</field>
+    </record>
+    <menuitem
+        id="edi_inbox_menu"
+        name="Received UAE Documents"
+        parent="account.menu_finance"
+        action="edi_inbox_action"
+        sequence="30"
+        groups="account.group_account_invoice,account.group_account_readonly"
+    />
+</odoo>

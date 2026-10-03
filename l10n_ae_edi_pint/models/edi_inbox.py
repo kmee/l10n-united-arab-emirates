@@ -23,12 +23,20 @@ class UaeEdiInbox(models.Model):
     _rec_name = "remote_id"
 
     binding_id = fields.Many2one(
-        "l10n_ae.edi.binding", required=True, check_company=True, ondelete="restrict"
+        "l10n_ae.edi.binding",
+        string="ASP Binding",
+        required=True,
+        check_company=True,
+        ondelete="restrict",
     )
     company_id = fields.Many2one("res.company", required=True, index=True)
-    remote_id = fields.Char(required=True, readonly=True, index=True)
-    original_xml = fields.Binary(required=True, readonly=True, attachment=False)
-    xml_hash = fields.Char(required=True, readonly=True)
+    remote_id = fields.Char(
+        string="ASP Document Reference", required=True, readonly=True, index=True
+    )
+    original_xml = fields.Binary(
+        string="Original XML", required=True, readonly=True, attachment=False
+    )
+    xml_hash = fields.Char(string="XML SHA-256", required=True, readonly=True)
     received_at = fields.Datetime(required=True, readonly=True)
     state = fields.Selection(
         [
@@ -41,9 +49,13 @@ class UaeEdiInbox(models.Model):
         readonly=True,
     )
     diagnostic = fields.Text(readonly=True)
-    identity_conflict = fields.Boolean(readonly=True)
+    identity_conflict = fields.Boolean(string="Remote ID Conflict", readonly=True)
     move_id = fields.Many2one(
-        "account.move", readonly=True, check_company=True, ondelete="restrict"
+        "account.move",
+        string="Supplier Bill",
+        readonly=True,
+        check_company=True,
+        ondelete="restrict",
     )
 
     _received_identity = models.UniqueIndex(
@@ -153,6 +165,20 @@ class UaeEdiInbox(models.Model):
             {"state": "processed", "diagnostic": False, "move_id": move.id}
         )
         return True
+
+    def action_open_move(self):
+        self.ensure_one()
+        self.check_access("read")
+        if not self.move_id:
+            raise UserError(self.env._("No supplier bill has been created yet."))
+        self.move_id.check_access("read")
+        return {
+            "type": "ir.actions.act_window",
+            "res_model": "account.move",
+            "res_id": self.move_id.id,
+            "view_mode": "form",
+            "target": "current",
+        }
 
     def _process_received_xml(self):
         content = self.original_xml.content
