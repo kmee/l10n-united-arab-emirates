@@ -5,3 +5,4 @@ from . import res_partner
 from . import account_move
 from . import edi_binding
 from . import edi_transmission
+from . import edi_attempt

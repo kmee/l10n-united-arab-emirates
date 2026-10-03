@@ -1,0 +1,122 @@
+# Copyright 2026 KMEE
+# License AGPL-3.0 or later (https://www.gnu.org/licenses/agpl).
+"""Explicit transaction boundaries for KMEE's loopback-only ASP simulation."""
+
+import hashlib
+import json
+
+from psycopg2.errors import SerializationFailure
+
+from odoo import api, fields
+from odoo.exceptions import AccessError, UserError
+
+from .controlled_client import ControlledAspClient, ControlledAspError
+
+
+class ControlledExecutor:
+    """Run after accounting commit, never inside a posting hook or HTTP RPC."""
+
+    def __init__(self, registry, uid, company_id, endpoint, token, clock=None):
+        self.registry, self.uid, self.company_id = registry, uid, company_id
+        self.endpoint, self.token = endpoint, token
+        self.clock = clock or fields.Datetime.now
+
+    def _record(self, cursor, transmission_id):
+        env = api.Environment(
+            cursor, self.uid, {"allowed_company_ids": [self.company_id]}
+        )
+        if not env.user.has_group("account.group_account_manager"):
+            raise AccessError(
+                env._("Only accounting managers can execute UAE sending.")
+            )
+        record = env["l10n_ae.edi.transmission"].browse(transmission_id).exists()
+        record.ensure_one()
+        record.check_access("read")
+        if record.company_id.id != self.company_id:
+            raise AccessError(env._("The UAE transmission belongs to another company."))
+        if record.environment != "sandbox" or (
+            record.submission_state == "queued" and not record.binding_id.active
+        ):
+            raise UserError(env._("An active controlled sandbox binding is required."))
+        return record
+
+    def run_once(self, transmission_id):
+        # Read/validate frozen bytes without a row lock. No remote HTTP here.
+        with self.registry.cursor() as cursor:
+            record = self._record(cursor, transmission_id)
+            if record.submission_state == "accepted":
+                return "accepted"
+            validation = record._validate_controlled_document()
+            document = {
+                "contract_version": "kmee-controlled-1",
+                "snapshot": record.payload,
+                "snapshot_sha256": record.payload_hash,
+                "xml": record.xml_content or None,
+                "xml_sha256": record.xml_hash or None,
+            }
+            if (
+                hashlib.sha256(record.payload.encode()).hexdigest()
+                != record.payload_hash
+            ):
+                raise UserError(
+                    record.env._("Frozen UAE snapshot integrity check failed.")
+                )
+            key, provider = record.idempotency_key, record.provider
+            tin = json.loads(record.payload)["company"]["tin"]
+        client = ControlledAspClient(self.endpoint, self.token, provider)
+        # Commit the durable reservation BEFORE remote I/O; a crash leaves a lease.
+        try:
+            with self.registry.cursor() as cursor:
+                record = self._record(cursor, transmission_id).sudo()
+                claim = record._claim_controlled(
+                    self.endpoint, self.clock(), validation
+                )
+                if not claim:
+                    return record.submission_state
+                cursor.commit()
+        except SerializationFailure:
+            return "busy"
+        receipt, error_kind, evidence = None, None, None
+        try:
+            receipt = (
+                client.submit(key, document)
+                if claim["operation"] == "submit"
+                else client.lookup(tin, key)
+            )
+            evidence = receipt
+            if receipt and any(
+                receipt.get(name) != expected
+                for name, expected in {
+                    "provider": provider,
+                    "tin": tin,
+                    "request_key": key,
+                    "snapshot_sha256": document["snapshot_sha256"],
+                    "xml_sha256": document["xml_sha256"],
+                }.items()
+            ):
+                receipt, error_kind = None, "correlation"
+            if receipt and (
+                receipt.get("submission_state") != "accepted"
+                or any(
+                    receipt.get(name) != "pending"
+                    for name in (
+                        "validation_c2_state",
+                        "delivery_c3_state",
+                        "reporting_c2_state",
+                        "reporting_c3_state",
+                    )
+                )
+            ):
+                receipt, error_kind = None, "unknown"
+            if not receipt and not error_kind:
+                error_kind = "not_found"
+        except ControlledAspError as error:
+            error_kind = error.kind
+        # Unknown/not-found is never permission to POST again.
+        with self.registry.cursor() as cursor:
+            record = self._record(cursor, transmission_id).sudo()
+            result = record._finish_controlled(
+                claim["token"], receipt, error_kind, self.clock(), evidence
+            )
+            cursor.commit()
+            return result

@@ -63,6 +63,15 @@ class AccountMove(models.Model):
     )
 
     def write(self, vals):
+        if vals.get("state") in ("draft", "cancel") and self.filtered(
+            "l10n_ae_transmission_id"
+        ):
+            raise UserError(
+                self.env._(
+                    "Reconcile the frozen UAE transmission before resetting or "
+                    "cancelling this invoice."
+                )
+            )
         identity_fields = {
             "l10n_ae_transmission_id",
             "l10n_ae_origin_system",
