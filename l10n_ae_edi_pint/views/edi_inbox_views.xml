@@ -21,7 +21,7 @@
                     <button
                         name="action_open_move"
                         type="object"
-                        string="Open Supplier Bill"
+                        string="Open Accounting Document"
                         invisible="not move_id"
                     />
                     <field

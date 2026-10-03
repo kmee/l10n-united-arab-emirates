@@ -49,10 +49,10 @@ transmission.
 Accounting managers can open **Received UAE Documents**, inspect the
 preserved XML and select **Process Received Document**. A supported
 ordinary AED tax invoice creates a supplier bill in draft; **Open
-Supplier Bill** opens it for accounting review. Unknown suppliers/taxes,
-invalid XML and unsupported scenarios remain in review with diagnostics.
-The original evidence cannot be edited, and a received document cannot
-be emitted again.
+Accounting Document** opens it for accounting review. Unknown
+suppliers/taxes, invalid XML and unsupported scenarios remain in review
+with diagnostics. The original evidence cannot be edited, and a received
+document cannot be emitted again.
 
 This inbox currently receives from the separately configured KMEE
 loopback mock worker. It does not connect to an accredited provider
@@ -71,6 +71,16 @@ endpoint, legal registration number/type and issuing authority. Unknown
 identities and tax mappings stay in review. The received category and
 original currency are protected; declared amounts keep the XML currency
 even if the accounting draft is reviewed in another currency.
+
+Buyer-issued self-billed invoices and credits in AED can become draft
+customer invoices and refunds when the local company is the XML
+supplier. A manager must maintain one valid UAE agreement with local
+role **Supplier Receiving Self-Billing** for the known buyer. Existing
+matching billing drafts are reused without replacing their lines or
+origin identifiers; differences remain in review. A received self-billed
+credit needs one matching original self-billed sale. The agreement
+reference at receipt remains available after later agreement changes.
+Posting received sales never emits them again.
 
 Known issues / Roadmap
 ======================

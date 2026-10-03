@@ -112,7 +112,11 @@ class AccountEdiUblUaeInbound(models.AbstractModel):
                     )
                 )
             )
-            default = record.company_id.account_purchase_tax_id & candidates
+            default = (
+                record.company_id.account_sale_tax_id
+                if tax_type == "sale"
+                else record.company_id.account_purchase_tax_id
+            ) & candidates
             if len(default) == 1:
                 candidates = default
             if len(candidates) != 1:

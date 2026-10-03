@@ -2,6 +2,8 @@
 # License AGPL-3.0 or later (https://www.gnu.org/licenses/agpl).
 import hashlib
 import os
+import re
+from decimal import Decimal
 
 from odoo import api, fields, models
 from odoo.exceptions import AccessError, UserError
@@ -52,7 +54,7 @@ class UaeEdiInbox(models.Model):
     identity_conflict = fields.Boolean(string="Remote ID Conflict", readonly=True)
     move_id = fields.Many2one(
         "account.move",
-        string="Supplier Bill",
+        string="Accounting Document",
         readonly=True,
         check_company=True,
         ondelete="restrict",
@@ -170,7 +172,7 @@ class UaeEdiInbox(models.Model):
         self.ensure_one()
         self.check_access("read")
         if not self.move_id:
-            raise UserError(self.env._("No supplier bill has been created yet."))
+            raise UserError(self.env._("No accounting document has been linked yet."))
         self.move_id.check_access("read")
         return {
             "type": "ir.actions.act_window",
@@ -198,9 +200,16 @@ class UaeEdiInbox(models.Model):
         type_code = tree.findtext(
             "./{*}CreditNoteTypeCode" if is_credit else "./{*}InvoiceTypeCode"
         )
+        customization = tree.findtext("./{*}CustomizationID")
+        selfbilling = customization == "urn:peppol:pint:selfbilling-1@ae-1"
+        supported = (
+            selfbilling
+            and type_code == ("261" if is_credit else "389")
+            or customization == "urn:peppol:pint:billing-1@ae-1"
+            and type_code in (("381", "81") if is_credit else ("380", "480"))
+        )
         if (
-            tree.findtext("./{*}CustomizationID") != "urn:peppol:pint:billing-1@ae-1"
-            or type_code not in (("381", "81") if is_credit else ("380", "480"))
+            not supported
             or tree.findtext("./{*}ProfileExecutionID") != "00000000"
             or tree.findtext("./{*}DocumentCurrencyCode") != "AED"
             or tree.findall("./{*}AllowanceCharge")
@@ -211,7 +220,8 @@ class UaeEdiInbox(models.Model):
             raise UserError(
                 self.env._("This received UAE scenario requires review before import.")
             )
-        endpoint = tree.find("./{*}AccountingCustomerParty/{*}Party/{*}EndpointID")
+        recipient_role = "AccountingSupplier" if selfbilling else "AccountingCustomer"
+        endpoint = tree.find(f"./{{*}}{recipient_role}Party/{{*}}Party/{{*}}EndpointID")
         if (
             endpoint is None
             or endpoint.get("schemeID") != "0235"
@@ -251,7 +261,7 @@ class UaeEdiInbox(models.Model):
         journal = self.env["account.journal"].search(
             [
                 ("company_id", "=", self.company_id.id),
-                ("type", "=", "purchase"),
+                ("type", "=", "sale" if selfbilling else "purchase"),
                 ("is_self_billing", "=", False),
             ],
             limit=2,
@@ -259,65 +269,78 @@ class UaeEdiInbox(models.Model):
         if len(journal) != 1:
             raise UserError(
                 self.env._(
-                    "Select an unambiguous purchase journal before receiving UAE "
-                    "invoices."
+                    "Select an unambiguous accounting journal for the received "
+                    "UAE document's economic role."
                 )
             )
-        move = self.env["account.move"].create(
-            {
-                "company_id": self.company_id.id,
-                "journal_id": journal.id,
-                "move_type": "in_refund" if is_credit else "in_invoice",
-                "l10n_ae_document_category": "commercial"
-                if type_code in ("480", "81")
-                else "tax",
-                "l10n_ae_credit_reason": tree.findtext(
-                    "./{*}DiscrepancyResponse/{*}ResponseCode"
-                )
-                if is_credit
-                else False,
-                "l10n_ae_origin_system": "controlled-inbound",
-                "l10n_ae_origin_document_id": f"{self.binding_id.id}:{self.remote_id}",
-                "l10n_ae_fiscal_uuid": tree.findtext("./{*}UUID"),
-                "l10n_ae_received_currency_id": self.env.ref("base.AED").id,
-                "l10n_ae_received_prepaid_amount": float(
-                    tree.findtext("./{*}LegalMonetaryTotal/{*}PrepaidAmount") or 0
-                ),
-                "l10n_ae_received_payable_amount": float(
-                    tree.findtext("./{*}LegalMonetaryTotal/{*}PayableAmount")
-                ),
+        agreement = self.env["l10n_ae.selfbilling.agreement"]
+        if selfbilling:
+            partner, agreement = self._resolve_received_selfbilling_agreement(tree)
+        values = {
+            "company_id": self.company_id.id,
+            "journal_id": journal.id,
+            "move_type": ("out_refund" if is_credit else "out_invoice")
+            if selfbilling
+            else "in_refund"
+            if is_credit
+            else "in_invoice",
+            "l10n_ae_received_process": "selfbilling" if selfbilling else "billing",
+            "l10n_ae_selfbilling_agreement_id": agreement.id,
+            "l10n_ae_received_agreement_snapshot": {
+                "reference": agreement.name,
+                "local_role": agreement.local_role,
+                "start_date": fields.Date.to_string(agreement.start_date),
+                "end_date": fields.Date.to_string(agreement.end_date),
+                "scope": agreement.scope,
+                "onboarding_reference": agreement.onboarding_reference,
             }
-        )
-        move._l10n_ae_mark_received()
-        self.env["account.edi.ubl.kmee_ae.inbound"]._import_invoice_ubl_cii(
-            move, {"xml_tree": tree, "attachment": False}, new=True
-        )
-        if is_credit:
-            references = tree.findall(
-                "./{*}BillingReference/{*}InvoiceDocumentReference"
+            if agreement
+            else False,
+            "l10n_ae_document_category": "commercial"
+            if type_code in ("480", "81")
+            else "tax",
+            "l10n_ae_credit_reason": tree.findtext(
+                "./{*}DiscrepancyResponse/{*}ResponseCode"
             )
-            if len(references) != 1:
-                raise UserError(
-                    self.env._("This received credit requires reference review.")
-                )
-            domain = [
-                ("company_id", "=", self.company_id.id),
-                ("partner_id", "=", move.partner_id.id),
-                ("move_type", "=", "in_invoice"),
-                ("ref", "=", references[0].findtext("./{*}ID")),
-                ("currency_id", "=", move.currency_id.id),
-                ("state", "!=", "cancel"),
-            ]
-            if date := references[0].findtext("./{*}IssueDate"):
-                domain.append(("invoice_date", "=", date))
-            original = self.env["account.move"].search(domain, limit=2)
-            if len(original) != 1:
-                raise UserError(
-                    self.env._(
-                        "The received credit's original supplier bill requires review."
-                    )
-                )
-            move.reversed_entry_id = original
+            if is_credit
+            else False,
+            "l10n_ae_origin_system": "controlled-inbound",
+            "l10n_ae_origin_document_id": f"{self.binding_id.id}:{self.remote_id}",
+            "l10n_ae_fiscal_uuid": tree.findtext("./{*}UUID"),
+            "l10n_ae_received_currency_id": self.env.ref("base.AED").id,
+            "l10n_ae_received_prepaid_amount": float(
+                tree.findtext("./{*}LegalMonetaryTotal/{*}PrepaidAmount") or 0
+            ),
+            "l10n_ae_received_payable_amount": float(
+                tree.findtext("./{*}LegalMonetaryTotal/{*}PayableAmount")
+            ),
+        }
+        existing = self.env["account.move"]
+        if selfbilling:
+            existing = self._find_existing_selfbilling_move(
+                tree, partner, values["move_type"]
+            )
+        if existing:
+            metadata = {
+                name: value
+                for name, value in values.items()
+                if name.startswith("l10n_ae_")
+            }
+            metadata.pop("l10n_ae_origin_system")
+            metadata.pop("l10n_ae_origin_document_id")
+            existing.write(metadata)
+            move = existing
+        else:
+            move = self.env["account.move"].create(values)
+        move._l10n_ae_mark_received()
+        if not existing:
+            self.env["account.edi.ubl.kmee_ae.inbound"]._import_invoice_ubl_cii(
+                move, {"xml_tree": tree, "attachment": False}, new=True
+            )
+        if is_credit:
+            move.reversed_entry_id = self._resolve_received_credit_reference(
+                tree, move, selfbilling
+            )
         expected = [
             ("TaxExclusiveAmount", move.amount_untaxed),
             ("TaxInclusiveAmount", move.amount_total),
@@ -326,7 +349,9 @@ class UaeEdiInbox(models.Model):
             amount = tree.findtext("./{*}LegalMonetaryTotal/{*}" + name)
             if amount is None or move.currency_id.compare_amounts(float(amount), value):
                 raise UserError(
-                    self.env._("Received totals do not match the draft bill.")
+                    self.env._(
+                        "Received totals do not match the draft accounting document."
+                    )
                 )
         self.env["ir.attachment"].create(
             {
@@ -338,3 +363,177 @@ class UaeEdiInbox(models.Model):
             }
         )
         return move
+
+    def _resolve_received_selfbilling_agreement(self, tree):
+        importer = self.env["account.edi.ubl.kmee_ae.inbound"]
+        partner, _logs = importer._import_partner(
+            self.company_id,
+            **importer._import_retrieve_partner_vals(tree, "AccountingCustomer"),
+        )
+        local_vat = self.company_id.partner_id.vat
+        supplier_vat = tree.xpath(
+            "./*[local-name()='AccountingSupplierParty']/*[local-name()='Party']"
+            "/*[local-name()='PartyTaxScheme'][*[local-name()='TaxScheme']"
+            "/*[local-name()='ID']='VAT']/*[local-name()='CompanyID']/text()"
+        )
+        if (
+            not re.fullmatch(r"[0-9]{15}", local_vat or "")
+            or supplier_vat != [local_vat]
+            or not re.fullmatch(r"[0-9]{15}", partner.vat or "")
+            or partner.routing_scheme != "0235"
+            or partner.routing_endpoint in {"9900000097", "9900000098", "9900000099"}
+            or not re.fullmatch(r"[0-9]{10}", partner.routing_endpoint or "")
+        ):
+            raise UserError(
+                self.env._(
+                    "Review the received self-billing VAT and onboarding identities."
+                )
+            )
+        issue_date = fields.Date.to_date(tree.findtext("./{*}IssueDate"))
+        agreement = self.env["l10n_ae.selfbilling.agreement"].search(
+            [
+                ("company_id", "=", self.company_id.id),
+                ("partner_id", "=", partner.id),
+                ("local_role", "=", "supplier"),
+                ("active", "=", True),
+                ("start_date", "<=", issue_date),
+                "|",
+                ("end_date", "=", False),
+                ("end_date", ">=", issue_date),
+            ],
+            limit=2,
+        )
+        if len(agreement) != 1:
+            raise UserError(
+                self.env._("The received self-billing agreement requires review.")
+            )
+        return partner, agreement
+
+    def _resolve_received_credit_reference(self, tree, move, selfbilling):
+        references = tree.findall("./{*}BillingReference/{*}InvoiceDocumentReference")
+        if len(references) != 1:
+            raise UserError(
+                self.env._("This received credit requires reference review.")
+            )
+        domain = [
+            ("company_id", "=", self.company_id.id),
+            ("partner_id", "=", move.partner_id.id),
+            ("move_type", "=", "out_invoice" if selfbilling else "in_invoice"),
+            ("currency_id", "=", move.currency_id.id),
+            ("state", "!=", "cancel"),
+        ]
+        number = references[0].findtext("./{*}ID")
+        if selfbilling:
+            domain += [
+                ("l10n_ae_received_process", "=", "selfbilling"),
+                "|",
+                ("ref", "=", number),
+                ("name", "=", number),
+            ]
+        else:
+            domain.append(("ref", "=", number))
+        if date := references[0].findtext("./{*}IssueDate"):
+            domain.append(("invoice_date", "=", date))
+        original = self.env["account.move"].search(domain, limit=2)
+        if len(original) != 1:
+            raise UserError(
+                self.env._(
+                    "The received credit's original self-billed sale requires review."
+                )
+                if selfbilling
+                else self.env._(
+                    "The received credit's original supplier bill requires review."
+                )
+            )
+        return original
+
+    def _find_existing_selfbilling_move(self, tree, partner, move_type):
+        number = tree.findtext("./{*}ID")
+        candidate = self.env["account.move"].search(
+            [
+                ("company_id", "=", self.company_id.id),
+                "|",
+                ("l10n_ae_fiscal_uuid", "=", tree.findtext("./{*}UUID")),
+                "&",
+                ("move_type", "=", move_type),
+                "&",
+                ("partner_id", "=", partner.id),
+                "|",
+                ("ref", "=", number),
+                ("name", "=", number),
+            ],
+            limit=2,
+        )
+        if not candidate:
+            return candidate
+        if (
+            len(candidate) != 1
+            or candidate.move_type != move_type
+            or candidate.partner_id != partner
+            or candidate.state != "draft"
+            or candidate.l10n_ae_transmission_id
+            or candidate.l10n_ae_received_document
+            or candidate.l10n_ae_document_category != "tax"
+            or candidate.currency_id.name != tree.findtext("./{*}DocumentCurrencyCode")
+            or candidate.invoice_date
+            != fields.Date.to_date(tree.findtext("./{*}IssueDate"))
+        ):
+            raise UserError(
+                self.env._(
+                    "The existing billing document requires reconciliation review."
+                )
+            )
+        expected = parse_invoice_xml(candidate.preview_l10n_ae_pint().encode())
+        if self._fiscal_lines_signature(expected) != self._fiscal_lines_signature(tree):
+            raise UserError(
+                self.env._(
+                    "The existing billing document's fiscal lines require review."
+                )
+            )
+        return candidate
+
+    @staticmethod
+    def _fiscal_lines_signature(tree):
+        def signature(node):
+            text = (node.text or "").strip()
+            localname = node.tag.rsplit("}", 1)[-1]
+            if text and localname.endswith(
+                ("Amount", "Quantity", "Percent", "Numeric")
+            ):
+                text = str(Decimal(text).normalize())
+            return (
+                node.tag,
+                tuple(sorted(node.attrib.items())),
+                text,
+                tuple(signature(child) for child in node if isinstance(child.tag, str)),
+            )
+
+        result = []
+        for line in tree.findall("./{*}InvoiceLine") + tree.findall(
+            "./{*}CreditNoteLine"
+        ):
+            parts = [
+                signature(child)
+                for child in line
+                if isinstance(child.tag, str)
+                and child.tag.rsplit("}", 1)[-1]
+                in {
+                    "InvoicedQuantity",
+                    "CreditedQuantity",
+                    "LineExtensionAmount",
+                    "TaxTotal",
+                    "ItemPriceExtension",
+                    "Price",
+                    "AllowanceCharge",
+                }
+            ]
+            parts += [
+                signature(child)
+                for child in line.findall("./{*}Item/{*}ClassifiedTaxCategory")
+            ]
+            parts += [
+                signature(child)
+                for child in line.findall("./{*}Item/{*}CommodityClassification")
+            ]
+            result.append(tuple(parts))
+        return tuple(result)
