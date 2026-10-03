@@ -1,6 +1,6 @@
 # Copyright 2026 KMEE
 # License AGPL-3.0 or later (https://www.gnu.org/licenses/agpl).
-from odoo import models
+from odoo import fields, models
 
 from odoo.addons.account_edi_ubl_cii.models.account_edi_common import FloatFmt
 from odoo.addons.account_edi_ubl_cii.tools.ubl_21_common import CustomerParty, TaxTotal
@@ -55,6 +55,26 @@ class AccountEdiUblUae(models.AbstractModel):
         result = super()._ubl_add_credit_note_type_code_node(vals)
         if vals["invoice"].l10n_ae_document_category == "commercial":
             vals["document_node"]["cbc:CreditNoteTypeCode"]["_text"] = "81"
+        return result
+
+    def _ubl_add_billing_reference_nodes(self, vals):
+        result = super()._ubl_add_billing_reference_nodes(vals)
+        invoice = vals["invoice"]
+        if (
+            self._is_document(vals, "credit_note", "self_credit_note")
+            and invoice.reversed_entry_id
+        ):
+            original = invoice.reversed_entry_id
+            vals["document_node"]["cac:BillingReference"] = [
+                {
+                    "cac:InvoiceDocumentReference": {
+                        "cbc:ID": {"_text": original.name},
+                        "cbc:IssueDate": {
+                            "_text": fields.Date.to_string(original.invoice_date)
+                        },
+                    }
+                }
+            ]
         return result
 
     def _ubl_add_party_legal_entity_nodes(self, vals):
@@ -139,9 +159,19 @@ class AccountEdiUblUae(models.AbstractModel):
     def _fill_document_values(self, vals):
         result = super()._fill_document_values(vals)
         invoice = vals["invoice"]
+        if self._is_document(vals, "credit_note", "self_credit_note"):
+            # The pinned public builder does not call its reference hook.
+            self._ubl_add_billing_reference_nodes(vals)
         vals["document_node"]["cbc:UUID"] = {
             "_text": invoice.l10n_ae_fiscal_uuid or None
         }
+        if (
+            self._is_document(vals, "credit_note", "self_credit_note")
+            and invoice.l10n_ae_credit_reason
+        ):
+            vals["document_node"]["cac:DiscrepancyResponse"] = [
+                {"cbc:ResponseCode": {"_text": invoice.l10n_ae_credit_reason}}
+            ]
         template = dict(vals["document_node"]["_template"])
         for name in ("cac:InvoiceLine", "cac:CreditNoteLine"):
             if name in template:

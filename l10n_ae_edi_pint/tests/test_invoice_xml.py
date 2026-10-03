@@ -114,12 +114,109 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
             [layer["name"] for layer in report["layers"]], ["shared", "ae"]
         )
 
+    def test_standard_credit_note_preserves_original_invoice_and_reason(self):
+        original = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
+        )
+        reversal = (
+            self.env["account.move.reversal"]
+            .with_context(active_model="account.move", active_ids=original.ids)
+            .create(
+                {
+                    "reason": "Synthetic cancelled supply",
+                    "move_ids": [(6, 0, original.ids)],
+                    "journal_id": original.journal_id.id,
+                }
+            )
+        )
+        reversal.refund_moves()
+        credit = reversal.new_move_ids
+        credit.write(
+            {
+                "l10n_ae_credit_reason": "DL8.61.1.A",
+                "l10n_ae_fiscal_uuid": "55555555-5555-4555-8555-555555555555",
+            }
+        )
+        credit.action_post()
+        xml = etree.fromstring(credit.preview_l10n_ae_pint().encode())
+        self.assertEqual(
+            xml.findtext("cac:DiscrepancyResponse/cbc:ResponseCode", namespaces=NS),
+            "DL8.61.1.A",
+        )
+        self.assertEqual(
+            xml.findtext(
+                "cac:BillingReference/cac:InvoiceDocumentReference/cbc:ID",
+                namespaces=NS,
+            ),
+            original.name,
+        )
+        self.assertEqual(
+            xml.findtext(
+                "cac:LegalMonetaryTotal/cbc:TaxInclusiveAmount", namespaces=NS
+            ),
+            "105.00",
+        )
+        # Native full reversal reconciles the unpaid invoice against its credit.
+        self.assertEqual(credit.amount_total, 105)
+        self.assertEqual(credit.amount_residual, 0)
+        self.assertEqual(
+            xml.findtext("cac:LegalMonetaryTotal/cbc:PayableAmount", namespaces=NS),
+            "0.00",
+        )
+        report = credit.validate_l10n_ae_pint()
+        self.assertTrue(report["valid"], report)
+
     def test_formal_action_reports_missing_uuid_as_a_normative_diagnostic(self):
         invoice = self.init_invoice(
             "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
         )
         with self.assertRaisesRegex(UserError, "ibr-193-ae"):
             invoice.action_l10n_ae_validate_pint()
+
+    def test_partial_credit_uses_its_own_amount_and_preserves_original_reference(self):
+        original = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
+        )
+        reversal = (
+            self.env["account.move.reversal"]
+            .with_context(active_model="account.move", active_ids=original.ids)
+            .create(
+                {
+                    "reason": "Synthetic consideration adjustment",
+                    "move_ids": [(6, 0, original.ids)],
+                    "journal_id": original.journal_id.id,
+                }
+            )
+        )
+        reversal.refund_moves()
+        credit = reversal.new_move_ids
+        credit.invoice_line_ids.write({"price_unit": 40})
+        credit.write(
+            {
+                "l10n_ae_credit_reason": "DL8.61.1.C",
+                "l10n_ae_fiscal_uuid": "66666666-6666-4666-8666-666666666666",
+            }
+        )
+        credit.action_post()
+        xml = etree.fromstring(credit.preview_l10n_ae_pint().encode())
+        # A credit of40+2 against100+5 leaves63 on the original invoice.
+        self.assertEqual(credit.amount_total, 42)
+        self.assertEqual(original.amount_residual, 63)
+        self.assertEqual(
+            xml.findtext(
+                "cac:CreditNoteLine/cac:ItemPriceExtension/cbc:Amount", namespaces=NS
+            ),
+            "42.00",
+        )
+        self.assertEqual(
+            xml.findtext(
+                "cac:BillingReference/cac:InvoiceDocumentReference/cbc:ID",
+                namespaces=NS,
+            ),
+            original.name,
+        )
+        report = credit.validate_l10n_ae_pint()
+        self.assertTrue(report["valid"], report)
 
     def test_discount_and_quantity_keep_core_totals_and_pass_official_rules(self):
         invoice = self.init_invoice("out_invoice", amounts=[100], taxes=self.tax_sale_a)
