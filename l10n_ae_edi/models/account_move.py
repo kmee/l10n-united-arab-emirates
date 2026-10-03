@@ -6,12 +6,25 @@ import re
 import uuid
 from decimal import Decimal
 
-from odoo import fields, models
+from odoo import api, fields, models
 from odoo.exceptions import UserError
 
 
 class AccountMove(models.Model):
     _inherit = "account.move"
+
+    l10n_ae_received_document = fields.Boolean(
+        string="Received UAE Document", readonly=True, copy=False
+    )
+
+    @api.model_create_multi
+    def create(self, vals_list):
+        if any("l10n_ae_received_document" in vals for vals in vals_list):
+            raise UserError(self.env._("The received UAE origin is protected."))
+        return super().create(vals_list)
+
+    def _l10n_ae_mark_received(self):
+        return super().write({"l10n_ae_received_document": True})
 
     l10n_ae_document_category = fields.Selection(
         [("tax", "Tax Document"), ("commercial", "Commercial Document")],
@@ -90,6 +103,7 @@ class AccountMove(models.Model):
         candidates = self.filtered(
             lambda move: (
                 move.company_id.country_id.code == "AE"
+                and not move.l10n_ae_received_document
                 and move.company_id.l10n_ae_edi_auto_prepare
                 and (
                     move.move_type in ("out_invoice", "out_refund")
@@ -112,6 +126,8 @@ class AccountMove(models.Model):
         return posted
 
     def write(self, vals):
+        if "l10n_ae_received_document" in vals:
+            raise UserError(self.env._("The received UAE origin is protected."))
         if vals.get("state") in ("draft", "cancel") and self.filtered(
             "l10n_ae_transmission_id"
         ):
@@ -127,6 +143,12 @@ class AccountMove(models.Model):
             "l10n_ae_origin_document_id",
             "l10n_ae_fiscal_uuid",
         }
+        if identity_fields.intersection(vals) and self.filtered(
+            "l10n_ae_received_document"
+        ):
+            raise UserError(
+                self.env._("The received UAE fiscal identity cannot be changed.")
+            )
         if identity_fields.intersection(vals) and self.filtered(
             "l10n_ae_transmission_id"
         ):
@@ -293,6 +315,10 @@ class AccountMove(models.Model):
 
     def action_l10n_ae_validate(self):
         for move in self:
+            if move.l10n_ae_received_document:
+                raise UserError(
+                    self.env._("A received UAE document cannot be emitted again.")
+                )
             if move.move_type not in ("out_invoice", "out_refund") and not (
                 move.move_type in ("in_invoice", "in_refund") and move.is_self_billing
             ):

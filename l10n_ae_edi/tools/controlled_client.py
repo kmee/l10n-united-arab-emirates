@@ -2,6 +2,7 @@
 # License AGPL-3.0 or later (https://www.gnu.org/licenses/agpl).
 """A client for KMEE's simulation contract, not a vendor's UAE API."""
 
+import hashlib
 import json
 from http.client import HTTPConnection, HTTPException
 from urllib.parse import urlencode, urlsplit
@@ -90,3 +91,20 @@ class ControlledAspClient:
         """Resolve an ambiguous result before attempting another POST."""
         query = urlencode({"tin": tin, "key": idempotency_key})
         return self._request("GET", "/submissions/by-key?" + query)
+
+    def lookup_inbound(self, tin, remote_id):
+        """Retrieve an original XML envelope from KMEE's controlled inbox."""
+        query = urlencode({"tin": tin, "id": remote_id})
+        result = self._request("GET", "/inbound/by-id?" + query)
+        if result is None:
+            return None
+        if (
+            result.get("provider") != self.provider
+            or result.get("tin") != tin
+            or result.get("remote_id") != remote_id
+            or not isinstance(result.get("xml"), str)
+            or hashlib.sha256(result["xml"].encode()).hexdigest()
+            != result.get("xml_sha256")
+        ):
+            raise ControlledAspError("correlation")
+        return result
