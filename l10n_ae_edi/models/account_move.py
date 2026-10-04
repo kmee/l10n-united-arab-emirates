@@ -118,6 +118,20 @@ class AccountMove(models.Model):
     )
     l10n_ae_ecommerce = fields.Boolean(string="Supply Through E-Commerce", copy=False)
     l10n_ae_exports = fields.Boolean(string="Exports", copy=False)
+    l10n_ae_buyer_not_implemented = fields.Boolean(
+        string="UAE Business Buyer Not Yet Implemented",
+        copy=False,
+        help="Confirm a domestic business buyer without e-invoicing or a "
+        "Participant ID; missing data or a failed lookup is insufficient.",
+    )
+    l10n_ae_buyer_onboarding_review_date = fields.Date(
+        string="Buyer Status Review Date",
+        copy=False,
+    )
+    l10n_ae_buyer_onboarding_review_reference = fields.Char(
+        string="Buyer Status Review Reference",
+        copy=False,
+    )
     l10n_ae_fiscal_uuid = fields.Char(
         string="UAE Fiscal UUID",
         copy=False,
@@ -247,6 +261,9 @@ class AccountMove(models.Model):
             "l10n_ae_document_category",
             "l10n_ae_credit_reason",
             "l10n_ae_credit_reference_ids",
+            "l10n_ae_buyer_not_implemented",
+            "l10n_ae_buyer_onboarding_review_date",
+            "l10n_ae_buyer_onboarding_review_reference",
         } | set(UAE_TRANSACTION_FLAG_FIELDS)
         received_fields = identity_fields | {
             "l10n_ae_received_agreement_snapshot",
@@ -286,7 +303,49 @@ class AccountMove(models.Model):
 
     def _l10n_ae_destination_override(self):
         self.ensure_one()
+        if self.l10n_ae_buyer_not_implemented and (
+            self.l10n_ae_deemed_supply or self.l10n_ae_exports or self.is_self_billing
+        ):
+            raise UserError(
+                self.env._(
+                    "Review the not-yet-implemented buyer routing: it cannot be "
+                    "combined with deemed supply, exports or self-billing."
+                )
+            )
         if not self.l10n_ae_deemed_supply:
+            if self.l10n_ae_buyer_not_implemented:
+                if self.partner_id.commercial_partner_id.country_id.code != "AE":
+                    raise UserError(
+                        self.env._(
+                            "Confirm a domestic UAE business buyer before using "
+                            "the not-yet-implemented buyer destination."
+                        )
+                    )
+                if self.partner_id.commercial_partner_id.routing_endpoint:
+                    raise UserError(
+                        self.env._(
+                            "Review the existing Participant ID before selecting a "
+                            "not-yet-implemented buyer. The existing identifier "
+                            "cannot be replaced by a predefined destination."
+                        )
+                    )
+                if (
+                    not self.l10n_ae_buyer_onboarding_review_date
+                    or not (
+                        self.l10n_ae_buyer_onboarding_review_reference or ""
+                    ).strip()
+                ):
+                    raise UserError(
+                        self.env._(
+                            "Record the buyer status review date and source before "
+                            "using the not-yet-implemented buyer destination."
+                        )
+                    )
+                return {
+                    "scheme": "0235",
+                    "endpoint": "9900000098",
+                    "reason": "buyer_not_implemented",
+                }
             return None
         if self.l10n_ae_document_category == "commercial":
             raise UserError(
@@ -353,6 +412,23 @@ class AccountMove(models.Model):
             "buyer": company_party if self.is_self_billing else counterparty,
             "destination": destination,
             "exchange_mode": "reporting_only" if destination else "exchange",
+            "buyer_onboarding_review": {
+                "status": "not_implemented",
+                "date": fields.Date.to_string(
+                    self.l10n_ae_buyer_onboarding_review_date
+                ),
+                "source": self.l10n_ae_buyer_onboarding_review_reference,
+            }
+            if self.l10n_ae_buyer_not_implemented
+            else None,
+            "alternative_delivery": {
+                "required": True,
+                "reason": "buyer_not_implemented",
+            }
+            if self.l10n_ae_buyer_not_implemented
+            and self.l10n_ae_document_category == "tax"
+            and self.move_type == "out_invoice"
+            else None,
             "selfbilling_agreement": {
                 "reference": agreement.name,
                 "local_role": agreement.local_role,
