@@ -2270,6 +2270,93 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
                 allowed_company_ids=self.env.company.ids
             ).read(["scope"])
 
+    def test_deemed_supply_routes_to_97_without_changing_the_actual_buyer(self):
+        invoice = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
+        )
+        invoice.write(
+            {
+                "l10n_ae_deemed_supply": True,
+                "l10n_ae_fiscal_uuid": "aaaaaaae-1111-4111-8111-111111111111",
+            }
+        )
+        tree = etree.fromstring(invoice.preview_l10n_ae_pint().encode())
+        buyer = tree.find("cac:AccountingCustomerParty/cac:Party", NS)
+        endpoint = buyer.find("cbc:EndpointID", NS)
+        self.assertEqual(
+            (endpoint.get("schemeID"), endpoint.text), ("0235", "9900000097")
+        )
+        self.assertEqual(
+            tree.findtext("cbc:ProfileExecutionID", namespaces=NS), "01000000"
+        )
+        self.assertEqual(
+            buyer.findtext("cac:PartyTaxScheme/cbc:CompanyID", namespaces=NS),
+            "100000000200003",
+        )
+        self.assertEqual(self.partner_a.routing_endpoint, "1000000002")
+        self.assertEqual(
+            (invoice.amount_untaxed, invoice.amount_tax, invoice.amount_total),
+            (100, 5, 105),
+        )
+        report = invoice.validate_l10n_ae_pint()
+        self.assertTrue(report["valid"], report)
+
+    def test_prepared_deemed_supply_preserves_effective_and_master_destinations(self):
+        invoice = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
+        )
+        invoice.write(
+            {
+                "l10n_ae_deemed_supply": True,
+                "l10n_ae_fiscal_uuid": "aaaaaaae-2222-4222-8222-222222222222",
+                "l10n_ae_binding_id": self.env["l10n_ae.edi.binding"]
+                .create({"name": "Deemed supply destination"})
+                .id,
+            }
+        )
+        invoice.action_l10n_ae_prepare()
+        transmission = invoice.l10n_ae_transmission_id
+        payload = transmission.payload
+        xml = transmission.xml_content
+        snapshot = json.loads(payload)
+        self.assertEqual(
+            snapshot.get("destination"),
+            {"scheme": "0235", "endpoint": "9900000097", "reason": "deemed_supply"},
+        )
+        self.assertEqual(snapshot["buyer"]["endpoint"], "1000000002")
+        self.partner_a.routing_endpoint = "1000000004"
+        self.assertEqual(invoice.preview_l10n_ae_pint(), xml)
+        self.assertEqual(transmission.payload, payload)
+        self.assertEqual((invoice.amount_tax, invoice.amount_total), (5, 105))
+
+    def test_commercial_deemed_supply_requires_review_even_with_outside_scope_tax(self):
+        outside_scope = self.tax_sale_a.copy(
+            {
+                "name": "Synthetic deemed commercial outside-scope tax",
+                "amount": 0,
+                "ubl_cii_tax_category_code": "O",
+            }
+        )
+        invoice = self.init_invoice("out_invoice", amounts=[100], taxes=outside_scope)
+        invoice.write(
+            {"l10n_ae_document_category": "commercial", "l10n_ae_deemed_supply": True}
+        )
+        with self.assertRaisesRegex(UserError, "IBR-157-AE"):
+            invoice.action_l10n_ae_validate()
+        self.assertFalse(invoice.l10n_ae_transmission_id)
+        self.assertEqual(
+            (invoice.state, invoice.amount_tax, invoice.amount_total), ("draft", 0, 100)
+        )
+
+    def test_deemed_self_billing_requires_review_before_changing_issuer_routing(self):
+        bill, _agreement = self._selfbilling_bill_with_agreement()
+        bill.l10n_ae_deemed_supply = True
+        with self.assertRaisesRegex(UserError, "self-billing.*routing"):
+            bill.action_l10n_ae_validate()
+        self.assertFalse(bill.l10n_ae_transmission_id)
+        self.assertEqual(bill.company_id.partner_id.routing_endpoint, "1000000001")
+        self.assertEqual(self.partner_a.routing_endpoint, "1000000002")
+
     def test_combined_free_zone_export_preserves_eight_bits_and_beneficiary(self):
         invoice = self.init_invoice(
             "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True

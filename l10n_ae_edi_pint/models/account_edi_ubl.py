@@ -113,6 +113,16 @@ class AccountEdiUblUae(models.AbstractModel):
             ]
         return result
 
+    def _ubl_add_accounting_customer_party_endpoint_id_node(self, vals):
+        result = super()._ubl_add_accounting_customer_party_endpoint_id_node(vals)
+        destination = vals["invoice"]._l10n_ae_destination_override()
+        if destination:
+            vals["party_node"]["cbc:EndpointID"] = {
+                "schemeID": destination["scheme"],
+                "_text": destination["endpoint"],
+            }
+        return result
+
     def _ubl_add_party_tax_scheme_nodes(self, vals):
         result = super()._ubl_add_party_tax_scheme_nodes(vals)
         partner = vals["party_vals"]["partner"].commercial_partner_id
