@@ -14,7 +14,12 @@ class AccountMoveLine(models.Model):
         }
 
     def write(self, vals):
-        consumption_fields = {"quantity", "price_unit", "discount"}.intersection(vals)
+        consumption_fields = {
+            "quantity",
+            "price_unit",
+            "discount",
+            "sale_line_ids",
+        }.intersection(vals)
         if consumption_fields:
             self.check_access("write")
             moves = self.filtered(
@@ -30,7 +35,34 @@ class AccountMoveLine(models.Model):
                     )
                 )
             ).move_id
-            moves._l10n_ae_lock_advance_sources()
+            new_sources = self.env["account.move"]
+            if "sale_line_ids" in consumption_fields:
+                for line in self.filtered(lambda line: line.move_id in moves):
+                    projected = line.new(
+                        {"sale_line_ids": vals["sale_line_ids"]}, origin=line
+                    )
+                    linked = (
+                        projected.sale_line_ids._origin.filtered("is_downpayment")
+                        .invoice_lines.filtered(
+                            lambda source_line: (
+                                source_line.move_id._is_downpayment()
+                                and source_line.move_id.move_type == "out_invoice"
+                                and source_line.quantity > 0
+                            )
+                        )
+                        .move_id
+                    )
+                    if linked.filtered(
+                        lambda source, line=line: source.company_id != line.company_id
+                    ):
+                        raise UserError(
+                            self.env._(
+                                "The taxed advance and deduction must belong "
+                                "to the same legal company."
+                            )
+                        )
+                    new_sources |= linked
+            moves._l10n_ae_lock_advance_sources(new_sources)
             if moves:
                 moves.check_access("write")
                 moves.flush_recordset()

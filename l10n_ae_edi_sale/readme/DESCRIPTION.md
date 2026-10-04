@@ -12,7 +12,9 @@ changes the accounting calculator. Shared-source posting/preparation uses the na
 request retry boundary; committed proofs cover stale posting, exact partial preparations
 and rollback while retaining original fiscal bytes. Posted negative deduction quantity,
 price and discount edits coordinate the source before preparation rechecks consumption.
-Identical pricing preserves source metadata; native posted tax restrictions remain.
+Native Sales link replacement coordinates both the old and new advance sources before
+mutation, so preparation rechecks consumed capacity on each. Identical pricing preserves
+source metadata; native posted tax restrictions remain.
 Frozen advance/final fiscal line
 changes and Sales link changes are refused; identical writes remain native. Shared-source
 capacity coordination for every mutable line field, multiple advances, full

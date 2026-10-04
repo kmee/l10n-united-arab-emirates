@@ -15,7 +15,7 @@ class AccountMove(models.Model):
         compute="_compute_l10n_ae_advance_reference_summary",
     )
 
-    def _l10n_ae_lock_advance_sources(self):
+    def _l10n_ae_lock_advance_sources(self, additional_sources=None):
         moves = self.filtered(
             lambda move: (
                 move.company_id.country_code == "AE"
@@ -25,6 +25,8 @@ class AccountMove(models.Model):
             )
         )
         sources = self.env["account.move"]
+        if moves and additional_sources:
+            sources |= additional_sources
         for move in moves:
             linked = (
                 move.invoice_line_ids.filtered(
