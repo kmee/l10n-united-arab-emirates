@@ -1,6 +1,8 @@
 # Copyright 2026 KMEE
 # License AGPL-3.0 or later (https://www.gnu.org/licenses/agpl).
 
+import hashlib
+
 from odoo import api, models
 
 
@@ -12,6 +14,61 @@ class AccountMoveSend(models.AbstractModel):
         if move.l10n_ae_transmission_id:
             return "kmee_ae_pint"
         return super()._get_default_invoice_edi_format(move, **kwargs)
+
+    @api.model
+    def _get_invoice_extra_attachments(self, move):
+        attachments = super()._get_invoice_extra_attachments(move)
+        transmission = move.l10n_ae_transmission_id
+        if transmission:
+            xml = move.preview_l10n_ae_pint().encode("utf-8")
+            if move.ubl_cii_xml_id and move.ubl_cii_xml_id.raw.content != xml:
+                attachments -= move.ubl_cii_xml_id
+            if transmission.conventional_html_content and move.invoice_pdf_report_id:
+                content = move.invoice_pdf_report_id.raw.content
+                if (
+                    hashlib.sha256(content).hexdigest()
+                    != transmission.conventional_pdf_hash
+                ):
+                    attachments -= move.invoice_pdf_report_id
+        return attachments
+
+    @api.model
+    def _get_placeholder_mail_attachments_data(
+        self, move, invoice_edi_format=None, extra_edis=None, pdf_report=None
+    ):
+        result = super()._get_placeholder_mail_attachments_data(
+            move,
+            invoice_edi_format=invoice_edi_format,
+            extra_edis=extra_edis,
+            pdf_report=pdf_report,
+        )
+        transmission = move.l10n_ae_transmission_id
+        if transmission:
+            attachments = self._get_invoice_extra_attachments(move)
+            expected = []
+            if transmission.conventional_html_content and (
+                not move.invoice_pdf_report_id
+                or move.invoice_pdf_report_id not in attachments
+            ):
+                expected.append((transmission.conventional_filename, "application/pdf"))
+            if not move.ubl_cii_xml_id or move.ubl_cii_xml_id not in attachments:
+                expected.append(
+                    (
+                        move._get_invoice_report_filename(extension="xml"),
+                        "application/xml",
+                    )
+                )
+            for filename, mimetype in expected:
+                if not any(item["mimetype"] == mimetype for item in result):
+                    result.append(
+                        {
+                            "id": f"placeholder_{filename}",
+                            "name": filename,
+                            "mimetype": mimetype,
+                            "placeholder": True,
+                        }
+                    )
+        return result
 
     def _hook_invoice_document_before_pdf_report_render(self, invoice, invoice_data):
         transmission = invoice.l10n_ae_transmission_id.with_context(bin_size=False)
