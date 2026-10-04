@@ -1597,6 +1597,281 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         report = invoice.validate_l10n_ae_pint()
         self.assertTrue(report["valid"], report)
 
+    def test_partial_credit_preserves_two_allocated_original_references(self):
+        first = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
+        )
+        second = self.init_invoice(
+            "out_invoice", amounts=[200], taxes=self.tax_sale_a, post=True
+        )
+        before = [
+            (move.name, move.amount_total, move.amount_residual)
+            for move in (first, second)
+        ]
+        credit = self.init_invoice("out_refund", amounts=[50], taxes=self.tax_sale_a)
+        credit.write(
+            {
+                "l10n_ae_credit_reason": "DL8.61.1.C",
+                "l10n_ae_fiscal_uuid": "abababab-1111-4111-8111-111111111111",
+                "l10n_ae_credit_reference_ids": [
+                    (
+                        0,
+                        0,
+                        {
+                            "invoice_id": first.id,
+                            "allocated_net": 30,
+                            "allocated_tax": 1.5,
+                        },
+                    ),
+                    (
+                        0,
+                        0,
+                        {
+                            "invoice_id": second.id,
+                            "allocated_net": 20,
+                            "allocated_tax": 1,
+                        },
+                    ),
+                ],
+            }
+        )
+        credit.action_post()
+        xml = etree.fromstring(credit.preview_l10n_ae_pint().encode())
+        references = xml.findall(
+            "cac:BillingReference/cac:InvoiceDocumentReference", NS
+        )
+        self.assertEqual(
+            [
+                (
+                    node.findtext("cbc:ID", namespaces=NS),
+                    node.findtext("cbc:IssueDate", namespaces=NS),
+                )
+                for node in references
+            ],
+            [
+                (first.name, str(first.invoice_date)),
+                (second.name, str(second.invoice_date)),
+            ],
+        )
+        self.assertEqual(
+            (credit.amount_untaxed, credit.amount_tax, credit.amount_total),
+            (50, 2.5, 52.5),
+        )
+        self.assertEqual(
+            xml.findtext(
+                "cac:LegalMonetaryTotal/cbc:TaxInclusiveAmount", namespaces=NS
+            ),
+            "52.50",
+        )
+        self.assertEqual(
+            [
+                (move.name, move.amount_total, move.amount_residual)
+                for move in (first, second)
+            ],
+            before,
+        )
+        report = credit.validate_l10n_ae_pint()
+        self.assertTrue(report["valid"], report)
+
+    def test_credit_reference_allocations_must_match_the_credit_not_original_totals(
+        self,
+    ):
+        original = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
+        )
+        credit = self.init_invoice("out_refund", amounts=[50], taxes=self.tax_sale_a)
+        credit.write(
+            {
+                "l10n_ae_credit_reason": "DL8.61.1.C",
+                "l10n_ae_credit_reference_ids": [
+                    (
+                        0,
+                        0,
+                        {
+                            "invoice_id": original.id,
+                            "allocated_net": 100,
+                            "allocated_tax": 5,
+                        },
+                    )
+                ],
+            }
+        )
+        with self.assertRaisesRegex(UserError, "allocations must match"):
+            credit.action_l10n_ae_validate()
+        self.assertEqual((credit.state, credit.amount_total), ("draft", 52.5))
+        self.assertEqual(
+            (original.state, original.amount_total, original.amount_residual),
+            ("posted", 105, 105),
+        )
+        self.assertFalse(credit.l10n_ae_transmission_id)
+
+    def test_prepared_credit_protects_its_allocated_original_references(self):
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {"name": "Allocated credit test"}
+        )
+        original = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
+        )
+        credit = self.init_invoice("out_refund", amounts=[50], taxes=self.tax_sale_a)
+        credit.write(
+            {
+                "l10n_ae_credit_reason": "DL8.61.1.C",
+                "l10n_ae_fiscal_uuid": "abababab-2222-4222-8222-222222222222",
+                "l10n_ae_binding_id": binding.id,
+                "l10n_ae_credit_reference_ids": [
+                    (
+                        0,
+                        0,
+                        {
+                            "invoice_id": original.id,
+                            "allocated_net": 50,
+                            "allocated_tax": 2.5,
+                        },
+                    )
+                ],
+            }
+        )
+        credit.action_post()
+        credit.action_l10n_ae_prepare()
+        transmission = credit.l10n_ae_transmission_id
+        content, payload = transmission.xml_content, transmission.payload
+        ref = credit.l10n_ae_credit_reference_ids
+        with self.assertRaisesRegex(UserError, "frozen UAE credit"):
+            ref.write({"allocated_net": 100})
+        with self.assertRaisesRegex(UserError, "frozen UAE credit"):
+            ref.unlink()
+        with self.assertRaisesRegex(UserError, "frozen UAE"):
+            credit.write({"l10n_ae_credit_reference_ids": [(5, 0, 0)]})
+        with self.assertRaisesRegex(UserError, "frozen UAE credit"):
+            self.env["l10n_ae.credit.reference"].create(
+                {
+                    "move_id": credit.id,
+                    "number": "EXTERNAL-SYNTHETIC",
+                    "issue_date": "2019-01-01",
+                    "allocated_net": 1,
+                }
+            )
+        self.assertEqual(
+            (transmission.xml_content, transmission.payload), (content, payload)
+        )
+        snapshot = json.loads(payload)
+        self.assertEqual(
+            snapshot["preceding_invoices"],
+            [
+                {
+                    "number": original.name,
+                    "issue_date": str(original.invoice_date),
+                    "allocated_net": "50.00",
+                    "allocated_vat": "2.50",
+                    "review_evidence": None,
+                }
+            ],
+        )
+
+    def test_local_credit_references_reject_unrelated_or_unposted_originals(self):
+        original = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
+        )
+        credit = self.init_invoice("out_refund", amounts=[50], taxes=self.tax_sale_a)
+        credit.write(
+            {
+                "l10n_ae_credit_reason": "DL8.61.1.C",
+                "l10n_ae_credit_reference_ids": [
+                    (
+                        0,
+                        0,
+                        {
+                            "invoice_id": original.id,
+                            "allocated_net": 50,
+                            "allocated_tax": 2.5,
+                        },
+                    )
+                ],
+            }
+        )
+        other_customer = self.init_invoice(
+            "out_invoice",
+            amounts=[100],
+            taxes=self.tax_sale_a,
+            partner=self.partner_b,
+            post=True,
+        )
+        unposted = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a
+        )
+        purchase = self.init_invoice(
+            "in_invoice", amounts=[100], taxes=self.tax_purchase_a, post=True
+        )
+        commercial = original.copy({"l10n_ae_document_category": "commercial"})
+        commercial.action_post()
+        usd = self.env.ref("base.USD")
+        usd.active = True
+        foreign = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a, currency=usd, post=True
+        )
+        ref = credit.l10n_ae_credit_reference_ids
+        for invalid in (other_customer, unposted, purchase, commercial, foreign):
+            with self.subTest(original=invalid.id):
+                ref.invoice_id = invalid
+                with self.assertRaisesRegex(UserError, "same company, counterparty"):
+                    credit.action_l10n_ae_validate()
+        ref.invoice_id = original
+        self.assertTrue(credit.action_l10n_ae_validate())
+        ref.number = "UNRELATED-SYNTHETIC-INVOICE"
+        with self.assertRaisesRegex(UserError, "local original identifiers"):
+            credit.action_l10n_ae_validate()
+        ref.invoice_id = original
+        self.assertEqual((credit.state, credit.amount_total), ("draft", 52.5))
+
+    def test_external_credit_originals_need_reviewed_evidence_without_fake_moves(self):
+        credit = self.init_invoice("out_refund", amounts=[50], taxes=self.tax_sale_a)
+        credit.write(
+            {
+                "l10n_ae_credit_reason": "DL8.61.1.C",
+                "l10n_ae_fiscal_uuid": "abababab-3333-4333-8333-333333333333",
+                "l10n_ae_credit_reference_ids": [
+                    (
+                        0,
+                        0,
+                        {
+                            "number": "LEGACY-SYNTH-A",
+                            "issue_date": "2018-12-01",
+                            "allocated_net": 30,
+                            "allocated_tax": 1.5,
+                        },
+                    ),
+                    (
+                        0,
+                        0,
+                        {
+                            "number": "LEGACY-SYNTH-B",
+                            "issue_date": "2018-12-02",
+                            "allocated_net": 20,
+                            "allocated_tax": 1,
+                        },
+                    ),
+                ],
+            }
+        )
+        with self.assertRaisesRegex(UserError, "reviewed evidence"):
+            credit.action_l10n_ae_validate()
+        credit.l10n_ae_credit_reference_ids.write(
+            {"review_evidence": "SYNTHETIC-LEGACY-ORIGINALS-REVIEW"}
+        )
+        credit.action_post()
+        xml = etree.fromstring(credit.preview_l10n_ae_pint().encode())
+        self.assertEqual(
+            xml.xpath(
+                "cac:BillingReference/cac:InvoiceDocumentReference/cbc:ID/text()",
+                namespaces=NS,
+            ),
+            ["LEGACY-SYNTH-A", "LEGACY-SYNTH-B"],
+        )
+        self.assertFalse(credit.l10n_ae_credit_reference_ids.invoice_id)
+        self.assertEqual((credit.amount_total, credit.amount_residual), (52.5, 52.5))
+        report = credit.validate_l10n_ae_pint()
+        self.assertTrue(report["valid"], report)
+
     def test_six_document_categories_preserve_type_and_process(self):
         cases = [
             ("out_invoice", "tax", "Invoice", "380", "billing"),

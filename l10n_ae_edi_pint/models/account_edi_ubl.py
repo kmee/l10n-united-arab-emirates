@@ -82,6 +82,22 @@ class AccountEdiUblUae(models.AbstractModel):
         invoice = vals["invoice"]
         if (
             self._is_document(vals, "credit_note", "self_credit_note")
+            and invoice.l10n_ae_credit_reference_ids
+        ):
+            vals["document_node"]["cac:BillingReference"] = [
+                {
+                    "cac:InvoiceDocumentReference": {
+                        "cbc:ID": {"_text": ref.number},
+                        "cbc:IssueDate": {
+                            "_text": fields.Date.to_string(ref.issue_date)
+                        },
+                    }
+                }
+                for ref in invoice.l10n_ae_credit_reference_ids
+            ]
+            return result
+        if (
+            self._is_document(vals, "credit_note", "self_credit_note")
             and invoice.reversed_entry_id
         ):
             original = invoice.reversed_entry_id
