@@ -14,7 +14,8 @@ class AccountMoveLine(models.Model):
         }
 
     def write(self, vals):
-        if "quantity" in vals:
+        consumption_fields = {"quantity", "price_unit", "discount"}.intersection(vals)
+        if consumption_fields:
             self.check_access("write")
             moves = self.filtered(
                 lambda line: (
@@ -23,8 +24,9 @@ class AccountMoveLine(models.Model):
                     and line.move_id.move_type == "out_invoice"
                     and line.is_downpayment
                     and line.quantity < 0
-                    and self.env["account.move"]._field_will_change(
-                        line, vals, "quantity"
+                    and any(
+                        self.env["account.move"]._field_will_change(line, vals, name)
+                        for name in consumption_fields
                     )
                 )
             ).move_id

@@ -178,7 +178,9 @@ class TestUaeSalesAdvance(AccountTestInvoicingCommon):
         self.assertTrue(advance_report["valid"], advance_report)
         self.assertTrue(final_report["valid"], final_report)
         self.assertTrue(
-            final.invoice_line_ids.filtered("is_downpayment").write({"quantity": -1})
+            final.invoice_line_ids.filtered("is_downpayment").write(
+                {"quantity": -1, "price_unit": 1000, "discount": 0}
+            )
         )
         self.assertEqual(final.preview_l10n_ae_pint(), final_xml)
 
