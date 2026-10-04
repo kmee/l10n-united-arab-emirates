@@ -70,6 +70,11 @@ class UaeCreditReference(models.Model):
             raise UserError(
                 self.env._("The frozen UAE credit references cannot be changed.")
             )
+        # A lock alone does not change a repeatable-read snapshot. Publish the
+        # child's edit through the parent's native access metadata so an older
+        # preparation request retries its entire transaction before freezing it.
+        moves.write({"write_date": self.env.cr.now()})
+        moves.flush_recordset(["write_uid", "write_date"])
 
     def write(self, vals):
         moves = self.move_id
