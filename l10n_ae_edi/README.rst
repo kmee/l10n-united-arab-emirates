@@ -112,6 +112,15 @@ separate original references, while allocation amounts stay in internal
 evidence. These links do not reconcile accounting balances. Volume
 discount handling remains unresolved.
 
+If controlled batch validation stops a prepared document locally, its
+UAE tab shows **Local Sending Review**, reason and recording time. Use
+**Validate UAE E-Invoice** to inspect the preserved document. The
+document is excluded from subsequent automatic batch selections while
+other eligible invoices continue. This records no remote attempt or ASP
+rejection and does not modify the posted invoice or frozen evidence.
+Automatic correction/unblocking, scheduling and retry backoff remain
+required work.
+
 For prerequisites, UI steps, expected results and error handling, read
 the repository scenario based user manual in
 `English <https://github.com/kmee/l10n-eua/blob/20.0-add-uae-edi/docs/user/scenarios-en.md>`__
@@ -122,8 +131,9 @@ Known issues / Roadmap
 ======================
 
 Complete the accepted specification in the KMEE brain repository,
-including operational scheduling/batch error handling/backoff, deployed
-authenticated event ingress and correction policy, inbound/self-billing,
+including operational scheduling, remaining batch recovery/backoff
+beyond expected local document validation, deployed authenticated event
+ingress and correction policy, complete inbound/self-billing,
 multi-currency, multiple credit references/advances, UUID assignment,
 Enterprise coexistence, accredited ASP contracts and release readiness.
 

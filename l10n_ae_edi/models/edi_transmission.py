@@ -73,6 +73,11 @@ class UaeEdiTransmission(models.Model):
     transport_endpoint = fields.Char(readonly=True, copy=False)
     lease_until = fields.Datetime(readonly=True, copy=False)
     claim_token = fields.Char(readonly=True, copy=False, groups="base.group_system")
+    dispatch_review_required = fields.Boolean(readonly=True, copy=False)
+    dispatch_error_kind = fields.Selection(
+        [("local_review", "Local Document Validation")], readonly=True, copy=False
+    )
+    dispatch_review_at = fields.Datetime(readonly=True, copy=False)
     attempt_ids = fields.One2many(
         "l10n_ae.edi.attempt", "transmission_id", readonly=True
     )
@@ -234,6 +239,25 @@ class UaeEdiTransmission(models.Model):
             "reporting_c3_state": c3_state,
         }
 
+    def _mark_controlled_dispatch_review(self, now):
+        """Record a local validation stop without inventing a remote rejection."""
+        self.ensure_one()
+        self.env.cr.execute(
+            "SELECT id FROM l10n_ae_edi_transmission WHERE id = %s FOR UPDATE",
+            [self.id],
+        )
+        self.invalidate_recordset()
+        if self.submission_state in {"accepted", "sending"}:
+            return self.submission_state
+        super().write(
+            {
+                "dispatch_review_required": True,
+                "dispatch_error_kind": "local_review",
+                "dispatch_review_at": now,
+            }
+        )
+        return "blocked"
+
     def _claim_controlled(self, endpoint, now, validation):
         """Called only by the executor's short, dedicated transaction."""
         self.ensure_one()
@@ -361,6 +385,9 @@ class UaeEdiTransmission(models.Model):
             "transport_endpoint",
             "lease_until",
             "claim_token",
+            "dispatch_review_required",
+            "dispatch_error_kind",
+            "dispatch_review_at",
             "attempt_ids",
             "event_ids",
             "event_review_required",

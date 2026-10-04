@@ -11,6 +11,7 @@ from odoo import api, fields
 from odoo.exceptions import AccessError, UserError
 
 from .controlled_client import ControlledAspClient, ControlledAspError
+from .errors import UaeDocumentValidationError
 
 
 class ControlledExecutor:
@@ -58,7 +59,7 @@ class ControlledExecutor:
                 hashlib.sha256(record.payload.encode()).hexdigest()
                 != record.payload_hash
             ):
-                raise UserError(
+                raise UaeDocumentValidationError(
                     record.env._("Frozen UAE snapshot integrity check failed.")
                 )
             key, provider = record.idempotency_key, record.provider
@@ -140,6 +141,7 @@ class ControlledExecutor:
                     [
                         ("company_id", "=", self.company_id),
                         ("binding_id", "=", binding_id),
+                        ("dispatch_review_required", "=", False),
                         "|",
                         ("submission_state", "in", ["queued", "unknown"]),
                         "&",
@@ -151,7 +153,19 @@ class ControlledExecutor:
                 )
                 .ids
             )
-        return [
-            {"transmission_id": record_id, "result": self.run_once(record_id)}
-            for record_id in transmission_ids
-        ]
+        outcomes = []
+        for record_id in transmission_ids:
+            outcome = {"transmission_id": record_id}
+            try:
+                outcome["result"] = self.run_once(record_id)
+            except UaeDocumentValidationError:
+                with self.registry.cursor() as cursor:
+                    record = self._record(cursor, record_id).sudo()
+                    outcome["result"] = record._mark_controlled_dispatch_review(
+                        self.clock()
+                    )
+                    cursor.commit()
+                if outcome["result"] == "blocked":
+                    outcome["error_kind"] = "local_review"
+            outcomes.append(outcome)
+        return outcomes

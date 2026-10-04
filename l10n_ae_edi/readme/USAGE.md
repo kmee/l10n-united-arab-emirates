@@ -47,6 +47,13 @@ credit's own net/VAT. Preparation protects the rows; XML contains separate origi
 references, while allocation amounts stay in internal evidence. These links do not
 reconcile accounting balances. Volume discount handling remains unresolved.
 
+If controlled batch validation stops a prepared document locally, its UAE tab shows
+**Local Sending Review**, reason and recording time. Use **Validate UAE E-Invoice**
+to inspect the preserved document. The document is excluded from subsequent automatic
+batch selections while other eligible invoices continue. This records no remote
+attempt or ASP rejection and does not modify the posted invoice or frozen evidence.
+Automatic correction/unblocking, scheduling and retry backoff remain required work.
+
 For prerequisites, UI steps, expected results and error handling, read the repository
 scenario based user manual in
 [English](https://github.com/kmee/l10n-eua/blob/20.0-add-uae-edi/docs/user/scenarios-en.md)

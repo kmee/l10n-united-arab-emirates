@@ -81,6 +81,22 @@
                         />
                     </group>
                     <group
+                        string="Local Sending Review"
+                        invisible="not l10n_ae_dispatch_review_required"
+                    >
+                        <field
+                            name="l10n_ae_dispatch_review_required"
+                            readonly="True"
+                        />
+                        <field name="l10n_ae_dispatch_error_kind" readonly="True" />
+                        <field name="l10n_ae_dispatch_review_at" readonly="True" />
+                        <label
+                            for="l10n_ae_dispatch_review_required"
+                            colspan="2"
+                            string="Automatic sending is paused for this document. Use Validate UAE E-Invoice to review the preserved document."
+                        />
+                    </group>
+                    <group
                         string="Reviewed Buyer Onboarding"
                         invisible="l10n_ae_received_document"
                     >

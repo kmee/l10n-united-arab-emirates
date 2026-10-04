@@ -199,6 +199,18 @@ class AccountMove(models.Model):
         related="l10n_ae_transmission_id.event_review_required",
         string="UAE Events Require Review",
     )
+    l10n_ae_dispatch_review_required = fields.Boolean(
+        related="l10n_ae_transmission_id.dispatch_review_required",
+        string="Automatic Sending Requires Review",
+    )
+    l10n_ae_dispatch_error_kind = fields.Selection(
+        related="l10n_ae_transmission_id.dispatch_error_kind",
+        string="Local Review Reason",
+    )
+    l10n_ae_dispatch_review_at = fields.Datetime(
+        related="l10n_ae_transmission_id.dispatch_review_at",
+        string="Local Review Recorded At",
+    )
     l10n_ae_origin_system = fields.Char(default="odoo", required=True, copy=False)
     l10n_ae_selfbilling_agreement_id = fields.Many2one(
         "l10n_ae.selfbilling.agreement",
