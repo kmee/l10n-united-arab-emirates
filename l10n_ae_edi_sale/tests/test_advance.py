@@ -132,7 +132,8 @@ class TestUaeSalesAdvance(AccountTestInvoicingCommon):
             ),
             1000,
         )
-        xml = etree.fromstring(final.preview_l10n_ae_pint().encode())
+        final_xml = final.preview_l10n_ae_pint()
+        xml = etree.fromstring(final_xml.encode())
         self.assertEqual(
             xml.xpath(
                 "//cac:BillingReference/cac:InvoiceDocumentReference/cbc:ID/text()",
@@ -176,6 +177,54 @@ class TestUaeSalesAdvance(AccountTestInvoicingCommon):
         final_report = final.validate_l10n_ae_pint()
         self.assertTrue(advance_report["valid"], advance_report)
         self.assertTrue(final_report["valid"], final_report)
+        self.assertTrue(
+            final.invoice_line_ids.filtered("is_downpayment").write({"quantity": -1})
+        )
+        self.assertEqual(final.preview_l10n_ae_pint(), final_xml)
+
+    def test_frozen_advance_and_final_preserve_their_sales_links(self):
+        order = self.env["sale.order"].create(
+            {
+                "partner_id": self.partner_a.id,
+                "order_line": [
+                    Command.create(
+                        {
+                            "product_id": self.product_a.id,
+                            "product_uom_qty": 1,
+                            "price_unit": 10000,
+                            "tax_ids": [Command.set(self.tax_sale_a.ids)],
+                        }
+                    )
+                ],
+            }
+        )
+        order.action_confirm()
+        advance = self._create_invoice(order, "percentage", 10)
+        advance.action_post()
+        advance.action_l10n_ae_prepare()
+        final = self._create_invoice(order, "delivered")
+        final.action_post()
+        final.action_l10n_ae_prepare()
+        for invoice in (advance, final):
+            line = invoice.invoice_line_ids.filtered("is_downpayment")
+            payload = invoice.l10n_ae_transmission_id.payload
+            xml = invoice.preview_l10n_ae_pint()
+            original_links = line.sale_line_ids.ids
+            for vals in (
+                {"sale_line_ids": [Command.clear()]},
+                {"is_downpayment": False},
+            ):
+                with (
+                    self.subTest(invoice=invoice.id, field=next(iter(vals))),
+                    self.cr.savepoint(),
+                    self.assertRaisesRegex(UserError, "frozen UAE.*line"),
+                ):
+                    line.write(vals)
+            self.assertEqual(line.sale_line_ids.ids, original_links)
+            self.assertTrue(line.is_downpayment)
+            self.assertEqual(invoice.l10n_ae_transmission_id.payload, payload)
+            self.assertEqual(invoice.preview_l10n_ae_pint(), xml)
+        self.assertEqual((advance.amount_total, final.amount_total), (1050, 9450))
 
     def test_final_balance_rejects_unposted_advance_before_accounting_post(self):
         order = self.env["sale.order"].create(

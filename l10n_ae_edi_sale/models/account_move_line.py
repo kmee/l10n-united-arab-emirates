@@ -7,6 +7,12 @@ from odoo.exceptions import UserError
 class AccountMoveLine(models.Model):
     _inherit = "account.move.line"
 
+    def _l10n_ae_fiscal_line_fields(self):
+        return super()._l10n_ae_fiscal_line_fields() | {
+            "sale_line_ids",
+            "is_downpayment",
+        }
+
     def write(self, vals):
         if "quantity" in vals:
             self.check_access("write")
@@ -17,6 +23,9 @@ class AccountMoveLine(models.Model):
                     and line.move_id.move_type == "out_invoice"
                     and line.is_downpayment
                     and line.quantity < 0
+                    and self.env["account.move"]._field_will_change(
+                        line, vals, "quantity"
+                    )
                 )
             ).move_id
             moves._l10n_ae_lock_advance_sources()
