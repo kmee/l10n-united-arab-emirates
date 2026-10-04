@@ -560,6 +560,22 @@ class AccountMove(models.Model):
             return self.action_l10n_ae_generate_conventional_pdf()
         return super().action_print_pdf()
 
+    def _get_invoice_legal_documents(self, filetype, allow_fallback=False):
+        self.ensure_one()
+        transmission = self.l10n_ae_transmission_id.with_context(bin_size=False)
+        if filetype == "pdf" and transmission.conventional_html_content:
+            self.action_l10n_ae_generate_conventional_pdf()
+            return [
+                {
+                    "filename": transmission.conventional_filename,
+                    "filetype": "application/pdf",
+                    "content": transmission.conventional_pdf_content.content,
+                }
+            ]
+        return super()._get_invoice_legal_documents(
+            filetype, allow_fallback=allow_fallback
+        )
+
     def action_l10n_ae_prepare(self):
         self.ensure_one()
         self.check_access("write")
