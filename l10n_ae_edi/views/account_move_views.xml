@@ -107,6 +107,36 @@
                         />
                     </group>
                     <group
+                        string="Reviewed Credit Allocations"
+                        col="1"
+                        invisible="move_type not in ('out_refund', 'in_refund') or l10n_ae_received_document"
+                    >
+                        <field
+                            name="l10n_ae_credit_reference_ids"
+                            nolabel="1"
+                            readonly="l10n_ae_transmission_id"
+                        >
+                            <list editable="bottom">
+                                <field name="currency_id" column_invisible="True" />
+                                <field name="company_id" column_invisible="True" />
+                                <field
+                                    name="invoice_id"
+                                    domain="[('company_id', '=', parent.company_id), ('currency_id', '=', parent.currency_id), ('state', '=', 'posted'), ('move_type', '=', 'in_invoice' if parent.is_self_billing else 'out_invoice')]"
+                                    options="{'no_create': True}"
+                                />
+                                <field name="number" readonly="invoice_id" />
+                                <field name="issue_date" readonly="invoice_id" />
+                                <field name="allocated_net" />
+                                <field name="allocated_tax" />
+                                <field name="review_evidence" />
+                            </list>
+                        </field>
+                        <label
+                            for="l10n_ae_credit_reference_ids"
+                            string="Allocations must match this credit's net and VAT. References do not reconcile accounting."
+                        />
+                    </group>
+                    <group
                         string="E-Invoice Confirmations"
                         invisible="not l10n_ae_transmission_id"
                     >

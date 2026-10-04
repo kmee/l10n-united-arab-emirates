@@ -11,3 +11,5 @@ access_uae_event_invoice,UAE event invoice user,l10n_ae.edi.event,account.group_
 access_uae_selfbilling_readonly,UAE self-billing agreement reader,l10n_ae.selfbilling.agreement,account.group_account_readonly,r,
 access_uae_selfbilling_invoice,UAE self-billing agreement invoice user,l10n_ae.selfbilling.agreement,account.group_account_invoice,r,
 access_uae_selfbilling_manager,UAE self-billing agreement manager,l10n_ae.selfbilling.agreement,account.group_account_manager,crud,
+access_uae_credit_reference_readonly,UAE credit reference reader,l10n_ae.credit.reference,account.group_account_readonly,r,
+access_uae_credit_reference_invoice,UAE credit reference invoice user,l10n_ae.credit.reference,account.group_account_invoice,crud,

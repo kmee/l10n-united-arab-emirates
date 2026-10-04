@@ -124,6 +124,14 @@ class AccountMove(models.Model):
         help="Fiscal UUID supplied by the ASP. Local assignment is available "
         "only in controlled simulation.",
     )
+    l10n_ae_credit_reference_ids = fields.One2many(
+        "l10n_ae.credit.reference",
+        "move_id",
+        string="UAE Credit Allocations",
+        copy=False,
+        help="Reviewed allocations and original references; "
+        "these do not reconcile accounting.",
+    )
     l10n_ae_credit_reason = fields.Selection(
         [
             ("DL8.61.1.A", "Cancelled Supply"),
@@ -230,6 +238,7 @@ class AccountMove(models.Model):
             "l10n_ae_beneficiary_id",
             "l10n_ae_document_category",
             "l10n_ae_credit_reason",
+            "l10n_ae_credit_reference_ids",
         } | set(UAE_TRANSACTION_FLAG_FIELDS)
         received_fields = identity_fields | {
             "l10n_ae_received_agreement_snapshot",
@@ -334,6 +343,16 @@ class AccountMove(models.Model):
             }
             if self.reversed_entry_id
             else None,
+            "preceding_invoices": [
+                {
+                    "number": ref.number,
+                    "issue_date": fields.Date.to_string(ref.issue_date),
+                    "allocated_net": amount(ref.allocated_net),
+                    "allocated_vat": amount(ref.allocated_tax),
+                    "review_evidence": ref.review_evidence or None,
+                }
+                for ref in self.l10n_ae_credit_reference_ids
+            ],
             "process": "selfbilling" if self.is_self_billing else "billing",
             "currency": self.currency_id.name,
             "tax_exchange": {
@@ -471,6 +490,63 @@ class AccountMove(models.Model):
             "target": "current",
         }
 
+    def _check_l10n_ae_credit_references(self):
+        self.ensure_one()
+        references = self.l10n_ae_credit_reference_ids
+        if references.filtered(
+            lambda ref: not ref.invoice_id and not (ref.review_evidence or "").strip()
+        ):
+            raise UserError(
+                self.env._(
+                    "Record reviewed evidence for the external original invoices "
+                    "and their credit allocations before emission."
+                )
+            )
+        for reference in references.filtered("invoice_id"):
+            original = reference.invoice_id
+            number, issue_date = reference._invoice_identity(original)
+            if (
+                reference.number != number
+                or reference.issue_date != fields.Date.to_date(issue_date)
+            ):
+                raise UserError(
+                    self.env._(
+                        "Preserve the local original identifiers: its invoice "
+                        "number and issue date must match the reviewed reference."
+                    )
+                )
+            expected_type = "in_invoice" if self.is_self_billing else "out_invoice"
+            if (
+                original.state != "posted"
+                or original.move_type != expected_type
+                or original.company_id != self.company_id
+                or original.commercial_partner_id != self.commercial_partner_id
+                or original.currency_id != self.currency_id
+                or original.l10n_ae_document_category != self.l10n_ae_document_category
+                or original.is_self_billing != self.is_self_billing
+                or original.l10n_ae_received_document
+            ):
+                raise UserError(
+                    self.env._(
+                        "Select a posted original invoice for the same company, "
+                        "counterparty, currency, category and process."
+                    )
+                )
+        if references and (
+            self.currency_id.compare_amounts(
+                sum(references.mapped("allocated_net")), self.amount_untaxed
+            )
+            or self.currency_id.compare_amounts(
+                sum(references.mapped("allocated_tax")), self.amount_tax
+            )
+        ):
+            raise UserError(
+                self.env._(
+                    "The UAE credit allocations must match the credit's net "
+                    "amount and VAT, not the original invoices' totals."
+                )
+            )
+
     def action_l10n_ae_validate(self):
         for move in self:
             if move.l10n_ae_received_document:
@@ -523,6 +599,7 @@ class AccountMove(models.Model):
                         "identifier."
                     )
                 )
+            move._check_l10n_ae_credit_references()
             if move.currency_id.name != "AED" and not (
                 move.l10n_ae_tax_exchange_rate
                 and move.l10n_ae_tax_exchange_date

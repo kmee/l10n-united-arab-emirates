@@ -81,6 +81,18 @@ check; automatic preparation blocks posting until an official code is
 selected. Received documents and ordinary vendor reversals do not use
 this outbound wizard field.
 
+For a correction covering several original invoices, create a separate
+customer credit and use **Reviewed Credit Allocations** in its UAE tab.
+Select each posted local original and enter its allocated net/VAT in the
+credit's currency. The original number/date are preserved; company,
+customer, currency, category and process must match. External originals
+require authentic number/date and **External Original Review Evidence**,
+without a fabricated accounting invoice. Allocation totals must match
+the credit's own net/VAT. Preparation protects the rows; XML contains
+separate original references, while allocation amounts stay in internal
+evidence. These links do not reconcile accounting balances. Volume
+discount handling remains unresolved.
+
 For prerequisites, UI steps, expected results and error handling, read
 the repository scenario based user manual in
 `English <https://github.com/kmee/l10n-eua/blob/20.0-add-uae-edi/docs/user/scenarios-en.md>`__
