@@ -2600,7 +2600,7 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         self.assertEqual(transmission.read(observed_fields)[0], original)
         self.assertEqual((invoice.amount_tax, invoice.amount_total), (5, 105))
 
-    def test_pdf_action_refuses_a_transmission_belonging_to_another_invoice(self):
+    def test_pdf_issue_cannot_be_attached_to_another_invoice(self):
         original = self.init_invoice(
             "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
         )
@@ -2617,14 +2617,16 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         unrelated = self.init_invoice(
             "out_invoice", amounts=[200], taxes=self.tax_sale_a, post=True
         )
-        unrelated.l10n_ae_transmission_id = transmission
-        with self.assertRaisesRegex(UserError, "belongs to another invoice"):
+        with self.assertRaisesRegex(UserError, "frozen UAE invoice reference"):
+            unrelated.l10n_ae_transmission_id = transmission
+        self.assertFalse(unrelated.l10n_ae_transmission_id)
+        with self.assertRaisesRegex(UserError, "Prepare"):
             unrelated.action_l10n_ae_generate_conventional_pdf()
         self.assertFalse(transmission.conventional_pdf_content)
         self.assertEqual(transmission.move_id, original)
         self.assertEqual((original.amount_total, unrelated.amount_total), (105, 210))
 
-    def test_xml_preview_refuses_a_transmission_belonging_to_another_invoice(self):
+    def test_xml_issue_cannot_be_attached_to_another_invoice(self):
         original = self.init_invoice(
             "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
         )
@@ -2641,9 +2643,10 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         unrelated = self.init_invoice(
             "out_invoice", amounts=[200], taxes=self.tax_sale_a, post=True
         )
-        unrelated.l10n_ae_transmission_id = original.l10n_ae_transmission_id
-        with self.assertRaisesRegex(UserError, "belongs to another invoice"):
-            unrelated.preview_l10n_ae_pint()
+        with self.assertRaisesRegex(UserError, "frozen UAE invoice reference"):
+            unrelated.l10n_ae_transmission_id = original.l10n_ae_transmission_id
+        self.assertFalse(unrelated.l10n_ae_transmission_id)
+        self.assertNotEqual(unrelated.preview_l10n_ae_pint(), frozen)
         self.assertEqual(original.preview_l10n_ae_pint(), frozen)
         self.assertEqual((original.amount_total, unrelated.amount_total), (105, 210))
 
