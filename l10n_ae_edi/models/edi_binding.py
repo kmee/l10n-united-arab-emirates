@@ -5,7 +5,13 @@ import os
 from odoo import api, fields, models
 from odoo.exceptions import AccessError, UserError, ValidationError
 
+from ..tools.controlled_client import ControlledAspClient, ControlledAspError
 from ..tools.controlled_executor import ControlledExecutor
+
+SCHEDULED_DIAGNOSTIC_FIELDS = {
+    "controlled_dispatch_error",
+    "controlled_dispatch_error_at",
+}
 
 
 class UaeEdiBinding(models.Model):
@@ -25,6 +31,17 @@ class UaeEdiBinding(models.Model):
         help="Dispatch committed sandbox invoices through the native scheduled action. "
         "Requires a loopback endpoint and synthetic token in protected "
         "process configuration.",
+    )
+    controlled_dispatch_error = fields.Selection(
+        [("configuration", "Controlled Sending Configuration Required")],
+        string="Scheduled Sending Review",
+        readonly=True,
+        copy=False,
+    )
+    controlled_dispatch_error_at = fields.Datetime(
+        string="Scheduled Sending Review Time",
+        readonly=True,
+        copy=False,
     )
     environment = fields.Selection(
         [("sandbox", "Sandbox"), ("production", "Production")],
@@ -90,25 +107,41 @@ class UaeEdiBinding(models.Model):
             prefix = f"KMEE_UAE_CONTROLLED_{binding.id}"
             endpoint = os.environ.get(prefix + "_ENDPOINT")
             token = os.environ.get(prefix + "_TOKEN")
-            if not endpoint or not token:
-                raise UserError(
-                    self.env._(
-                        "Protected controlled dispatch configuration is unavailable "
-                        "for binding %(binding)s.",
-                        binding=binding.name,
-                    )
-                )
             routes.append((binding.id, binding.company_id.id, endpoint, token))
         registry, uid = self.env.registry, self.env.uid
         progress = self.env["ir.cron"]
         if not progress._commit_progress(remaining=len(routes)):
             return
         for binding_id, company_id, endpoint, token in routes:
-            ControlledExecutor(registry, uid, company_id, endpoint, token).run_pending(
-                binding_id
-            )
+            binding = self.browse(binding_id)
+            configured = bool(endpoint and token)
+            if configured:
+                try:
+                    ControlledAspClient(endpoint, token, binding.provider)
+                except (ControlledAspError, ValueError):
+                    configured = False
+            if not configured:
+                binding._record_controlled_dispatch_configuration(True)
+            else:
+                binding._record_controlled_dispatch_configuration(False)
+                ControlledExecutor(
+                    registry, uid, company_id, endpoint, token
+                ).run_pending(binding_id)
             if not progress._commit_progress(1):
                 return
+
+    def _record_controlled_dispatch_configuration(self, failed):
+        self.ensure_one()
+        if not failed and not self.controlled_dispatch_error:
+            return
+        return super().write(
+            {
+                "controlled_dispatch_error": "configuration" if failed else False,
+                "controlled_dispatch_error_at": fields.Datetime.now()
+                if failed
+                else False,
+            }
+        )
 
     _one_production_asp = models.UniqueIndex(
         "(company_id) WHERE active IS TRUE AND environment = 'production'",
@@ -117,6 +150,15 @@ class UaeEdiBinding(models.Model):
 
     @api.model_create_multi
     def create(self, vals_list):
+        if any(
+            any(vals.get(field) for field in SCHEDULED_DIAGNOSTIC_FIELDS)
+            for vals in vals_list
+        ):
+            raise UserError(
+                self.env._(
+                    "Scheduled sending diagnostics are managed by the native scheduler."
+                )
+            )
         defaults = self.default_get(["company_id", "active", "environment"])
         production_companies = set()
         for vals in vals_list:
@@ -138,3 +180,12 @@ class UaeEdiBinding(models.Model):
                     )
                 production_companies.add(company_id)
         return super().create(vals_list)
+
+    def write(self, vals):
+        if SCHEDULED_DIAGNOSTIC_FIELDS.intersection(vals):
+            raise UserError(
+                self.env._(
+                    "Scheduled sending diagnostics are managed by the native scheduler."
+                )
+            )
+        return super().write(vals)

@@ -17,6 +17,14 @@
                             name="controlled_dispatch_enabled"
                             invisible="environment != 'sandbox'"
                         />
+                        <field
+                            name="controlled_dispatch_error"
+                            invisible="not controlled_dispatch_error"
+                        />
+                        <field
+                            name="controlled_dispatch_error_at"
+                            invisible="not controlled_dispatch_error"
+                        />
                     </group>
                     <div
                         class="text-muted"
@@ -40,6 +48,8 @@
                 <field name="environment" />
                 <field name="fiscal_uuid_policy" />
                 <field name="active" />
+                <field name="controlled_dispatch_error" optional="show" />
+                <field name="controlled_dispatch_error_at" optional="hide" />
             </list>
         </field>
     </record>
