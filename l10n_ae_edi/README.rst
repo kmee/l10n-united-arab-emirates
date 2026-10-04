@@ -81,6 +81,16 @@ check; automatic preparation blocks posting until an official code is
 selected. Received documents and ordinary vendor reversals do not use
 this outbound wizard field.
 
+For a buyer-issued self-billed purchase adjustment, use the same native
+wizard and review partial lines. The resulting vendor credit retains the
+self-billing journal, official reason and original reference. Select an
+eligible **UAE Self-Billing Agreement** again for its company,
+commercial supplier and date: the wizard does not copy it. Missing
+agreement blocks check/post with automatic preparation before
+UUID/transmission. Supplier contacts use their commercial entity's
+agreements. Confirm the purchase fiscal position and line VAT with the
+tax specialist if the expected tax is unavailable.
+
 For a reviewed commercial sale or credit, select **Commercial Document**
 and the taxes determined by the tax specialist. With the PINT addon
 installed, **IBR-122-AE** blocks standard VAT at **Check UAE Data** and
