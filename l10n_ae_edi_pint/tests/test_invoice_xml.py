@@ -2357,6 +2357,36 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         self.assertEqual(bill.company_id.partner_id.routing_endpoint, "1000000001")
         self.assertEqual(self.partner_a.routing_endpoint, "1000000002")
 
+    def test_prepared_deemed_supply_declares_reporting_only_without_c3_obligations(
+        self,
+    ):
+        invoice = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
+        )
+        invoice.write(
+            {
+                "l10n_ae_deemed_supply": True,
+                "l10n_ae_fiscal_uuid": "aaaaaaae-3333-4333-8333-333333333333",
+                "l10n_ae_binding_id": self.env["l10n_ae.edi.binding"]
+                .create({"name": "Deemed reporting-only obligations"})
+                .id,
+            }
+        )
+        invoice.action_l10n_ae_prepare()
+        transmission = invoice.l10n_ae_transmission_id
+        self.assertEqual(
+            json.loads(transmission.payload).get("exchange_mode"), "reporting_only"
+        )
+        self.assertEqual(transmission.exchange_mode, "reporting_only")
+        self.assertEqual(transmission.submission_state, "queued")
+        self.assertEqual(transmission.validation_c2_state, "unknown")
+        self.assertEqual(transmission.reporting_c2_state, "unknown")
+        self.assertEqual(transmission.delivery_c3_state, "not_applicable")
+        self.assertEqual(transmission.reporting_c3_state, "not_applicable")
+        self.assertFalse(transmission.attempt_ids)
+        self.assertFalse(transmission.event_ids)
+        self.assertEqual((invoice.amount_tax, invoice.amount_total), (5, 105))
+
     def test_combined_free_zone_export_preserves_eight_bits_and_beneficiary(self):
         invoice = self.init_invoice(
             "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
