@@ -14,7 +14,10 @@ and rollback while retaining original fiscal bytes. Posted negative deduction qu
 price and discount edits coordinate the source before preparation rechecks consumption.
 Native Sales link replacement coordinates both the old and new advance sources before
 mutation, so preparation rechecks consumed capacity on each. Identical pricing preserves
-source metadata; native posted tax restrictions remain.
+source metadata; native posted tax restrictions remain. Native down-payment
+classification changes also coordinate the source before mutation, including a line
+that becomes a deduction. Stale preparation rechecks released or added consumption;
+posted balances and original fiscal bytes remain unchanged.
 Frozen advance/final fiscal line
 changes and Sales link changes are refused; identical writes remain native. Shared-source
 capacity coordination for every mutable line field, multiple advances, full

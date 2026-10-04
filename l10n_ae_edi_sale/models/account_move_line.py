@@ -19,6 +19,7 @@ class AccountMoveLine(models.Model):
             "price_unit",
             "discount",
             "sale_line_ids",
+            "is_downpayment",
         }.intersection(vals)
         if consumption_fields:
             self.check_access("write")
@@ -27,7 +28,7 @@ class AccountMoveLine(models.Model):
                     line.move_id.state == "posted"
                     and line.company_id.country_code == "AE"
                     and line.move_id.move_type == "out_invoice"
-                    and line.is_downpayment
+                    and (line.is_downpayment or vals.get("is_downpayment"))
                     and line.quantity < 0
                     and any(
                         self.env["account.move"]._field_will_change(line, vals, name)
@@ -36,10 +37,12 @@ class AccountMoveLine(models.Model):
                 )
             ).move_id
             new_sources = self.env["account.move"]
-            if "sale_line_ids" in consumption_fields:
+            if {"sale_line_ids", "is_downpayment"}.intersection(consumption_fields):
                 for line in self.filtered(lambda line: line.move_id in moves):
-                    projected = line.new(
-                        {"sale_line_ids": vals["sale_line_ids"]}, origin=line
+                    projected = (
+                        line.new({"sale_line_ids": vals["sale_line_ids"]}, origin=line)
+                        if "sale_line_ids" in vals
+                        else line
                     )
                     linked = (
                         projected.sale_line_ids._origin.filtered("is_downpayment")
