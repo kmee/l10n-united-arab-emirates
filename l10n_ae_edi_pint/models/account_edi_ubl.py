@@ -138,8 +138,11 @@ class AccountEdiUblUae(models.AbstractModel):
     def _ubl_add_line_item_name_description_nodes(self, vals):
         result = super()._ubl_add_line_item_name_description_nodes(vals)
         if not vals["item_node"].get("cbc:Description"):
+            base_line = vals["line_vals"]["base_line"]
+            # Native Sales may leave the custom line description empty while
+            # displaying the product's name. Preserve that actual item label.
             vals["item_node"]["cbc:Description"] = {
-                "_text": vals["line_vals"]["base_line"].get("name")
+                "_text": base_line.get("name") or base_line["product_id"].display_name
             }
         return result
 
