@@ -1,4 +1,7 @@
 id,name,model_id,group_id/id,operation,domain
+access_uae_binding_event_receiver,UAE binding event receiver,l10n_ae.edi.binding,group_event_receiver,r,
+access_uae_transmission_event_receiver,UAE transmission event receiver,l10n_ae.edi.transmission,group_event_receiver,r,
+access_uae_event_event_receiver,UAE event service evidence reader,l10n_ae.edi.event,group_event_receiver,r,
 access_uae_binding_accountant,UAE binding accountant,l10n_ae.edi.binding,account.group_account_readonly,r,
 access_uae_binding_manager,UAE binding manager,l10n_ae.edi.binding,account.group_account_manager,crud,
 access_uae_binding_invoice,UAE binding invoice user,l10n_ae.edi.binding,account.group_account_invoice,r,

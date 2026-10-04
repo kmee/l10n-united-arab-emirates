@@ -11,6 +11,7 @@
     "license": "AGPL-3",
     "depends": ["l10n_ae", "account_edi"],
     "data": [
+        "security/edi_groups.xml",
         "security/ir.access.csv",
         "security/edi_security.xml",
         "data/ir_cron.xml",
