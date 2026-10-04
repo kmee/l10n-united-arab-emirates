@@ -81,6 +81,15 @@ check; automatic preparation blocks posting until an official code is
 selected. Received documents and ordinary vendor reversals do not use
 this outbound wizard field.
 
+For a reviewed commercial sale or credit, select **Commercial Document**
+and the taxes determined by the tax specialist. With the PINT addon
+installed, **IBR-122-AE** blocks standard VAT at **Check UAE Data** and
+automatic preparation on **Confirm**, retaining the draft without a
+UUID/transmission. Review the line taxes; the system does not change
+their classification automatically. Formal PINT validation remains
+required. The native credit wizard preserves the commercial category,
+which is protected after preparation.
+
 For a correction covering several original invoices, create a separate
 customer credit and use **Reviewed Credit Allocations** in its UAE tab.
 Select each posted local original and enter its allocated net/VAT in the

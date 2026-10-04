@@ -35,7 +35,7 @@
                         />
                         <field
                             name="l10n_ae_document_category"
-                            readonly="l10n_ae_received_document"
+                            readonly="l10n_ae_transmission_id or l10n_ae_received_document"
                         />
                         <field
                             name="l10n_ae_received_process"
