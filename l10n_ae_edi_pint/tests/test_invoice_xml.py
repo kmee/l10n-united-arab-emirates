@@ -2357,6 +2357,222 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         self.assertEqual(bill.company_id.partner_id.routing_endpoint, "1000000001")
         self.assertEqual(self.partner_a.routing_endpoint, "1000000002")
 
+    def test_reviewed_domestic_business_buyer_without_onboarding_uses_destination_98(
+        self,
+    ):
+        self.partner_a.routing_endpoint = False
+        invoice = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
+        )
+        invoice.l10n_ae_fiscal_uuid = "aaaaaaaf-1111-4111-8111-111111111111"
+        try:
+            invoice.write(
+                {
+                    "l10n_ae_buyer_not_implemented": True,
+                    "l10n_ae_buyer_onboarding_review_date": "2019-01-01",
+                    "l10n_ae_buyer_onboarding_review_reference": (
+                        "SYNTH-DOMESTIC-BUSINESS-NOT-IMPLEMENTED"
+                    ),
+                }
+            )
+        except (ValueError, KeyError) as error:
+            self.fail(
+                "The public invoice action cannot record reviewed buyer "
+                f"availability: {error}"
+            )
+        xml = etree.fromstring(invoice.preview_l10n_ae_pint().encode())
+        buyer = xml.find("cac:AccountingCustomerParty/cac:Party", NS)
+        endpoint = buyer.find("cbc:EndpointID", NS)
+        self.assertEqual(
+            (endpoint.get("schemeID"), endpoint.text), ("0235", "9900000098")
+        )
+        self.assertEqual(
+            xml.findtext("cbc:ProfileExecutionID", namespaces=NS), "00000000"
+        )
+        self.assertEqual(
+            buyer.findtext("cac:PartyTaxScheme/cbc:CompanyID", namespaces=NS),
+            "100000000200003",
+        )
+        self.assertFalse(self.partner_a.routing_endpoint)
+        self.assertEqual(self.partner_a.vat, "100000000200003")
+        self.assertEqual(
+            (invoice.amount_untaxed, invoice.amount_tax, invoice.amount_total),
+            (100, 5, 105),
+        )
+        report = invoice.validate_l10n_ae_pint()
+        self.assertTrue(report["valid"], report)
+
+    def test_buyer_not_implemented_requires_dated_review_evidence(self):
+        self.partner_a.routing_endpoint = False
+        invoice = self.init_invoice("out_invoice", amounts=[100], taxes=self.tax_sale_a)
+        for review_date, review_reference in (
+            (False, "SYNTH-NOT-IMPLEMENTED"),
+            ("2019-01-01", False),
+            ("2019-01-01", "   "),
+        ):
+            with self.subTest(date=review_date, reference=review_reference):
+                invoice.write(
+                    {
+                        "l10n_ae_buyer_not_implemented": True,
+                        "l10n_ae_buyer_onboarding_review_date": review_date,
+                        "l10n_ae_buyer_onboarding_review_reference": review_reference,
+                    }
+                )
+                with self.assertRaisesRegex(UserError, "review date and source"):
+                    invoice.action_l10n_ae_validate()
+                self.assertFalse(invoice.l10n_ae_transmission_id)
+                self.assertFalse(invoice.l10n_ae_fiscal_uuid)
+                self.assertEqual(
+                    (invoice.state, invoice.amount_tax, invoice.amount_total),
+                    ("draft", 5, 105),
+                )
+
+    def test_buyer_status_review_cannot_replace_an_existing_participant_id(self):
+        invoice = self.init_invoice("out_invoice", amounts=[100], taxes=self.tax_sale_a)
+        invoice.write(
+            {
+                "l10n_ae_buyer_not_implemented": True,
+                "l10n_ae_buyer_onboarding_review_date": "2019-01-01",
+                "l10n_ae_buyer_onboarding_review_reference": "SYNTH-CONFLICTING-STATUS",
+            }
+        )
+        with self.assertRaisesRegex(UserError, "existing Participant ID"):
+            invoice.action_l10n_ae_validate()
+        self.assertEqual(self.partner_a.routing_endpoint, "1000000002")
+        self.assertEqual(self.partner_a.vat, "100000000200003")
+        self.assertFalse(invoice.l10n_ae_transmission_id)
+        self.assertEqual((invoice.state, invoice.amount_total), ("draft", 105))
+
+    def test_buyer_not_implemented_requires_a_domestic_buyer_country(self):
+        self.partner_a.routing_endpoint = False
+        invoice = self.init_invoice("out_invoice", amounts=[100], taxes=self.tax_sale_a)
+        invoice.write(
+            {
+                "l10n_ae_buyer_not_implemented": True,
+                "l10n_ae_buyer_onboarding_review_date": "2019-01-01",
+                "l10n_ae_buyer_onboarding_review_reference": "SYNTH-DOMESTIC-REVIEW",
+            }
+        )
+        for country in (self.env.ref("base.us"), self.env["res.country"]):
+            with self.subTest(country=country.code):
+                self.partner_a.country_id = country
+                self.partner_a.routing_endpoint = False
+                with self.assertRaisesRegex(UserError, "domestic UAE business buyer"):
+                    invoice.action_l10n_ae_validate()
+                self.assertFalse(self.partner_a.routing_endpoint)
+                self.assertFalse(invoice.l10n_ae_transmission_id)
+                self.assertEqual((invoice.state, invoice.amount_total), ("draft", 105))
+
+    def test_buyer_not_implemented_cannot_mix_incompatible_routing_processes(self):
+        self.partner_a.routing_endpoint = False
+        for flag in ("l10n_ae_deemed_supply", "l10n_ae_exports", "is_self_billing"):
+            with self.subTest(flag=flag):
+                if flag == "is_self_billing":
+                    invoice, _agreement = self._selfbilling_bill_with_agreement()
+                    self.partner_a.routing_endpoint = False
+                else:
+                    invoice = self.init_invoice(
+                        "out_invoice", amounts=[100], taxes=self.tax_sale_a
+                    )
+                invoice.write(
+                    {
+                        "l10n_ae_buyer_not_implemented": True,
+                        "l10n_ae_buyer_onboarding_review_date": "2019-01-01",
+                        "l10n_ae_buyer_onboarding_review_reference": (
+                            "SYNTH-AMBIGUOUS-ROUTING"
+                        ),
+                        flag: True,
+                    }
+                )
+                with self.assertRaisesRegex(
+                    UserError, "not-yet-implemented buyer routing"
+                ):
+                    invoice.action_l10n_ae_validate()
+                self.assertFalse(invoice.l10n_ae_transmission_id)
+                self.assertEqual((invoice.state, invoice.amount_total), ("draft", 105))
+
+    def test_prepared_buyer98_freezes_review_and_separate_delivery_obligation(self):
+        self.partner_a.routing_endpoint = False
+        invoice = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
+        )
+        invoice.write(
+            {
+                "l10n_ae_buyer_not_implemented": True,
+                "l10n_ae_buyer_onboarding_review_date": "2019-01-01",
+                "l10n_ae_buyer_onboarding_review_reference": "SYNTH-BUYER98-REVIEW",
+                "l10n_ae_fiscal_uuid": "aaaaaaaf-2222-4222-8222-222222222222",
+                "l10n_ae_binding_id": self.env["l10n_ae.edi.binding"]
+                .create({"name": "Buyer98 reviewed destination"})
+                .id,
+            }
+        )
+        invoice.action_l10n_ae_prepare()
+        transmission = invoice.l10n_ae_transmission_id
+        payload = transmission.payload
+        xml = transmission.xml_content
+        snapshot = json.loads(payload)
+        self.assertEqual(
+            snapshot.get("buyer_onboarding_review"),
+            {
+                "status": "not_implemented",
+                "date": "2019-01-01",
+                "source": "SYNTH-BUYER98-REVIEW",
+            },
+        )
+        self.assertEqual(
+            snapshot.get("alternative_delivery"),
+            {"required": True, "reason": "buyer_not_implemented"},
+        )
+        self.assertEqual(
+            snapshot["destination"],
+            {
+                "scheme": "0235",
+                "endpoint": "9900000098",
+                "reason": "buyer_not_implemented",
+            },
+        )
+        self.assertIsNone(snapshot["buyer"]["endpoint"])
+        self.assertEqual(snapshot["buyer"]["vat"], "100000000200003")
+        self.assertEqual(transmission.exchange_mode, "reporting_only")
+        self.assertEqual(transmission.confirmation_state, "pending")
+        self.assertEqual(transmission.delivery_c3_state, "not_applicable")
+        self.assertEqual(transmission.reporting_c3_state, "not_applicable")
+        self.partner_a.routing_endpoint = "1000000004"
+        self.assertEqual(invoice.preview_l10n_ae_pint(), xml)
+        self.assertEqual(transmission.payload, payload)
+        self.assertEqual((invoice.amount_tax, invoice.amount_total), (5, 105))
+
+    def test_prepared_buyer98_review_cannot_be_rewritten_by_an_administrator(self):
+        self.partner_a.routing_endpoint = False
+        invoice = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
+        )
+        invoice.write(
+            {
+                "l10n_ae_buyer_not_implemented": True,
+                "l10n_ae_buyer_onboarding_review_date": "2019-01-01",
+                "l10n_ae_buyer_onboarding_review_reference": "SYNTH-FROZEN-BUYER98",
+                "l10n_ae_fiscal_uuid": "aaaaaaaf-3333-4333-8333-333333333333",
+                "l10n_ae_binding_id": self.env["l10n_ae.edi.binding"]
+                .create({"name": "Protected buyer98 review"})
+                .id,
+            }
+        )
+        invoice.action_l10n_ae_prepare()
+        payload = invoice.l10n_ae_transmission_id.payload
+        xml = invoice.l10n_ae_transmission_id.xml_content
+        for field, value in (
+            ("l10n_ae_buyer_not_implemented", False),
+            ("l10n_ae_buyer_onboarding_review_date", "2019-01-02"),
+            ("l10n_ae_buyer_onboarding_review_reference", "REPLACEMENT"),
+        ):
+            with self.subTest(field=field):
+                with self.assertRaisesRegex(UserError, "frozen UAE"):
+                    invoice.sudo().write({field: value})
+                self.assertEqual(invoice.l10n_ae_transmission_id.payload, payload)
+                self.assertEqual(invoice.preview_l10n_ae_pint(), xml)
+
     def test_prepared_deemed_supply_declares_reporting_only_without_c3_obligations(
         self,
     ):
