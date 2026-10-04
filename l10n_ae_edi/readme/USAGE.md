@@ -52,9 +52,19 @@ If controlled batch validation stops a prepared document locally, its UAE tab sh
 to inspect the preserved document. The document is excluded from subsequent automatic
 batch selections while other eligible invoices continue. This records no remote
 attempt or ASP rejection and does not modify the posted invoice or frozen evidence.
-Automatic correction/unblocking, scheduling and retry backoff remain required work.
+Automatic correction/unblocking and complete operational recovery remain required work.
 
 For prerequisites, UI steps, expected results and error handling, read the repository
 scenario based user manual in
 [English](https://github.com/kmee/l10n-eua/blob/20.0-add-uae-edi/docs/user/scenarios-en.md)
 or [Português](https://github.com/kmee/l10n-eua/blob/20.0-add-uae-edi/docs/user/scenarios-pt_BR.md).
+
+For scheduled controlled sending, accounting managers open **UAE Provider Bindings**,
+select the reviewed **Sandbox** binding and enable **Automatic Controlled Dispatch**.
+Support must configure a native Odoo cron worker and protected local API credentials.
+The default is off; production bindings cannot enable it. The native job checks eligible
+committed invoices every minute. Queuing on posting is a separate company option.
+API acceptance leaves fiscal/delivery confirmations pending. Missing scheduler
+configuration leaves the invoice queued; ask support to inspect native Scheduled Actions.
+Archiving prevents new submissions but retains reconciliation of existing attempts while
+scheduling stays enabled. Disabling scheduling also stops automatic lookup.

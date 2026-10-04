@@ -13,6 +13,10 @@
                         <field name="provider" />
                         <field name="environment" />
                         <field name="fiscal_uuid_policy" />
+                        <field
+                            name="controlled_dispatch_enabled"
+                            invisible="environment != 'sandbox'"
+                        />
                     </group>
                     <div
                         class="text-muted"

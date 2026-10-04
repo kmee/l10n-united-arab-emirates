@@ -13,6 +13,7 @@
     "data": [
         "security/ir.access.csv",
         "security/edi_security.xml",
+        "data/ir_cron.xml",
         "views/edi_binding_views.xml",
         "views/selfbilling_agreement_views.xml",
         "views/res_company_views.xml",
