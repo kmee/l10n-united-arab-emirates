@@ -39,6 +39,13 @@ class UaeEdiTransmission(models.Model):
     origin_system = fields.Char(required=True)
     origin_document_id = fields.Char(required=True)
     revision = fields.Integer(default=1, required=True)
+    local_correction_id = fields.Many2one(
+        "l10n_ae.edi.correction",
+        readonly=True,
+        copy=False,
+        ondelete="restrict",
+        check_company=True,
+    )
     payload = fields.Text(required=True, readonly=True)
     payload_hash = fields.Char(required=True, readonly=True)
     xml_content = fields.Text(readonly=True)
@@ -271,6 +278,8 @@ class UaeEdiTransmission(models.Model):
         if not self.env.cr.fetchone():
             return None
         self.invalidate_recordset()
+        if self.local_correction_id:
+            return None
         if (
             self.submission_state == "accepted"
             or (self.submission_state == "sending" and self.lease_until > now)
@@ -375,6 +384,7 @@ class UaeEdiTransmission(models.Model):
 
     def write(self, vals):
         immutable = {
+            "local_correction_id",
             "move_id",
             "company_id",
             "binding_id",
@@ -420,6 +430,10 @@ class UaeEdiTransmission(models.Model):
         if immutable.intersection(vals):
             raise UserError(self.env._("Frozen UAE invoice evidence is immutable."))
         return super().write(vals)
+
+    def _set_local_correction(self, correction):
+        self.ensure_one()
+        return super().write({"local_correction_id": correction.id})
 
     @api.ondelete(at_uninstall=False)
     def _unlink_except_frozen_evidence(self):

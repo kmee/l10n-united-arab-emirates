@@ -7,7 +7,7 @@ import uuid
 from decimal import Decimal
 
 from odoo import api, fields, models
-from odoo.exceptions import UserError
+from odoo.exceptions import AccessError, UserError
 
 UAE_TRANSACTION_FLAG_FIELDS = (
     "l10n_ae_free_zone",
@@ -23,6 +23,22 @@ UAE_TRANSACTION_FLAG_FIELDS = (
 
 class AccountMove(models.Model):
     _inherit = "account.move"
+
+    l10n_ae_correction_id = fields.Many2one(
+        "l10n_ae.edi.correction",
+        string="Local UAE Correction",
+        readonly=True,
+        copy=False,
+        check_company=True,
+        ondelete="restrict",
+    )
+    l10n_ae_transmission_ids = fields.One2many(
+        "l10n_ae.edi.transmission",
+        "move_id",
+        string="UAE Issue History",
+        readonly=True,
+        copy=False,
+    )
 
     l10n_ae_received_document = fields.Boolean(
         string="Received UAE Document", readonly=True, copy=False
@@ -93,6 +109,15 @@ class AccountMove(models.Model):
 
     @api.model_create_multi
     def create(self, vals_list):
+        history_fields = {
+            "l10n_ae_correction_id",
+            "l10n_ae_transmission_id",
+            "l10n_ae_transmission_ids",
+        }
+        if any(any(vals.get(name) for name in history_fields) for vals in vals_list):
+            raise UserError(
+                self.env._("UAE issue and correction history references are protected.")
+            )
         if any("l10n_ae_received_document" in vals for vals in vals_list):
             raise UserError(self.env._("The received UAE origin is protected."))
         return super().create(vals_list)
@@ -249,6 +274,26 @@ class AccountMove(models.Model):
         return posted
 
     def write(self, vals):
+        protected = {
+            "l10n_ae_correction_id",
+            "l10n_ae_transmission_ids",
+            "l10n_ae_transmission_id",
+        }
+        origin = {
+            "l10n_ae_origin_system",
+            "l10n_ae_origin_document_id",
+            "company_id",
+            "move_type",
+        }
+        if protected.intersection(vals) or (
+            origin.intersection(vals) and self.filtered("l10n_ae_transmission_ids")
+        ):
+            raise UserError(
+                self.env._(
+                    "The frozen UAE invoice reference and business identity "
+                    "cannot be changed."
+                )
+            )
         if "l10n_ae_received_document" in vals:
             raise UserError(self.env._("The received UAE origin is protected."))
         if vals.get("state") in ("draft", "cancel") and self.filtered(
@@ -588,6 +633,95 @@ class AccountMove(models.Model):
             filetype, allow_fallback=allow_fallback
         )
 
+    def action_l10n_ae_start_local_correction(self):
+        self.ensure_one()
+        self.check_access("write")
+        if not self.env.user.has_group("account.group_account_manager"):
+            raise AccessError(
+                self.env._("Only accounting managers can correct UAE issues.")
+            )
+        return {
+            "type": "ir.actions.act_window",
+            "res_model": "l10n_ae.edi.correction.wizard",
+            "view_mode": "form",
+            "target": "new",
+            "context": {
+                "default_move_id": self.id,
+                "default_source_transmission_id": self.l10n_ae_transmission_id.id,
+            },
+        }
+
+    def _start_l10n_ae_local_correction(self, source, reason):
+        self.ensure_one()
+        self.check_access("write")
+        if not self.env.user.has_group("account.group_account_manager"):
+            raise AccessError(
+                self.env._("Only accounting managers can correct UAE issues.")
+            )
+        source.ensure_one()
+        source.check_access("read")
+        if not reason or not reason.strip():
+            raise UserError(
+                self.env._("Explain the local correction before continuing.")
+            )
+        self.flush_recordset()
+        self.env.cr.execute(
+            "SELECT id FROM account_move WHERE id = %s FOR UPDATE", [self.id]
+        )
+        self.invalidate_recordset()
+        source.flush_recordset()
+        self.env.cr.execute(
+            "SELECT id FROM l10n_ae_edi_transmission WHERE id = %s FOR UPDATE",
+            [source.id],
+        )
+        source.invalidate_recordset()
+        if source.move_id != self or source.company_id != self.company_id:
+            raise UserError(
+                self.env._(
+                    "The local correction source belongs to another invoice or company."
+                )
+            )
+        action = {
+            "type": "ir.actions.act_window",
+            "res_model": "account.move",
+            "res_id": self.id,
+            "view_mode": "form",
+            "target": "current",
+        }
+        if source.local_correction_id:
+            return action
+        if (
+            self.l10n_ae_transmission_id != source
+            or self.state != "posted"
+            or source.environment != "sandbox"
+            or source.submission_state != "queued"
+            or source.attempt_ids
+            or source.remote_id
+            or source.event_ids
+            or source.validation_receipt
+        ):
+            raise UserError(
+                self.env._(
+                    "Correct only a queued sandbox issue with no transport "
+                    "attempt or remote facts."
+                )
+            )
+        with self.env.cr.savepoint():
+            correction = (
+                self.env["l10n_ae.edi.correction"]
+                .sudo()
+                ._begin(self, source, reason.strip())
+            )
+            source.sudo()._set_local_correction(correction)
+            super().write(
+                {
+                    "l10n_ae_transmission_id": False,
+                    "l10n_ae_correction_id": correction.id,
+                }
+            )
+            self.button_draft()
+        return action
+
     def action_l10n_ae_prepare(self):
         self.ensure_one()
         self.check_access("write")
@@ -626,6 +760,22 @@ class AccountMove(models.Model):
                     )
                 )
             with self.env.cr.savepoint():
+                correction = self.l10n_ae_correction_id
+                source = correction.source_transmission_id
+                if correction and (
+                    correction.replacement_transmission_id
+                    or source.binding_id != binding
+                    or source.company_id != self.company_id
+                    or source.process != self._l10n_ae_snapshot()["process"]
+                    or source.origin_system != self.l10n_ae_origin_system
+                    or source.origin_document_id != self.l10n_ae_origin_document_id
+                ):
+                    raise UserError(
+                        self.env._(
+                            "Preserve the local correction's company, process, "
+                            "origin and sandbox binding."
+                        )
+                    )
                 uuid_source = "supplied" if self.l10n_ae_fiscal_uuid else None
                 if (
                     not self.l10n_ae_fiscal_uuid
@@ -640,6 +790,12 @@ class AccountMove(models.Model):
                     "environment": binding.environment,
                     "simulation": True,
                 }
+                if correction and self.l10n_ae_fiscal_uuid:
+                    previous = json.loads(source.payload)
+                    if previous.get("fiscal_uuid") == self.l10n_ae_fiscal_uuid:
+                        snapshot["fiscal_uuid_assignment"] = previous[
+                            "fiscal_uuid_assignment"
+                        ]
                 xml_content = self._l10n_ae_prepare_xml()
                 presentation = self._l10n_ae_conventional_presentation(snapshot)
                 payload = json.dumps(
@@ -659,6 +815,7 @@ class AccountMove(models.Model):
                             "provider": binding.provider,
                             "environment": binding.environment,
                             "process": snapshot["process"],
+                            "revision": source.revision + 1 if correction else 1,
                             "exchange_mode": snapshot["exchange_mode"],
                             "delivery_c3_state": "not_applicable"
                             if snapshot["exchange_mode"] == "reporting_only"
@@ -679,7 +836,9 @@ class AccountMove(models.Model):
                         }
                     )
                 )
-                self.l10n_ae_transmission_id = transmission
+                super().write({"l10n_ae_transmission_id": transmission.id})
+                if correction:
+                    correction.sudo()._complete(transmission)
         return {
             "type": "ir.actions.act_window",
             "res_model": "l10n_ae.edi.transmission",

@@ -35,6 +35,17 @@
                         />
                         <field name="l10n_ae_transmission_id" readonly="True" />
                         <field name="l10n_ae_submission_state" readonly="True" />
+                        <button
+                            name="action_l10n_ae_start_local_correction"
+                            type="object"
+                            string="Correct Before Sending"
+                            groups="account.group_account_manager"
+                            invisible="state != 'posted' or not l10n_ae_transmission_id or l10n_ae_submission_state != 'queued'"
+                        />
+                        <field
+                            name="l10n_ae_correction_id"
+                            invisible="not l10n_ae_correction_id"
+                        />
                         <field
                             name="l10n_ae_received_document"
                             readonly="True"
@@ -165,6 +176,27 @@
                         <label
                             for="l10n_ae_received_payable_amount"
                             string="Review these declared amounts; local payments are not imported."
+                        />
+                    </group>
+                    <group
+                        string="UAE Issue History"
+                        col="1"
+                        invisible="not l10n_ae_transmission_ids"
+                    >
+                        <field
+                            name="l10n_ae_transmission_ids"
+                            readonly="True"
+                            nolabel="1"
+                        >
+                            <list create="0" edit="0" delete="0">
+                                <field name="revision" />
+                                <field name="submission_state" />
+                                <field name="local_correction_id" />
+                            </list>
+                        </field>
+                        <label
+                            for="l10n_ae_transmission_ids"
+                            string="A locally corrected revision stays in this history and is excluded from sending."
                         />
                     </group>
                     <group

@@ -49,6 +49,8 @@ class ControlledExecutor:
         # Read/validate frozen bytes without a row lock. No remote HTTP here.
         with self.registry.cursor() as cursor:
             record = self._record(cursor, transmission_id)
+            if record.local_correction_id:
+                return "local_correction"
             if record.submission_state == "accepted":
                 return "accepted"
             if (
@@ -84,6 +86,8 @@ class ControlledExecutor:
                     self.endpoint, self.clock(), validation
                 )
                 if not claim:
+                    if record.local_correction_id:
+                        return "local_correction"
                     return record.submission_state
                 cursor.commit()
         except SerializationFailure:
@@ -161,6 +165,7 @@ class ControlledExecutor:
                     [
                         ("company_id", "=", self.company_id),
                         ("binding_id", "=", binding_id),
+                        ("local_correction_id", "=", False),
                         ("dispatch_review_required", "=", False),
                         "|",
                         "|",
