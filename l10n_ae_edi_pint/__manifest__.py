@@ -14,6 +14,7 @@
         "security/ir.access.csv",
         "security/inbox_security.xml",
         "views/account_move_views.xml",
+        "views/account_move_send_wizard_views.xml",
         "views/edi_inbox_views.xml",
     ],
     "external_dependencies": {

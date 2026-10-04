@@ -13,6 +13,10 @@ class AccountEdiUblUae(models.AbstractModel):
     _inherit = "account.edi.ubl_pint"
     _description = "UAE PINT Billing"
 
+    def _export_invoice_filename(self, invoice):
+        # The native Send placeholder still uses the legacy filename interface.
+        return invoice._get_invoice_report_filename(extension="xml")
+
     def _export_invoice(self, invoice):
         result = super()._export_invoice(invoice)
         if isinstance(result, dict):

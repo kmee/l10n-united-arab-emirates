@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<odoo>
+    <record id="account_move_send_wizard_form" model="ir.ui.view">
+        <field name="name">account.move.send.wizard.form.uae</field>
+        <field name="model">account.move.send.wizard</field>
+        <field name="inherit_id" ref="account.account_move_send_wizard_form" />
+        <field name="arch" type="xml">
+            <xpath expr="//div[@id='extra_edis']" position="after">
+                <group invisible="invoice_edi_format != 'kmee_ae_pint'">
+                    <field name="invoice_edi_format" readonly="1" />
+                </group>
+            </xpath>
+        </field>
+    </record>
+</odoo>
