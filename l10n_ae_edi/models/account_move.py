@@ -276,6 +276,30 @@ class AccountMove(models.Model):
             "1" if self[name] else "0" for name in UAE_TRANSACTION_FLAG_FIELDS
         )
 
+    def _l10n_ae_destination_override(self):
+        self.ensure_one()
+        if not self.l10n_ae_deemed_supply:
+            return None
+        if self.l10n_ae_document_category == "commercial":
+            raise UserError(
+                self.env._(
+                    "IBR-157-AE: deemed supply is not eligible for a commercial "
+                    "invoice or credit note. Review the document category."
+                )
+            )
+        if self.is_self_billing:
+            raise UserError(
+                self.env._(
+                    "Deemed supply self-billing requires a reviewed routing "
+                    "policy before preparation."
+                )
+            )
+        return {
+            "scheme": "0235",
+            "endpoint": "9900000097",
+            "reason": "deemed_supply",
+        }
+
     def _l10n_ae_snapshot(self):
         self.ensure_one()
         company = self.company_id
@@ -318,6 +342,7 @@ class AccountMove(models.Model):
             "issuer_role": "buyer" if self.is_self_billing else "supplier",
             "supplier": counterparty if self.is_self_billing else company_party,
             "buyer": company_party if self.is_self_billing else counterparty,
+            "destination": self._l10n_ae_destination_override(),
             "selfbilling_agreement": {
                 "reference": agreement.name,
                 "local_role": agreement.local_role,
@@ -599,6 +624,7 @@ class AccountMove(models.Model):
                         "identifier."
                     )
                 )
+            move._l10n_ae_destination_override()
             move._check_l10n_ae_credit_references()
             if move.currency_id.name != "AED" and not (
                 move.l10n_ae_tax_exchange_rate
