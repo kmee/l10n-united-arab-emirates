@@ -80,6 +80,59 @@ class AccountMove(models.Model):
         self._l10n_ae_lock_advance_sources()
         return super().action_l10n_ae_prepare()
 
+    def button_draft(self):
+        sources = self.filtered(
+            lambda move: (
+                move.company_id.country_code == "AE"
+                and move.move_type == "out_invoice"
+                and move.state == "posted"
+                and move.invoice_line_ids.filtered(
+                    lambda line: line.is_downpayment and line.quantity > 0
+                )
+            )
+        )
+        if sources:
+            sources.check_access("write")
+            sources.flush_recordset()
+            self.env.cr.execute(
+                "SELECT id FROM account_move WHERE id = ANY(%s) ORDER BY id FOR UPDATE",
+                [sources.ids],
+            )
+            sources.invalidate_recordset()
+            for source in sources:
+                frozen_deduction = self.env["l10n_ae.edi.transmission"].search_count(
+                    [
+                        ("company_id", "=", source.company_id.id),
+                        ("l10n_ae_advance_source_ids", "in", source.ids),
+                    ],
+                    limit=1,
+                )
+                posted_deduction = self.env["account.move.line"].search_count(
+                    [
+                        ("company_id", "=", source.company_id.id),
+                        (
+                            "sale_line_ids",
+                            "in",
+                            source.invoice_line_ids.sale_line_ids.ids,
+                        ),
+                        ("is_downpayment", "=", True),
+                        ("quantity", "<", 0),
+                        ("move_id.state", "=", "posted"),
+                        ("move_id.move_type", "=", "out_invoice"),
+                        ("move_id", "!=", source.id),
+                    ],
+                    limit=1,
+                )
+                if frozen_deduction or posted_deduction:
+                    raise UserError(
+                        self.env._(
+                            "This advance has already been deducted in "
+                            "accounting or UAE evidence. "
+                            "Preserve it and review the appropriate adjustment."
+                        )
+                    )
+        return super().button_draft()
+
     def _l10n_ae_advance_references(self):
         self.ensure_one()
         if self.l10n_ae_transmission_id:
@@ -214,6 +267,11 @@ class AccountMove(models.Model):
                 ("company_id", "=", self.company_id.id),
                 ("l10n_ae_advance_source_ids", "in", source.ids),
                 ("move_id", "!=", self.id),
+                "|",
+                ("local_correction_id", "=", False),
+                "&",
+                ("local_correction_id.replacement_transmission_id", "=", False),
+                ("move_id.state", "=", "draft"),
             ]
         )
         consumed = {"consumed_net": Decimal(0), "consumed_vat": Decimal(0)}
