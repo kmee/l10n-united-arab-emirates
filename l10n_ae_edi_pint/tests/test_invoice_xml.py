@@ -2126,6 +2126,92 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         with self.assertRaisesRegex(UserError, "frozen"):
             bill.write({"l10n_ae_selfbilling_agreement_id": False})
 
+    def test_native_self_billed_partial_credit_requires_reviewed_agreement_and_261(
+        self,
+    ):
+        bill, agreement = self._selfbilling_bill_with_agreement()
+        binding = bill.l10n_ae_binding_id
+        binding.fiscal_uuid_policy = "controlled_local"
+        bill.l10n_ae_fiscal_uuid = False
+        self.env.company.write(
+            {"l10n_ae_edi_auto_prepare": True, "l10n_ae_edi_binding_id": binding.id}
+        )
+        bill.action_post()
+        original_evidence = (
+            bill.l10n_ae_transmission_id.payload,
+            bill.l10n_ae_transmission_id.xml_content,
+        )
+        wizard = (
+            self.env["account.move.reversal"]
+            .with_context(active_model="account.move", active_ids=bill.ids)
+            .create(
+                {
+                    "reason": "Reviewed self-billed consideration reduction",
+                    "l10n_ae_credit_reason": "DL8.61.1.C",
+                    "journal_id": bill.journal_id.id,
+                    "date": bill.invoice_date,
+                }
+            )
+        )
+        self.assertTrue(wizard.l10n_ae_credit_reason_applicable)
+        wizard.refund_moves()
+        credit = wizard.new_move_ids
+        self.assertEqual(
+            (credit.state, credit.move_type, credit.is_self_billing),
+            ("draft", "in_refund", True),
+        )
+        self.assertEqual(credit.l10n_ae_credit_reason, "DL8.61.1.C")
+        self.assertFalse(credit.l10n_ae_selfbilling_agreement_id)
+        with self.assertRaisesRegex(UserError, "self-billing agreement"):
+            credit.action_post()
+        self.assertEqual(credit.state, "draft")
+        self.assertFalse(credit.l10n_ae_fiscal_uuid)
+        self.assertFalse(credit.l10n_ae_transmission_id)
+        credit.l10n_ae_selfbilling_agreement_id = agreement
+        credit.invoice_line_ids.price_unit = 40
+        credit.action_post()
+        report = credit.validate_l10n_ae_pint()
+        self.assertTrue(report["valid"], report)
+        self.assertEqual(report["profile"], "selfbilling")
+        frozen = credit.l10n_ae_transmission_id
+        snapshot = json.loads(frozen.payload)
+        self.assertEqual(snapshot["issuer_role"], "buyer")
+        self.assertEqual(snapshot["supplier"]["vat"], "100000000200003")
+        self.assertEqual(snapshot["buyer"]["vat"], "100000000100003")
+        self.assertEqual(snapshot["selfbilling_agreement"]["reference"], agreement.name)
+        tree = etree.fromstring(frozen.xml_content.encode())
+        expected = {
+            "cbc:CreditNoteTypeCode": "261",
+            "cbc:CustomizationID": "urn:peppol:pint:selfbilling-1@ae-1",
+            "cbc:ProfileID": "urn:peppol:bis:selfbilling",
+            "cac:DiscrepancyResponse/cbc:ResponseCode": "DL8.61.1.C",
+            "cac:BillingReference/cac:InvoiceDocumentReference/cbc:ID": bill.name,
+            "cac:LegalMonetaryTotal/cbc:TaxExclusiveAmount": "40.00",
+            "cac:TaxTotal/cbc:TaxAmount": "2.00",
+            "cac:LegalMonetaryTotal/cbc:TaxInclusiveAmount": "42.00",
+            "cac:LegalMonetaryTotal/cbc:PrepaidAmount": "42.00",
+            "cac:LegalMonetaryTotal/cbc:PayableAmount": "0.00",
+        }
+        for path, value in expected.items():
+            self.assertEqual(tree.findtext(path, namespaces=NS), value, path)
+        self.assertEqual(
+            (
+                bill.amount_total,
+                bill.amount_residual,
+                credit.amount_total,
+                credit.amount_residual,
+            ),
+            (105, 63, 42, 0),
+        )
+        self.assertNotEqual(credit.l10n_ae_fiscal_uuid, bill.l10n_ae_fiscal_uuid)
+        self.assertEqual(
+            (
+                bill.l10n_ae_transmission_id.payload,
+                bill.l10n_ae_transmission_id.xml_content,
+            ),
+            original_evidence,
+        )
+
     def test_self_billing_requires_vat_registration_for_both_economic_parties(self):
         bill, _agreement = self._selfbilling_bill_with_agreement()
         for party in (self.env.company.partner_id, self.partner_a):
