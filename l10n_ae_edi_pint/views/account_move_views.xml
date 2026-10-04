@@ -14,6 +14,15 @@
                     invisible="country_code != 'AE' or move_type == 'entry' or l10n_ae_received_document"
                 />
             </xpath>
+            <xpath expr="//page[@name='uae_edi']/group[1]" position="inside">
+                <button
+                    name="action_l10n_ae_download_xml"
+                    type="object"
+                    string="Download UAE XML"
+                    groups="account.group_account_readonly,account.group_account_invoice"
+                    invisible="not l10n_ae_transmission_id"
+                />
+            </xpath>
         </field>
     </record>
 </odoo>

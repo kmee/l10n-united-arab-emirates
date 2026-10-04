@@ -61,6 +61,14 @@ class AccountMove(models.Model):
         self.check_access("read")
         transmission = self.l10n_ae_transmission_id
         if transmission:
+            transmission.check_access("read")
+            if (
+                transmission.move_id != self
+                or transmission.company_id != self.company_id
+            ):
+                raise UserError(
+                    self.env._("The frozen UAE XML belongs to another invoice.")
+                )
             if not transmission.xml_content:
                 raise UserError(
                     self.env._("No frozen XML is available for this transmission.")
@@ -76,6 +84,44 @@ class AccountMove(models.Model):
         if errors:
             raise UserError("\n".join(sorted(errors)))
         return content.decode("utf-8")
+
+    def _get_invoice_legal_documents(self, filetype, allow_fallback=False):
+        self.ensure_one()
+        if filetype == "ubl" and self.l10n_ae_transmission_id:
+            content = self.preview_l10n_ae_pint().encode("utf-8")
+            return [
+                {
+                    "filename": self._get_invoice_report_filename(extension="xml"),
+                    "filetype": "application/xml",
+                    "content": content,
+                }
+            ]
+        return super()._get_invoice_legal_documents(
+            filetype, allow_fallback=allow_fallback
+        )
+
+    def _get_invoice_legal_documents_all(self, allow_fallback=False):
+        self.ensure_one()
+        if self.l10n_ae_transmission_id.conventional_html_content:
+            return self._get_invoice_legal_documents(
+                "pdf", allow_fallback=allow_fallback
+            ) + self._get_invoice_legal_documents("ubl", allow_fallback=allow_fallback)
+        return super()._get_invoice_legal_documents_all(allow_fallback=allow_fallback)
+
+    def action_l10n_ae_download_xml(self):
+        """Download the checked preserved issue through the native XML route."""
+        self.ensure_one()
+        self.check_access("read")
+        if not self.l10n_ae_transmission_id:
+            raise UserError(
+                self.env._("Prepare the UAE invoice before downloading its XML.")
+            )
+        self.preview_l10n_ae_pint()
+        return {
+            "type": "ir.actions.act_url",
+            "target": "download",
+            "url": f"/account/download_invoice_documents/{self.id}/ubl",
+        }
 
     def _l10n_ae_prepare_xml(self):
         return self.preview_l10n_ae_pint()

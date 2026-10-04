@@ -2624,6 +2624,29 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         self.assertEqual(transmission.move_id, original)
         self.assertEqual((original.amount_total, unrelated.amount_total), (105, 210))
 
+    def test_xml_preview_refuses_a_transmission_belonging_to_another_invoice(self):
+        original = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
+        )
+        original.write(
+            {
+                "l10n_ae_fiscal_uuid": "aaaaaaaf-6666-4666-8666-666666666666",
+                "l10n_ae_binding_id": self.env["l10n_ae.edi.binding"]
+                .create({"name": "Frozen XML invoice association"})
+                .id,
+            }
+        )
+        original.action_l10n_ae_prepare()
+        frozen = original.preview_l10n_ae_pint()
+        unrelated = self.init_invoice(
+            "out_invoice", amounts=[200], taxes=self.tax_sale_a, post=True
+        )
+        unrelated.l10n_ae_transmission_id = original.l10n_ae_transmission_id
+        with self.assertRaisesRegex(UserError, "belongs to another invoice"):
+            unrelated.preview_l10n_ae_pint()
+        self.assertEqual(original.preview_l10n_ae_pint(), frozen)
+        self.assertEqual((original.amount_total, unrelated.amount_total), (105, 210))
+
     def test_ordinary_invoice_native_print_keeps_the_core_report_action(self):
         self.env.company.external_report_layout_id = self.env.ref(
             "web.external_layout_standard"
