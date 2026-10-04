@@ -1,11 +1,13 @@
 # Copyright 2026 KMEE
 # License AGPL-3.0 or later (https://www.gnu.org/licenses/agpl).
+import hashlib
 import json
 import uuid
 from datetime import timedelta
 
 from odoo import api, fields, models
 from odoo.exceptions import UserError
+from odoo.tools.binary import BinaryBytes
 
 
 class UaeEdiTransmission(models.Model):
@@ -41,6 +43,17 @@ class UaeEdiTransmission(models.Model):
     payload_hash = fields.Char(required=True, readonly=True)
     xml_content = fields.Text(readonly=True)
     xml_hash = fields.Char(readonly=True)
+    conventional_html_content = fields.Text(readonly=True, copy=False)
+    conventional_html_hash = fields.Char(readonly=True, copy=False)
+    conventional_report_id = fields.Many2one(
+        "ir.actions.report", readonly=True, copy=False, ondelete="restrict"
+    )
+    conventional_filename = fields.Char(readonly=True, copy=False)
+    conventional_pdf_content = fields.Binary(
+        readonly=True, copy=False, attachment=False
+    )
+    conventional_pdf_hash = fields.Char(readonly=True, copy=False)
+    conventional_pdf_generated_at = fields.Datetime(readonly=True, copy=False)
     idempotency_key = fields.Char(
         required=True, readonly=True, default=lambda self: str(uuid.uuid4()), copy=False
     )
@@ -160,6 +173,45 @@ class UaeEdiTransmission(models.Model):
 
     def _mark_controlled_event_review(self):
         return super().write({"event_review_required": True})
+
+    def _ensure_conventional_pdf(self):
+        """Render preserved content once; no invoice recalculation or delivery."""
+        self.ensure_one()
+        self.flush_recordset()
+        self.env.cr.execute(
+            "SELECT id FROM l10n_ae_edi_transmission WHERE id = %s FOR UPDATE",
+            [self.id],
+        )
+        self.invalidate_recordset()
+        if not self.conventional_html_content or not self.conventional_report_id:
+            raise UserError(
+                self.env._("No preserved conventional invoice is available.")
+            )
+        html = self.conventional_html_content.encode()
+        if hashlib.sha256(html).hexdigest() != self.conventional_html_hash:
+            raise UserError(
+                self.env._("The preserved invoice presentation is corrupt.")
+            )
+        if self.conventional_pdf_content:
+            content = self.conventional_pdf_content.content
+            if hashlib.sha256(content).hexdigest() != self.conventional_pdf_hash:
+                raise UserError(self.env._("The preserved invoice PDF is corrupt."))
+            return
+        report = self.conventional_report_id.with_company(self.company_id)
+        engine = report._get_pdf_engine(report)
+        content, _record_ids = report._run_pdf_engine(engine, html, report_ref=report)
+        if not content.startswith(b"%PDF-"):
+            raise UserError(self.env._("The report engine did not return a PDF."))
+        # Only this checked invoice action may append the first PDF artifact.
+        super().write(
+            {
+                "conventional_pdf_content": BinaryBytes(
+                    content, filename=self.conventional_filename
+                ),
+                "conventional_pdf_hash": hashlib.sha256(content).hexdigest(),
+                "conventional_pdf_generated_at": fields.Datetime.now(),
+            }
+        )
 
     def _apply_controlled_event(self, event):
         self.ensure_one()
@@ -297,6 +349,13 @@ class UaeEdiTransmission(models.Model):
             "idempotency_key",
             "xml_content",
             "xml_hash",
+            "conventional_html_content",
+            "conventional_html_hash",
+            "conventional_report_id",
+            "conventional_filename",
+            "conventional_pdf_content",
+            "conventional_pdf_hash",
+            "conventional_pdf_generated_at",
             "submission_state",
             "remote_id",
             "transport_endpoint",

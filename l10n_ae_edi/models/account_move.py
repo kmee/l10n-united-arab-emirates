@@ -510,6 +510,56 @@ class AccountMove(models.Model):
         """Format addons provide submitted bytes at the preparation boundary."""
         return False
 
+    def _l10n_ae_conventional_presentation(self, snapshot):
+        """Preserve the native presentation locally, before later master edits."""
+        if not (snapshot.get("alternative_delivery") or {}).get("required"):
+            return {}
+        move = self.with_company(self.company_id)
+        report = self.env["account.move.send"]._get_default_pdf_report_id(move)
+        html, _report_type = (
+            report.with_company(move.company_id)
+            .with_context(debug=False)
+            ._render_qweb_html(report, move.ids, data={"report_type": "pdf"})
+        )
+        return {
+            "conventional_html_content": html.decode(),
+            "conventional_html_hash": hashlib.sha256(html).hexdigest(),
+            "conventional_report_id": report.id,
+            "conventional_filename": move._get_invoice_report_filename(report=report),
+        }
+
+    def action_l10n_ae_generate_conventional_pdf(self):
+        """Download the same prepared conventional invoice, without delivering it."""
+        self.ensure_one()
+        self.check_access("read")
+        transmission = self.l10n_ae_transmission_id.with_context(bin_size=False)
+        if not transmission:
+            raise UserError(
+                self.env._("Prepare the UAE invoice before generating its PDF.")
+            )
+        transmission.check_access("read")
+        if transmission.move_id != self or transmission.company_id != self.company_id:
+            raise UserError(
+                self.env._(
+                    "The preserved document belongs to another invoice or company."
+                )
+            )
+        transmission.sudo()._ensure_conventional_pdf()
+        return {
+            "type": "ir.actions.act_url",
+            "target": "download",
+            "url": (
+                f"/web/content/l10n_ae.edi.transmission/{transmission.id}/"
+                "conventional_pdf_content?download=true&filename_field=conventional_filename"
+            ),
+        }
+
+    def action_print_pdf(self):
+        self.ensure_one()
+        if self.l10n_ae_transmission_id.conventional_html_content:
+            return self.action_l10n_ae_generate_conventional_pdf()
+        return super().action_print_pdf()
+
     def action_l10n_ae_prepare(self):
         self.ensure_one()
         self.check_access("write")
@@ -563,6 +613,7 @@ class AccountMove(models.Model):
                     "simulation": True,
                 }
                 xml_content = self._l10n_ae_prepare_xml()
+                presentation = self._l10n_ae_conventional_presentation(snapshot)
                 payload = json.dumps(
                     snapshot, ensure_ascii=False, sort_keys=True, separators=(",", ":")
                 )
@@ -573,6 +624,7 @@ class AccountMove(models.Model):
                     .sudo()
                     .create(
                         {
+                            **presentation,
                             "move_id": self.id,
                             "company_id": self.company_id.id,
                             "binding_id": binding.id,

@@ -74,6 +74,40 @@
                         />
                     </group>
                     <group
+                        string="Reviewed Buyer Onboarding"
+                        invisible="l10n_ae_received_document"
+                    >
+                        <field
+                            name="l10n_ae_buyer_not_implemented"
+                            readonly="l10n_ae_transmission_id or l10n_ae_received_document"
+                        />
+                        <field
+                            name="l10n_ae_buyer_onboarding_review_date"
+                            invisible="not l10n_ae_buyer_not_implemented"
+                            required="l10n_ae_buyer_not_implemented"
+                            readonly="l10n_ae_transmission_id or l10n_ae_received_document"
+                        />
+                        <field
+                            name="l10n_ae_buyer_onboarding_review_reference"
+                            invisible="not l10n_ae_buyer_not_implemented"
+                            required="l10n_ae_buyer_not_implemented"
+                            readonly="l10n_ae_transmission_id or l10n_ae_received_document"
+                        />
+                        <label
+                            for="l10n_ae_buyer_not_implemented"
+                            colspan="2"
+                            string="This buyer needs a conventional invoice. Fiscal confirmations do not prove its delivery."
+                            invisible="not l10n_ae_buyer_not_implemented or move_type != 'out_invoice' or l10n_ae_document_category != 'tax'"
+                        />
+                        <button
+                            name="action_l10n_ae_generate_conventional_pdf"
+                            type="object"
+                            string="Generate Conventional PDF"
+                            groups="account.group_account_invoice"
+                            invisible="not l10n_ae_transmission_id or not l10n_ae_buyer_not_implemented or move_type != 'out_invoice' or l10n_ae_document_category != 'tax'"
+                        />
+                    </group>
+                    <group
                         string="Reviewed Fiscal Exchange Rate to AED"
                         invisible="l10n_ae_received_document"
                     >
