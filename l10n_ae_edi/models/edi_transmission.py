@@ -72,6 +72,8 @@ class UaeEdiTransmission(models.Model):
     validation_receipt = fields.Text(readonly=True, copy=False)
     transport_endpoint = fields.Char(readonly=True, copy=False)
     lease_until = fields.Datetime(readonly=True, copy=False)
+    next_attempt_at = fields.Datetime(readonly=True, copy=False, index=True)
+    consecutive_transport_failures = fields.Integer(readonly=True, copy=False)
     claim_token = fields.Char(readonly=True, copy=False, groups="base.group_system")
     dispatch_review_required = fields.Boolean(readonly=True, copy=False)
     dispatch_error_kind = fields.Selection(
@@ -269,8 +271,14 @@ class UaeEdiTransmission(models.Model):
         if not self.env.cr.fetchone():
             return None
         self.invalidate_recordset()
-        if self.submission_state == "accepted" or (
-            self.submission_state == "sending" and self.lease_until > now
+        if (
+            self.submission_state == "accepted"
+            or (self.submission_state == "sending" and self.lease_until > now)
+            or (
+                self.submission_state == "unknown"
+                and self.next_attempt_at
+                and self.next_attempt_at > now
+            )
         ):
             return None
         if self.transport_endpoint and self.transport_endpoint != endpoint:
@@ -308,7 +316,9 @@ class UaeEdiTransmission(models.Model):
         )
         return {"token": token, "operation": operation}
 
-    def _finish_controlled(self, token, receipt, error_kind, now, evidence=None):
+    def _finish_controlled(
+        self, token, receipt, error_kind, now, evidence=None, retry_jitter=0
+    ):
         self.ensure_one()
         self.env.cr.execute(
             "SELECT id FROM l10n_ae_edi_transmission WHERE id = %s FOR UPDATE",
@@ -347,6 +357,13 @@ class UaeEdiTransmission(models.Model):
         if accepted:
             values.update(self._controlled_pending_dimensions())
             values["remote_id"] = receipt["remote_id"]
+            values["next_attempt_at"] = False
+            values["consecutive_transport_failures"] = 0
+        else:
+            failures = self.consecutive_transport_failures + 1
+            delay = min(60 * 2 ** min(failures - 1, 6) + retry_jitter, 3600)
+            values["consecutive_transport_failures"] = failures
+            values["next_attempt_at"] = now + timedelta(seconds=delay)
         super().write(values)
         return state
 
@@ -384,6 +401,8 @@ class UaeEdiTransmission(models.Model):
             "remote_id",
             "transport_endpoint",
             "lease_until",
+            "next_attempt_at",
+            "consecutive_transport_failures",
             "claim_token",
             "dispatch_review_required",
             "dispatch_error_kind",

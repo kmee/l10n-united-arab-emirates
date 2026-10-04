@@ -4,6 +4,7 @@
 
 import hashlib
 import json
+import random
 
 from psycopg2.errors import SerializationFailure
 
@@ -17,10 +18,13 @@ from .errors import UaeDocumentValidationError
 class ControlledExecutor:
     """Run after accounting commit, never inside a posting hook or HTTP RPC."""
 
-    def __init__(self, registry, uid, company_id, endpoint, token, clock=None):
+    def __init__(
+        self, registry, uid, company_id, endpoint, token, clock=None, retry_jitter=None
+    ):
         self.registry, self.uid, self.company_id = registry, uid, company_id
         self.endpoint, self.token = endpoint, token
         self.clock = clock or fields.Datetime.now
+        self.retry_jitter = retry_jitter or (lambda: random.randint(0, 15))
 
     def _record(self, cursor, transmission_id):
         env = api.Environment(
@@ -47,6 +51,12 @@ class ControlledExecutor:
             record = self._record(cursor, transmission_id)
             if record.submission_state == "accepted":
                 return "accepted"
+            if (
+                record.submission_state == "unknown"
+                and record.next_attempt_at
+                and record.next_attempt_at > self.clock()
+            ):
+                return "unknown"
             validation = record._validate_controlled_document()
             document = {
                 "contract_version": "kmee-controlled-1",
@@ -110,10 +120,20 @@ class ControlledExecutor:
         except ControlledAspError as error:
             error_kind = error.kind
         # Unknown/not-found is never permission to POST again.
+        jitter = 0 if receipt else self.retry_jitter()
+        if type(jitter) is not int or not 0 <= jitter <= 15:
+            raise ValueError(
+                "Controlled retry jitter must be between 0 and 15 seconds."
+            )
         with self.registry.cursor() as cursor:
             record = self._record(cursor, transmission_id).sudo()
             result = record._finish_controlled(
-                claim["token"], receipt, error_kind, self.clock(), evidence
+                claim["token"],
+                receipt,
+                error_kind,
+                self.clock(),
+                evidence,
+                retry_jitter=jitter,
             )
             cursor.commit()
             return result
@@ -143,7 +163,13 @@ class ControlledExecutor:
                         ("binding_id", "=", binding_id),
                         ("dispatch_review_required", "=", False),
                         "|",
-                        ("submission_state", "in", ["queued", "unknown"]),
+                        "|",
+                        ("submission_state", "=", "queued"),
+                        "&",
+                        ("submission_state", "=", "unknown"),
+                        "|",
+                        ("next_attempt_at", "=", False),
+                        ("next_attempt_at", "<=", self.clock()),
                         "&",
                         ("submission_state", "=", "sending"),
                         ("lease_until", "<=", self.clock()),
