@@ -1,5 +1,6 @@
 # Copyright 2026 KMEE
 # License AGPL-3.0 or later (https://www.gnu.org/licenses/agpl).
+import hashlib
 import json
 import uuid
 from decimal import Decimal
@@ -2543,6 +2544,99 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         self.assertEqual(transmission.payload, payload)
         self.assertEqual((invoice.amount_tax, invoice.amount_total), (5, 105))
 
+    def test_prepared_buyer98_preserves_native_invoice_html_after_buyer_changes(self):
+        self.partner_a.write(
+            {"name": "Synthetic Buyer98 HTML Original", "routing_endpoint": False}
+        )
+        invoice = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
+        )
+        invoice.write(
+            {
+                "l10n_ae_buyer_not_implemented": True,
+                "l10n_ae_buyer_onboarding_review_date": "2019-01-01",
+                "l10n_ae_buyer_onboarding_review_reference": "SYNTH-BUYER98-HTML",
+                "l10n_ae_fiscal_uuid": "aaaaaaaf-4444-4444-8444-444444444444",
+                "l10n_ae_binding_id": self.env["l10n_ae.edi.binding"]
+                .create({"name": "Buyer98 conventional presentation"})
+                .id,
+            }
+        )
+        invoice.action_l10n_ae_prepare()
+        transmission = invoice.l10n_ae_transmission_id
+        observed_fields = [
+            "conventional_html_content",
+            "conventional_html_hash",
+            "conventional_report_id",
+            "conventional_filename",
+            "payload",
+            "xml_content",
+        ]
+        try:
+            original = transmission.read(observed_fields)[0]
+        except ValueError as error:
+            self.fail(f"Preparation does not preserve the native presentation: {error}")
+        html = original["conventional_html_content"]
+        text = " ".join(etree.HTML(html.encode()).itertext())
+        self.assertIn("Synthetic Buyer98 HTML Original", text)
+        self.assertIn("100000000200003", text)
+        self.assertIn(invoice.name, text)
+        self.assertIn("100.00", text)
+        self.assertIn("5.00", text)
+        self.assertIn("105.00", text)
+        self.assertEqual(
+            original["conventional_html_hash"],
+            hashlib.sha256(html.encode()).hexdigest(),
+        )
+        self.assertEqual(
+            original["conventional_report_id"][0],
+            self.env.ref("account.account_invoices").id,
+        )
+        self.assertTrue(original["conventional_filename"].endswith(".pdf"))
+        self.partner_a.write(
+            {"name": "Synthetic Changed Buyer98", "street": "Changed buyer street"}
+        )
+        invoice.action_l10n_ae_prepare()
+        self.assertEqual(transmission.read(observed_fields)[0], original)
+        self.assertEqual((invoice.amount_tax, invoice.amount_total), (5, 105))
+
+    def test_pdf_action_refuses_a_transmission_belonging_to_another_invoice(self):
+        original = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
+        )
+        original.write(
+            {
+                "l10n_ae_fiscal_uuid": "aaaaaaaf-5555-4555-8555-555555555555",
+                "l10n_ae_binding_id": self.env["l10n_ae.edi.binding"]
+                .create({"name": "Preserved PDF invoice association"})
+                .id,
+            }
+        )
+        original.action_l10n_ae_prepare()
+        transmission = original.l10n_ae_transmission_id
+        unrelated = self.init_invoice(
+            "out_invoice", amounts=[200], taxes=self.tax_sale_a, post=True
+        )
+        unrelated.l10n_ae_transmission_id = transmission
+        with self.assertRaisesRegex(UserError, "belongs to another invoice"):
+            unrelated.action_l10n_ae_generate_conventional_pdf()
+        self.assertFalse(transmission.conventional_pdf_content)
+        self.assertEqual(transmission.move_id, original)
+        self.assertEqual((original.amount_total, unrelated.amount_total), (105, 210))
+
+    def test_ordinary_invoice_native_print_keeps_the_core_report_action(self):
+        self.env.company.external_report_layout_id = self.env.ref(
+            "web.external_layout_standard"
+        )
+        invoice = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
+        )
+        action = invoice.action_print_pdf()
+        self.assertEqual(action["type"], "ir.actions.report")
+        self.assertEqual(action["report_name"], "account.report_invoice_with_payments")
+        self.assertFalse(invoice.l10n_ae_transmission_id)
+        self.assertEqual(invoice.amount_total, 105)
+
     def test_prepared_buyer98_review_cannot_be_rewritten_by_an_administrator(self):
         self.partner_a.routing_endpoint = False
         invoice = self.init_invoice(
@@ -2562,6 +2656,14 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         invoice.action_l10n_ae_prepare()
         payload = invoice.l10n_ae_transmission_id.payload
         xml = invoice.l10n_ae_transmission_id.xml_content
+        presentation_fields = [
+            "conventional_html_content",
+            "conventional_html_hash",
+            "conventional_report_id",
+            "conventional_filename",
+        ]
+        transmission = invoice.l10n_ae_transmission_id
+        presentation = transmission.read(presentation_fields)
         for field, value in (
             ("l10n_ae_buyer_not_implemented", False),
             ("l10n_ae_buyer_onboarding_review_date", "2019-01-02"),
@@ -2572,6 +2674,15 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
                     invoice.sudo().write({field: value})
                 self.assertEqual(invoice.l10n_ae_transmission_id.payload, payload)
                 self.assertEqual(invoice.preview_l10n_ae_pint(), xml)
+        for field in presentation_fields + [
+            "conventional_pdf_content",
+            "conventional_pdf_hash",
+            "conventional_pdf_generated_at",
+        ]:
+            with self.subTest(artifact_field=field):
+                with self.assertRaisesRegex(UserError, "immutable"):
+                    transmission.sudo().write({field: False})
+                self.assertEqual(transmission.read(presentation_fields), presentation)
 
     def test_prepared_deemed_supply_declares_reporting_only_without_c3_obligations(
         self,
