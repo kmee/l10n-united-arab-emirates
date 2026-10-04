@@ -4,6 +4,7 @@ from . import res_company
 from . import res_partner
 from . import selfbilling_agreement
 from . import account_move
+from . import account_move_line
 from . import credit_reference
 from . import edi_binding
 from . import edi_transmission

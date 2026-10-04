@@ -2,6 +2,7 @@
 # License AGPL-3.0 or later (https://www.gnu.org/licenses/agpl).
 import json
 
+from odoo import Command
 from odoo.exceptions import UserError
 from odoo.tests import tagged
 
@@ -28,6 +29,155 @@ class TestUaeInvoicePreparation(AccountTestInvoicingCommon):
         cls.binding = cls.env["l10n_ae.edi.binding"].create(
             {"name": "Synthetic sandbox ASP"}
         )
+
+    def test_frozen_invoice_line_price_cannot_be_rewritten(self):
+        invoice = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
+        )
+        invoice.l10n_ae_binding_id = self.binding
+        invoice.action_l10n_ae_prepare()
+        payload = invoice.l10n_ae_transmission_id.payload
+        with self.assertRaisesRegex(UserError, "frozen UAE.*line"), self.cr.savepoint():
+            invoice.invoice_line_ids.write({"price_unit": 120})
+        self.assertEqual(invoice.invoice_line_ids.price_unit, 100)
+        self.assertEqual(invoice.amount_total, 105)
+        self.assertEqual(invoice.l10n_ae_transmission_id.payload, payload)
+
+    def test_frozen_invoice_line_fiscal_facts_cannot_be_rewritten(self):
+        invoice = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
+        )
+        invoice.l10n_ae_binding_id = self.binding
+        invoice.action_l10n_ae_prepare()
+        payload = invoice.l10n_ae_transmission_id.payload
+        for vals in (
+            {"quantity": 2},
+            {"discount": 10},
+            {"name": "Rewritten fiscal description"},
+            {"product_id": self.product_b.id},
+            {"product_uom_id": self.env.ref("uom.product_uom_dozen").id},
+            {"tax_ids": [Command.clear()]},
+            {"currency_id": self.env.ref("base.USD").id},
+            {"display_type": "cogs"},
+            {"balance": -120, "amount_currency": -120},
+            {"debit": 0, "credit": 120},
+        ):
+            with (
+                self.subTest(field=next(iter(vals))),
+                self.cr.savepoint(),
+                self.assertRaisesRegex(UserError, "frozen UAE.*line"),
+            ):
+                invoice.invoice_line_ids.write(vals)
+        self.assertEqual(invoice.invoice_line_ids.quantity, 1)
+        self.assertEqual(invoice.invoice_line_ids.discount, 0)
+        self.assertEqual(invoice.amount_total, 105)
+        self.assertEqual(invoice.l10n_ae_transmission_id.payload, payload)
+
+    def test_frozen_invoice_line_identical_fiscal_write_remains_native(self):
+        invoice = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
+        )
+        invoice.l10n_ae_binding_id = self.binding
+        invoice.action_l10n_ae_prepare()
+        payload = invoice.l10n_ae_transmission_id.payload
+        line = invoice.invoice_line_ids
+        self.assertTrue(
+            line.write(
+                {
+                    "quantity": 1,
+                    "price_unit": 100,
+                    "discount": 0,
+                    "name": line.name,
+                    "product_id": line.product_id.id,
+                    "product_uom_id": line.product_uom_id.id,
+                    "tax_ids": [Command.set(self.tax_sale_a.ids)],
+                    "currency_id": invoice.currency_id.id,
+                    "display_type": "product",
+                    "balance": -100,
+                    "amount_currency": -100,
+                }
+            )
+        )
+        self.assertEqual(invoice.amount_total, 105)
+        self.assertEqual(invoice.l10n_ae_transmission_id.payload, payload)
+
+    def test_frozen_invoice_cannot_gain_an_extra_zero_value_line(self):
+        invoice = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
+        )
+        invoice.l10n_ae_binding_id = self.binding
+        invoice.action_l10n_ae_prepare()
+        original_ids = invoice.invoice_line_ids.ids
+        payload = invoice.l10n_ae_transmission_id.payload
+        with self.assertRaisesRegex(UserError, "frozen UAE.*line"), self.cr.savepoint():
+            self.env["account.move.line"].create(
+                {
+                    "move_id": invoice.id,
+                    "account_id": invoice.invoice_line_ids.account_id.id,
+                    "name": "Unapproved extra fiscal line",
+                    "quantity": 1,
+                    "price_unit": 0,
+                    "tax_ids": [Command.set(self.tax_sale_a.ids)],
+                }
+            )
+        self.assertEqual(invoice.invoice_line_ids.ids, original_ids)
+        self.assertEqual(invoice.amount_total, 105)
+        self.assertEqual(invoice.l10n_ae_transmission_id.payload, payload)
+
+    def test_frozen_invoice_cannot_lose_a_zero_value_line(self):
+        invoice = self.init_invoice("out_invoice", amounts=[100], taxes=self.tax_sale_a)
+        zero_line = self.env["account.move.line"].create(
+            {
+                "move_id": invoice.id,
+                "account_id": invoice.invoice_line_ids.account_id.id,
+                "name": "Reviewed zero-value fiscal line",
+                "quantity": 1,
+                "price_unit": 0,
+                "tax_ids": [Command.set(self.tax_sale_a.ids)],
+            }
+        )
+        invoice.action_post()
+        invoice.l10n_ae_binding_id = self.binding
+        invoice.action_l10n_ae_prepare()
+        original_ids = invoice.invoice_line_ids.ids
+        payload = invoice.l10n_ae_transmission_id.payload
+        with self.assertRaisesRegex(UserError, "frozen UAE.*line"), self.cr.savepoint():
+            zero_line.unlink()
+        self.assertEqual(invoice.invoice_line_ids.ids, original_ids)
+        self.assertTrue(zero_line.exists())
+        self.assertEqual(invoice.amount_total, 105)
+        self.assertEqual(invoice.l10n_ae_transmission_id.payload, payload)
+
+    def test_frozen_invoice_lines_cannot_be_transferred_in_either_direction(self):
+        invoice = self.init_invoice("out_invoice", amounts=[100], taxes=self.tax_sale_a)
+        other = self.init_invoice("out_invoice", amounts=[100], taxes=self.tax_sale_a)
+        lines = {}
+        for move in (invoice, other):
+            lines[move.id] = self.env["account.move.line"].create(
+                {
+                    "move_id": move.id,
+                    "account_id": move.invoice_line_ids.account_id.id,
+                    "name": "Reviewed zero-value fiscal line",
+                    "quantity": 1,
+                    "price_unit": 0,
+                    "tax_ids": [Command.set(self.tax_sale_a.ids)],
+                }
+            )
+        invoice.action_post()
+        invoice.l10n_ae_binding_id = self.binding
+        invoice.action_l10n_ae_prepare()
+        payload = invoice.l10n_ae_transmission_id.payload
+        for source, target in ((invoice, other), (other, invoice)):
+            with (
+                self.subTest(source=source.id),
+                self.cr.savepoint(),
+                self.assertRaisesRegex(UserError, "frozen UAE.*line"),
+            ):
+                lines[source.id].write({"move_id": target.id})
+        self.assertEqual(lines[invoice.id].move_id, invoice)
+        self.assertEqual(lines[other.id].move_id, other)
+        self.assertEqual((invoice.amount_total, other.amount_total), (105, 105))
+        self.assertEqual(invoice.l10n_ae_transmission_id.payload, payload)
 
     def test_posting_with_automatic_queue_creates_one_frozen_intent(self):
         invoice = self.init_invoice("out_invoice", amounts=[100], taxes=self.tax_sale_a)
