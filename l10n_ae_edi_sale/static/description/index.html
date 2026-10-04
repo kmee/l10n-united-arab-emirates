@@ -375,11 +375,16 @@ native Sales down payment calculations and add the original taxed
 advance’s number, date and consumed net/VAT to the frozen final invoice
 evidence and XML references. The base accounting localization remains
 installable without Sales.</p>
-<p>The current checkpoint covers one AED taxed advance and its final
-balance, with automated checks for unposted advances, another commercial
-customer and an excessive deduction. Multiple advances,
-cumulative/concurrent consumption, the complete fiscal matrix and
-browser acceptance remain under development.</p>
+<p>The current checkpoint includes the native AED
+advance/receipt/final/partial-credit browser journey. Checks refuse an
+unposted source, another legal company or commercial customer, a
+different document currency/category and an excessive deduction.
+Sequential consumption counts frozen evidence and already-posted native
+deductions; partial400/20 and600/30 can consume exactly an
+advance1000/50. It never creates another payment or changes the
+accounting calculator. Multiple advances, concurrent consumption, full
+process/FX/adjustment combinations and fiscal ratification remain under
+development.</p>
 <div class="admonition important">
 <p class="first admonition-title">Important</p>
 <p class="last">This is an alpha version, the data model and design can change at any time without warning.

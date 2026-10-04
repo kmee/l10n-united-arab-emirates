@@ -264,3 +264,303 @@ class TestUaeSalesAdvance(AccountTestInvoicingCommon):
         self.assertEqual(final.state, "draft")
         self.assertEqual((final.amount_untaxed, final.amount_tax), (8000, 400))
         self.assertFalse(final.l10n_ae_transmission_id)
+
+    def test_final_balance_rejects_an_advance_in_another_document_currency(self):
+        order = self.env["sale.order"].create(
+            {
+                "partner_id": self.partner_a.id,
+                "order_line": [
+                    Command.create(
+                        {
+                            "product_id": self.product_a.id,
+                            "product_uom_qty": 1,
+                            "price_unit": 10000,
+                            "tax_ids": [Command.set(self.tax_sale_a.ids)],
+                        }
+                    )
+                ],
+            }
+        )
+        order.action_confirm()
+        advance = self._create_invoice(order, "percentage", 10)
+        advance.action_post()
+        advance.action_l10n_ae_prepare()
+        original = advance.l10n_ae_transmission_id
+        original_xml, original_payload = original.xml_content, original.payload
+        final = self._create_invoice(order, "delivered")
+        final.write(
+            {
+                "currency_id": self.env.ref("base.USD").id,
+                "l10n_ae_tax_exchange_rate": "3.672500",
+                "l10n_ae_tax_exchange_date": fields.Date.today(),
+                "l10n_ae_tax_exchange_source": "Synthetic reviewed quote",
+            }
+        )
+        with self.assertRaisesRegex(UserError, "same.*currency"):
+            final.action_l10n_ae_validate()
+        self.assertEqual(final.state, "draft")
+        self.assertFalse(final.l10n_ae_fiscal_uuid)
+        self.assertFalse(final.l10n_ae_transmission_id)
+        self.assertEqual(
+            (original.xml_content, original.payload), (original_xml, original_payload)
+        )
+
+    def test_final_balance_rejects_a_different_advance_document_category(self):
+        order = self.env["sale.order"].create(
+            {
+                "partner_id": self.partner_a.id,
+                "order_line": [
+                    Command.create(
+                        {
+                            "product_id": self.product_a.id,
+                            "product_uom_qty": 1,
+                            "price_unit": 10000,
+                            "tax_ids": [Command.set(self.tax_sale_a.ids)],
+                        }
+                    )
+                ],
+            }
+        )
+        order.action_confirm()
+        advance = self._create_invoice(order, "percentage", 10)
+        advance.action_post()
+        advance.action_l10n_ae_prepare()
+        original = advance.l10n_ae_transmission_id
+        original_xml, original_payload = original.xml_content, original.payload
+        final = self._create_invoice(order, "delivered")
+        outside_scope = self.tax_sale_a.copy(
+            {
+                "name": "Synthetic Advance Outside Scope",
+                "amount": 0,
+                "ubl_cii_tax_category_code": "O",
+            }
+        )
+        final.l10n_ae_document_category = "commercial"
+        final.invoice_line_ids.tax_ids = outside_scope
+        with self.assertRaisesRegex(UserError, "same.*category"):
+            final.action_l10n_ae_validate()
+        self.assertEqual(final.state, "draft")
+        self.assertEqual((final.amount_untaxed, final.amount_tax), (9000, 0))
+        self.assertFalse(final.l10n_ae_fiscal_uuid)
+        self.assertFalse(final.l10n_ae_transmission_id)
+        self.assertEqual(
+            (original.xml_content, original.payload), (original_xml, original_payload)
+        )
+
+    def test_final_balance_rejects_an_advance_from_another_legal_company(self):
+        order = self.env["sale.order"].create(
+            {
+                "partner_id": self.partner_a.id,
+                "order_line": [
+                    Command.create(
+                        {
+                            "product_id": self.product_a.id,
+                            "product_uom_qty": 1,
+                            "price_unit": 10000,
+                            "tax_ids": [Command.set(self.tax_sale_a.ids)],
+                        }
+                    )
+                ],
+            }
+        )
+        order.action_confirm()
+        advance = self._create_invoice(order, "percentage", 10)
+        advance.action_post()
+        advance.action_l10n_ae_prepare()
+        original = advance.l10n_ae_transmission_id
+        original_xml, original_payload = original.xml_content, original.payload
+        other_data = self.setup_other_company(name="Synthetic independent UAE company")
+        other = other_data["company"]
+        other.write({"l10n_ae_tin": "1000000011", "l10n_ae_tin_confirmed": True})
+        source_line = advance.invoice_line_ids.filtered("is_downpayment")
+        # Public ORM accepts a Sales relation without a company check on that field.
+        final = (
+            self.env["account.move"]
+            .with_company(other)
+            .create(
+                {
+                    "company_id": other.id,
+                    "move_type": "out_invoice",
+                    "partner_id": self.partner_a.id,
+                    "invoice_date": fields.Date.today(),
+                    "journal_id": other_data["default_journal_sale"].id,
+                    "invoice_line_ids": [
+                        Command.create(
+                            {
+                                "name": "Synthetic independent service",
+                                "quantity": 1,
+                                "price_unit": 10000,
+                                "account_id": other_data["default_account_revenue"].id,
+                                "tax_ids": [Command.set(other.account_sale_tax_id.ids)],
+                            }
+                        ),
+                        Command.create(
+                            {
+                                "name": "Synthetic foreign-company advance deduction",
+                                "quantity": -1,
+                                "price_unit": 1000,
+                                "is_downpayment": True,
+                                "sale_line_ids": [
+                                    Command.set(source_line.sale_line_ids.ids)
+                                ],
+                                "account_id": other_data["default_account_revenue"].id,
+                                "tax_ids": [Command.set(other.account_sale_tax_id.ids)],
+                            }
+                        ),
+                    ],
+                }
+            )
+        )
+        with self.assertRaisesRegex(UserError, "same.*company"):
+            final.action_l10n_ae_validate()
+        self.assertEqual(final.state, "draft")
+        self.assertFalse(final.l10n_ae_fiscal_uuid)
+        self.assertFalse(final.l10n_ae_transmission_id)
+        self.assertEqual(
+            (original.xml_content, original.payload), (original_xml, original_payload)
+        )
+
+    def test_second_final_cannot_reuse_an_already_frozen_advance_deduction(self):
+        order = self.env["sale.order"].create(
+            {
+                "partner_id": self.partner_a.id,
+                "order_line": [
+                    Command.create(
+                        {
+                            "product_id": self.product_a.id,
+                            "product_uom_qty": 1,
+                            "price_unit": 10000,
+                            "tax_ids": [Command.set(self.tax_sale_a.ids)],
+                        }
+                    )
+                ],
+            }
+        )
+        order.action_confirm()
+        advance = self._create_invoice(order, "percentage", 10)
+        advance.action_post()
+        advance.action_l10n_ae_prepare()
+        final = self._create_invoice(order, "delivered")
+        final.action_post()
+        final.action_l10n_ae_prepare()
+        first = final.l10n_ae_transmission_id
+        first_xml, first_payload = first.xml_content, first.payload
+        with self.assertRaisesRegex(UserError, "immutable"):
+            first.sudo().write({"l10n_ae_advance_source_ids": [Command.clear()]})
+        duplicate = final.with_context(include_business_fields=True).copy(
+            {"invoice_date": fields.Date.today()}
+        )
+        self.assertTrue(duplicate.invoice_line_ids.filtered("is_downpayment"))
+        self.env.company.write(
+            {
+                "l10n_ae_edi_auto_prepare": True,
+                "l10n_ae_edi_binding_id": self.binding.id,
+            }
+        )
+        with self.assertRaisesRegex(UserError, "already.*deduct|remaining.*advance"):
+            duplicate.action_post()
+        self.assertEqual(duplicate.state, "draft")
+        self.assertFalse(duplicate.l10n_ae_fiscal_uuid)
+        self.assertFalse(duplicate.l10n_ae_transmission_id)
+        self.assertEqual((first.xml_content, first.payload), (first_xml, first_payload))
+        self.assertEqual((advance.amount_total, final.amount_total), (1050, 9450))
+
+    def test_two_partial_finals_can_consume_exactly_one_advance(self):
+        order = self.env["sale.order"].create(
+            {
+                "partner_id": self.partner_a.id,
+                "order_line": [
+                    Command.create(
+                        {
+                            "product_id": self.product_a.id,
+                            "product_uom_qty": 1,
+                            "price_unit": 10000,
+                            "tax_ids": [Command.set(self.tax_sale_a.ids)],
+                        }
+                    )
+                ],
+            }
+        )
+        order.action_confirm()
+        advance = self._create_invoice(order, "percentage", 10)
+        advance.action_post()
+        advance.action_l10n_ae_prepare()
+        first = self._create_invoice(order, "delivered")
+        first.invoice_line_ids.filtered(
+            lambda line: line.display_type == "product" and not line.is_downpayment
+        ).quantity = 0.5
+        first.invoice_line_ids.filtered("is_downpayment").quantity = -0.4
+        first.action_post()
+        first.action_l10n_ae_prepare()
+        first_xml = first.preview_l10n_ae_pint()
+        second = first.with_context(include_business_fields=True).copy(
+            {
+                "invoice_date": fields.Date.today(),
+                "l10n_ae_binding_id": self.binding.id,
+            }
+        )
+        second.invoice_line_ids.filtered("is_downpayment").quantity = -0.6
+        second.action_post()
+        second.action_l10n_ae_prepare()
+        self.assertEqual(
+            (first.amount_untaxed, first.amount_tax, first.amount_total),
+            (4600, 230, 4830),
+        )
+        self.assertEqual(
+            (second.amount_untaxed, second.amount_tax, second.amount_total),
+            (4400, 220, 4620),
+        )
+        for invoice, net, vat in (
+            (first, "400.00", "20.00"),
+            (second, "600.00", "30.00"),
+        ):
+            reference = json.loads(invoice.l10n_ae_transmission_id.payload)[
+                "taxed_advances"
+            ]
+            self.assertEqual(len(reference), 1)
+            self.assertEqual(
+                (reference[0]["consumed_net"], reference[0]["consumed_vat"]), (net, vat)
+            )
+            report = invoice.validate_l10n_ae_pint()
+            self.assertTrue(report["valid"], report)
+        self.assertEqual(first.preview_l10n_ae_pint(), first_xml)
+        self.assertNotEqual(first.l10n_ae_fiscal_uuid, second.l10n_ae_fiscal_uuid)
+        self.assertEqual(
+            advance.amount_total + first.amount_total + second.amount_total, 10500
+        )
+
+    def test_posted_final_consumes_advance_before_fiscal_preparation(self):
+        order = self.env["sale.order"].create(
+            {
+                "partner_id": self.partner_a.id,
+                "order_line": [
+                    Command.create(
+                        {
+                            "product_id": self.product_a.id,
+                            "product_uom_qty": 1,
+                            "price_unit": 10000,
+                            "tax_ids": [Command.set(self.tax_sale_a.ids)],
+                        }
+                    )
+                ],
+            }
+        )
+        order.action_confirm()
+        advance = self._create_invoice(order, "percentage", 10)
+        advance.action_post()
+        advance.action_l10n_ae_prepare()
+        first = self._create_invoice(order, "delivered")
+        first.action_post()
+        self.assertFalse(first.l10n_ae_transmission_id)
+        duplicate = first.with_context(include_business_fields=True).copy(
+            {
+                "invoice_date": fields.Date.today(),
+            }
+        )
+        with self.assertRaisesRegex(UserError, "already.*deduct|remaining.*advance"):
+            duplicate.action_l10n_ae_validate()
+        self.assertEqual(duplicate.state, "draft")
+        self.assertFalse(duplicate.l10n_ae_fiscal_uuid)
+        self.assertFalse(duplicate.l10n_ae_transmission_id)
+        self.assertEqual((first.state, first.amount_total), ("posted", 9450))
+        self.assertFalse(first.l10n_ae_transmission_id)

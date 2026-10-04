@@ -47,6 +47,13 @@ class AccountMove(models.Model):
                     )
                 )
             source = sources
+            if source.company_id != self.company_id:
+                raise UserError(
+                    self.env._(
+                        "The taxed advance and deduction must belong "
+                        "to the same legal company."
+                    )
+                )
             if source.state != "posted":
                 raise UserError(
                     self.env._(
@@ -68,6 +75,26 @@ class AccountMove(models.Model):
                     "issue_date": fields.Date.to_string(source.invoice_date),
                 }
             )
+            if (
+                identity.get("currency", source.currency_id.name)
+                != self.currency_id.name
+            ):
+                raise UserError(
+                    self.env._(
+                        "The taxed advance and deduction must use "
+                        "the same document currency."
+                    )
+                )
+            if (
+                identity.get("document_category", source.l10n_ae_document_category)
+                != self.l10n_ae_document_category
+            ):
+                raise UserError(
+                    self.env._(
+                        "The taxed advance and deduction must use "
+                        "the same document category."
+                    )
+                )
             reference = references.setdefault(
                 source.id,
                 {
@@ -99,9 +126,66 @@ class AccountMove(models.Model):
                         "Review the invoice lines."
                     )
                 )
+            consumed = self._l10n_ae_prior_advance_consumption(source)
+            if consumed["consumed_net"] + reference["consumed_net"] > Decimal(
+                str(source_totals["net"])
+            ) or consumed["consumed_vat"] + reference["consumed_vat"] > Decimal(
+                str(source_totals["vat"])
+            ):
+                raise UserError(
+                    self.env._(
+                        "This advance has already been deducted. "
+                        "Review its remaining net and VAT before another deduction."
+                    )
+                )
             for name in ("consumed_net", "consumed_vat"):
                 reference[name] = str(reference[name].quantize(scale))
         return list(references.values())
+
+    def _l10n_ae_prior_advance_consumption(self, source):
+        self.ensure_one()
+        prior = self.env["l10n_ae.edi.transmission"].search(
+            [
+                ("company_id", "=", self.company_id.id),
+                ("l10n_ae_advance_source_ids", "in", source.ids),
+                ("move_id", "!=", self.id),
+            ]
+        )
+        consumed = {"consumed_net": Decimal(0), "consumed_vat": Decimal(0)}
+        for transmission in prior:
+            for used in json.loads(transmission.payload).get("taxed_advances", []):
+                if used["source_move_id"] == source.id:
+                    for name in consumed:
+                        consumed[name] += Decimal(used[name])
+        posted_lines = self.env["account.move.line"].search(
+            [
+                ("company_id", "=", self.company_id.id),
+                ("sale_line_ids", "in", source.invoice_line_ids.sale_line_ids.ids),
+                ("is_downpayment", "=", True),
+                ("quantity", "<", 0),
+                ("move_id.state", "=", "posted"),
+                ("move_id.move_type", "=", "out_invoice"),
+                ("move_id", "!=", self.id),
+                ("move_id.l10n_ae_transmission_id", "=", False),
+            ]
+        )
+        for used_line in posted_lines:
+            if (
+                used_line.move_id.currency_id != self.currency_id
+                or used_line.move_id.l10n_ae_document_category
+                != self.l10n_ae_document_category
+            ):
+                raise UserError(
+                    self.env._(
+                        "Review the previous posted advance deduction's "
+                        "currency and document category."
+                    )
+                )
+            consumed["consumed_net"] -= Decimal(str(used_line.price_subtotal))
+            consumed["consumed_vat"] -= Decimal(str(used_line.price_total)) - Decimal(
+                str(used_line.price_subtotal)
+            )
+        return consumed
 
     def action_l10n_ae_validate(self):
         result = super().action_l10n_ae_validate()
