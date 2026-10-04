@@ -8,5 +8,8 @@ browser journey. Checks refuse an unposted source, another legal company or comm
 customer, a different document currency/category and an excessive deduction. Sequential
 consumption counts frozen evidence and already-posted native deductions; partial400/20
 and600/30 can consume exactly an advance1000/50. It never creates another payment or
-changes the accounting calculator. Multiple advances, concurrent consumption, full
+changes the accounting calculator. Shared-source posting/preparation uses the native
+request retry boundary; committed proofs cover stale posting, exact partial preparations
+and rollback while retaining original fiscal bytes. Multiple advances, concurrent line
+editing, full
 process/FX/adjustment combinations and fiscal ratification remain under development.

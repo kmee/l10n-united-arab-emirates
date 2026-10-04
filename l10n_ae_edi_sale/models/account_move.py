@@ -15,6 +15,69 @@ class AccountMove(models.Model):
         compute="_compute_l10n_ae_advance_reference_summary",
     )
 
+    def _l10n_ae_lock_advance_sources(self):
+        moves = self.filtered(
+            lambda move: (
+                move.company_id.country_code == "AE"
+                and move.move_type == "out_invoice"
+                and not move.l10n_ae_received_document
+                and not move.l10n_ae_transmission_id
+            )
+        )
+        sources = self.env["account.move"]
+        for move in moves:
+            linked = (
+                move.invoice_line_ids.filtered(
+                    lambda line: line.is_downpayment and line.quantity < 0
+                )
+                ._get_downpayment_lines()
+                .filtered(
+                    lambda line: (
+                        line.move_id.move_type == "out_invoice" and line.quantity > 0
+                    )
+                )
+                .move_id
+            )
+            if linked.filtered(
+                lambda source, move=move: source.company_id != move.company_id
+            ):
+                raise UserError(
+                    self.env._(
+                        "The taxed advance and deduction must belong "
+                        "to the same legal company."
+                    )
+                )
+            sources |= linked
+        if sources:
+            locked = moves | sources
+            locked.check_access("write")
+            locked.flush_recordset()
+            self.env.cr.execute(
+                "SELECT id FROM account_move WHERE id = ANY(%s) ORDER BY id FOR UPDATE",
+                [locked.ids],
+            )
+            locked.invalidate_recordset()
+            # Publish the consumption change through the original's row version.
+            # A stale repeatable-read request then retries its entire action.
+            # Original fiscal number/UUID/snapshot/XML remain unchanged.
+            sources.write({"write_date": self.env.cr.now()})
+            sources.flush_recordset(["write_uid", "write_date"])
+
+    def _post(self, soft=True):
+        self.filtered(
+            lambda move: (
+                not soft
+                or not move.date
+                or move.date <= fields.Date.context_today(move)
+            )
+        )._l10n_ae_lock_advance_sources()
+        return super()._post(soft=soft)
+
+    def action_l10n_ae_prepare(self):
+        self.ensure_one()
+        self._l10n_ae_lock_advance_sources()
+        return super().action_l10n_ae_prepare()
+
     def _l10n_ae_advance_references(self):
         self.ensure_one()
         if self.l10n_ae_transmission_id:
