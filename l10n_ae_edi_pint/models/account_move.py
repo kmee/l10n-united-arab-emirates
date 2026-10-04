@@ -15,6 +15,26 @@ class AccountMove(models.Model):
 
     def action_l10n_ae_validate(self):
         result = super().action_l10n_ae_validate()
+        formatter = self.env["account.edi.ubl.kmee_ae"]
+        for move in self.filtered(
+            lambda record: record.l10n_ae_document_category == "commercial"
+        ):
+            taxes = move.invoice_line_ids.tax_ids.flatten_taxes_hierarchy()
+            if any(
+                formatter._get_tax_category_code(
+                    move.partner_id.commercial_partner_id,
+                    move.company_id.partner_id,
+                    tax,
+                )
+                not in {"E", "O", "Z"}
+                for tax in taxes
+            ):
+                raise UserError(
+                    self.env._(
+                        "IBR-122-AE: commercial invoices and credits require tax "
+                        "categories E, O or Z. Review the line taxes before posting."
+                    )
+                )
         for move in self.filtered("is_self_billing"):
             supplier = move.partner_id.commercial_partner_id
             buyer = move.company_id.partner_id

@@ -1872,6 +1872,158 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         report = credit.validate_l10n_ae_pint()
         self.assertTrue(report["valid"], report)
 
+    def test_commercial_standard_vat_is_rejected_before_posting_or_freezing(self):
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {
+                "name": "Invalid commercial simulation",
+                "fiscal_uuid_policy": "controlled_local",
+            }
+        )
+        self.env.company.write(
+            {"l10n_ae_edi_auto_prepare": True, "l10n_ae_edi_binding_id": binding.id}
+        )
+        outside_scope = self.tax_sale_a.copy(
+            {
+                "name": "Synthetic outside-scope group child",
+                "amount": 0,
+                "ubl_cii_tax_category_code": "O",
+            }
+        )
+        mixed_group = self.tax_sale_a.copy(
+            {
+                "name": "Synthetic mixed commercial group",
+                "amount_type": "group",
+                "children_tax_ids": [(6, 0, (self.tax_sale_a | outside_scope).ids)],
+            }
+        )
+        cases = [
+            (move_type, taxes)
+            for move_type in ("out_invoice", "out_refund")
+            for taxes in (self.tax_sale_a, mixed_group)
+        ]
+        for move_type, taxes in cases:
+            with self.subTest(move_type=move_type, taxes=taxes.name):
+                move = self.init_invoice(move_type, amounts=[100], taxes=taxes)
+                move.write(
+                    {
+                        "l10n_ae_document_category": "commercial",
+                        "l10n_ae_credit_reason": "DL8.61.1.C"
+                        if move_type == "out_refund"
+                        else False,
+                    }
+                )
+                with self.assertRaisesRegex(UserError, "IBR-122-AE"):
+                    move.action_l10n_ae_validate()
+                with self.assertRaisesRegex(UserError, "IBR-122-AE"):
+                    move.action_post()
+                self.assertEqual(move.state, "draft")
+                self.assertEqual((move.amount_tax, move.amount_total), (5, 105))
+                self.assertFalse(move.l10n_ae_fiscal_uuid)
+                self.assertFalse(move.l10n_ae_transmission_id)
+
+    def test_native_partial_commercial_credit_preserves_480_original_and_type_81(self):
+        self.env.company.partner_id.vat = False
+        self._assert_native_partial_commercial_credit()
+
+    def test_registered_supplier_commercial_credit_preserves_outside_scope_category(
+        self,
+    ):
+        self.assertTrue(self.env.company.partner_id.vat)
+        self._assert_native_partial_commercial_credit()
+
+    def _assert_native_partial_commercial_credit(self):
+        outside_scope = self.tax_sale_a.copy(
+            {
+                "name": "Reviewed synthetic outside-scope sale",
+                "amount": 0,
+                "ubl_cii_tax_category_code": "O",
+            }
+        )
+        original = self.init_invoice("out_invoice", amounts=[100], taxes=outside_scope)
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {
+                "name": "Commercial credit local simulation",
+                "fiscal_uuid_policy": "controlled_local",
+            }
+        )
+        original.write(
+            {
+                "l10n_ae_document_category": "commercial",
+                "l10n_ae_binding_id": binding.id,
+            }
+        )
+        original.action_post()
+        original.action_l10n_ae_prepare()
+        original_evidence = (
+            original.l10n_ae_transmission_id.payload,
+            original.l10n_ae_transmission_id.xml_content,
+        )
+        report = original.validate_l10n_ae_pint()
+        self.assertTrue(report["valid"], report)
+        wizard = (
+            self.env["account.move.reversal"]
+            .with_context(active_model="account.move", active_ids=original.ids)
+            .create(
+                {
+                    "reason": "Reviewed synthetic consideration reduction",
+                    "l10n_ae_credit_reason": "DL8.61.1.C",
+                    "journal_id": original.journal_id.id,
+                    "date": original.invoice_date,
+                }
+            )
+        )
+        wizard.refund_moves()
+        credit = wizard.new_move_ids
+        self.assertEqual(
+            (credit.state, credit.l10n_ae_document_category), ("draft", "commercial")
+        )
+        credit.invoice_line_ids.price_unit = 40
+        credit.l10n_ae_binding_id = binding
+        credit.action_post()
+        credit.action_l10n_ae_prepare()
+        report = credit.validate_l10n_ae_pint()
+        self.assertTrue(report["valid"], report)
+        tree = etree.fromstring(credit.l10n_ae_transmission_id.xml_content.encode())
+        self.assertEqual(tree.findtext("cbc:CreditNoteTypeCode", namespaces=NS), "81")
+        self.assertEqual(
+            tree.findtext(
+                "cac:BillingReference/cac:InvoiceDocumentReference/cbc:ID",
+                namespaces=NS,
+            ),
+            original.name,
+        )
+        self.assertEqual(
+            tree.findtext(
+                "cac:LegalMonetaryTotal/cbc:TaxInclusiveAmount", namespaces=NS
+            ),
+            "40.00",
+        )
+        self.assertEqual(
+            tree.findtext("cac:LegalMonetaryTotal/cbc:PayableAmount", namespaces=NS),
+            "0.00",
+        )
+        self.assertEqual(
+            (
+                credit.amount_untaxed,
+                credit.amount_tax,
+                credit.amount_total,
+                credit.amount_residual,
+            ),
+            (40, 0, 40, 0),
+        )
+        self.assertEqual(
+            (original.state, original.amount_total, original.amount_residual),
+            ("posted", 100, 60),
+        )
+        self.assertNotEqual(credit.l10n_ae_fiscal_uuid, original.l10n_ae_fiscal_uuid)
+        self.assertEqual(
+            (
+                original.l10n_ae_transmission_id.payload,
+                original.l10n_ae_transmission_id.xml_content,
+            ),
+            original_evidence,
+        )
+
     def test_six_document_categories_preserve_type_and_process(self):
         cases = [
             ("out_invoice", "tax", "Invoice", "380", "billing"),
