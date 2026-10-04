@@ -40,6 +40,7 @@ class UaeEdiEvent(models.Model):
             ("replay_conflict", "Divergent Replay"),
             ("obsolete", "Older Fact"),
             ("conflict", "Contradictory Fact"),
+            ("unexpected", "Unexpected Dimension"),
         ],
         required=True,
         readonly=True,

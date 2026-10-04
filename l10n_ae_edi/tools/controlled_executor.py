@@ -63,6 +63,7 @@ class ControlledExecutor:
                 )
             key, provider = record.idempotency_key, record.provider
             tin = json.loads(record.payload)["company"]["tin"]
+            pending_dimensions = record._controlled_pending_dimensions()
         client = ControlledAspClient(self.endpoint, self.token, provider)
         # Commit the durable reservation BEFORE remote I/O; a crash leaves a lease.
         try:
@@ -98,13 +99,8 @@ class ControlledExecutor:
             if receipt and (
                 receipt.get("submission_state") != "accepted"
                 or any(
-                    receipt.get(name) != "pending"
-                    for name in (
-                        "validation_c2_state",
-                        "delivery_c3_state",
-                        "reporting_c2_state",
-                        "reporting_c3_state",
-                    )
+                    receipt.get(name) != expected
+                    for name, expected in pending_dimensions.items()
                 )
             ):
                 receipt, error_kind = None, "unknown"

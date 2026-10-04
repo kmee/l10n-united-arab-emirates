@@ -182,7 +182,9 @@ class ControlledEventReceiver:
                 order="sequence desc, id desc",
                 limit=1,
             )
-            if not previous and current_fact:
+            if not previous and record[body["dimension"]] == "not_applicable":
+                outcome = "unexpected"
+            elif not previous and current_fact:
                 if body["sequence"] < current_fact.sequence:
                     outcome = "obsolete"
                 elif body["state"] != current_fact.fact_state:
@@ -207,7 +209,7 @@ class ControlledEventReceiver:
                     }
                 )
             )
-            if outcome in {"replay_conflict", "conflict"}:
+            if outcome in {"replay_conflict", "conflict", "unexpected"}:
                 (
                     record | previous.transmission_id
                 ).sudo()._mark_controlled_event_review()

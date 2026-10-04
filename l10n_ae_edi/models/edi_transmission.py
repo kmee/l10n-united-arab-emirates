@@ -28,6 +28,12 @@ class UaeEdiTransmission(models.Model):
     process = fields.Selection(
         [("billing", "Billing"), ("selfbilling", "Self-Billing")], required=True
     )
+    exchange_mode = fields.Selection(
+        [("exchange", "Invoice Exchange"), ("reporting_only", "Reporting Only")],
+        default="exchange",
+        required=True,
+        readonly=True,
+    )
     origin_system = fields.Char(required=True)
     origin_document_id = fields.Char(required=True)
     revision = fields.Integer(default=1, required=True)
@@ -70,6 +76,7 @@ class UaeEdiTransmission(models.Model):
     )
     delivery_c3_state = fields.Selection(
         [
+            ("not_applicable", "Not Applicable"),
             ("unknown", "Unknown"),
             ("pending", "Pending"),
             ("delivered", "Delivered"),
@@ -92,6 +99,7 @@ class UaeEdiTransmission(models.Model):
     )
     reporting_c3_state = fields.Selection(
         [
+            ("not_applicable", "Not Applicable"),
             ("unknown", "Unknown"),
             ("pending", "Pending"),
             ("confirmed", "Confirmed"),
@@ -106,6 +114,50 @@ class UaeEdiTransmission(models.Model):
 
     event_review_required = fields.Boolean(readonly=True, copy=False)
 
+    confirmation_state = fields.Selection(
+        [
+            ("pending", "Pending Confirmations"),
+            ("confirmed", "Confirmations Complete"),
+            ("review", "Requires Review"),
+        ],
+        compute="_compute_confirmation_state",
+    )
+
+    @api.depends(
+        "exchange_mode",
+        "submission_state",
+        "validation_c2_state",
+        "delivery_c3_state",
+        "reporting_c2_state",
+        "reporting_c3_state",
+        "event_review_required",
+    )
+    def _compute_confirmation_state(self):
+        for record in self:
+            expected = {
+                "validation_c2_state": "passed",
+                "reporting_c2_state": "confirmed",
+            }
+            if record.exchange_mode == "reporting_only":
+                expected.update(
+                    delivery_c3_state="not_applicable",
+                    reporting_c3_state="not_applicable",
+                )
+            else:
+                expected.update(
+                    delivery_c3_state="delivered", reporting_c3_state="confirmed"
+                )
+            if record.event_review_required or any(
+                record[name] == "rejected" for name in expected
+            ):
+                record.confirmation_state = "review"
+            elif record.submission_state == "accepted" and all(
+                record[name] == state for name, state in expected.items()
+            ):
+                record.confirmation_state = "confirmed"
+            else:
+                record.confirmation_state = "pending"
+
     def _mark_controlled_event_review(self):
         return super().write({"event_review_required": True})
 
@@ -117,6 +169,18 @@ class UaeEdiTransmission(models.Model):
         raise UserError(
             self.env._("Install the UAE PINT format for controlled sending.")
         )
+
+    def _controlled_pending_dimensions(self):
+        self.ensure_one()
+        c3_state = (
+            "not_applicable" if self.exchange_mode == "reporting_only" else "pending"
+        )
+        return {
+            "validation_c2_state": "pending",
+            "delivery_c3_state": c3_state,
+            "reporting_c2_state": "pending",
+            "reporting_c3_state": c3_state,
+        }
 
     def _claim_controlled(self, endpoint, now, validation):
         """Called only by the executor's short, dedicated transaction."""
@@ -205,15 +269,8 @@ class UaeEdiTransmission(models.Model):
         )
         values = {"submission_state": state, "lease_until": False}
         if accepted:
-            values.update(
-                {
-                    "remote_id": receipt["remote_id"],
-                    "validation_c2_state": "pending",
-                    "delivery_c3_state": "pending",
-                    "reporting_c2_state": "pending",
-                    "reporting_c3_state": "pending",
-                }
-            )
+            values.update(self._controlled_pending_dimensions())
+            values["remote_id"] = receipt["remote_id"]
         super().write(values)
         return state
 
@@ -231,6 +288,7 @@ class UaeEdiTransmission(models.Model):
             "provider",
             "environment",
             "process",
+            "exchange_mode",
             "origin_system",
             "origin_document_id",
             "revision",
@@ -247,6 +305,7 @@ class UaeEdiTransmission(models.Model):
             "attempt_ids",
             "event_ids",
             "event_review_required",
+            "confirmation_state",
             "validation_c2_state",
             "delivery_c3_state",
             "reporting_c2_state",

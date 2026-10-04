@@ -157,6 +157,14 @@ class AccountMove(models.Model):
         related="l10n_ae_transmission_id.submission_state",
         string="UAE Submission Status",
     )
+    l10n_ae_exchange_mode = fields.Selection(
+        related="l10n_ae_transmission_id.exchange_mode",
+        string="UAE Exchange Mode",
+    )
+    l10n_ae_confirmation_state = fields.Selection(
+        related="l10n_ae_transmission_id.confirmation_state",
+        string="UAE Confirmation Status",
+    )
     l10n_ae_validation_c2_state = fields.Selection(
         related="l10n_ae_transmission_id.validation_c2_state",
         string="ASP Validation",
@@ -335,6 +343,7 @@ class AccountMove(models.Model):
         company_party = {**party(company.partner_id), "tin": company.l10n_ae_tin}
         counterparty = party(partner)
         agreement = self.l10n_ae_selfbilling_agreement_id
+        destination = self._l10n_ae_destination_override()
         return {
             "contract_version": "kmee-controlled-1",
             "company": company_party,
@@ -342,7 +351,8 @@ class AccountMove(models.Model):
             "issuer_role": "buyer" if self.is_self_billing else "supplier",
             "supplier": counterparty if self.is_self_billing else company_party,
             "buyer": company_party if self.is_self_billing else counterparty,
-            "destination": self._l10n_ae_destination_override(),
+            "destination": destination,
+            "exchange_mode": "reporting_only" if destination else "exchange",
             "selfbilling_agreement": {
                 "reference": agreement.name,
                 "local_role": agreement.local_role,
@@ -493,6 +503,13 @@ class AccountMove(models.Model):
                             "provider": binding.provider,
                             "environment": binding.environment,
                             "process": snapshot["process"],
+                            "exchange_mode": snapshot["exchange_mode"],
+                            "delivery_c3_state": "not_applicable"
+                            if snapshot["exchange_mode"] == "reporting_only"
+                            else "unknown",
+                            "reporting_c3_state": "not_applicable"
+                            if snapshot["exchange_mode"] == "reporting_only"
+                            else "unknown",
                             "origin_system": self.l10n_ae_origin_system,
                             "origin_document_id": self.l10n_ae_origin_document_id,
                             "payload": payload,

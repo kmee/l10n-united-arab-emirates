@@ -63,6 +63,10 @@
                             readonly="l10n_ae_transmission_id or l10n_ae_received_document"
                         />
                         <field
+                            name="l10n_ae_deemed_supply"
+                            readonly="l10n_ae_transmission_id or l10n_ae_received_document"
+                        />
+                        <field
                             name="l10n_ae_beneficiary_id"
                             invisible="not l10n_ae_free_zone"
                             required="l10n_ae_free_zone"
@@ -140,6 +144,14 @@
                         string="E-Invoice Confirmations"
                         invisible="not l10n_ae_transmission_id"
                     >
+                        <field name="l10n_ae_exchange_mode" readonly="True" />
+                        <field name="l10n_ae_confirmation_state" readonly="True" />
+                        <label
+                            for="l10n_ae_exchange_mode"
+                            colspan="2"
+                            string="Reporting Only requires ASP validation and its tax report; buyer ASP exchange does not apply."
+                            invisible="l10n_ae_exchange_mode != 'reporting_only'"
+                        />
                         <field name="l10n_ae_validation_c2_state" readonly="True" />
                         <field name="l10n_ae_delivery_c3_state" readonly="True" />
                         <field name="l10n_ae_reporting_c2_state" readonly="True" />
