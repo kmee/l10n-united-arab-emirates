@@ -118,9 +118,14 @@ class ControlledEventReceiver:
             env = api.Environment(
                 cursor, self.uid, {"allowed_company_ids": [self.company_id]}
             )
-            if not (
-                env.user.has_group("l10n_ae_edi.group_event_receiver")
-                or env.user.has_group("account.group_account_manager")
+            principal = env.user.exists()
+            if (
+                not principal
+                or not principal.active
+                or not (
+                    principal.has_group("l10n_ae_edi.group_event_receiver")
+                    or principal.has_group("account.group_account_manager")
+                )
             ):
                 raise AccessError(env._("UAE event receiving permission is required."))
             binding = env["l10n_ae.edi.binding"].browse(binding_id).exists()
