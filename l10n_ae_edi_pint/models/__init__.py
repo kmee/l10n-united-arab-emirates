@@ -10,3 +10,4 @@ from . import edi_inbox_review
 from . import edi_inbox_evidence
 from . import edi_binding
 from . import res_partner
+from . import edi_retention
