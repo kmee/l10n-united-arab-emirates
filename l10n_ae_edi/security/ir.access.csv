@@ -1,4 +1,6 @@
 id,name,model_id,group_id/id,operation,domain
+access_uae_transmission_billing,UAE billing frozen issue reader,l10n_ae.edi.transmission,group_billing_reader,r,
+access_uae_event_billing,UAE billing event reader,l10n_ae.edi.event,group_billing_reader,r,
 access_uae_binding_sender,UAE sending binding reader,l10n_ae.edi.binding,group_controlled_sender,r,
 access_uae_transmission_sender,UAE sending frozen issue reader,l10n_ae.edi.transmission,group_controlled_sender,r,
 access_uae_attempt_sender,UAE sending attempt reader,l10n_ae.edi.attempt,group_controlled_sender,r,

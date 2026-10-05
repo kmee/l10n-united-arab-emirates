@@ -1,5 +1,14 @@
 Install only in an isolated Odoo 20.0 development database. Read the architecture and QA instructions before preparing synthetic documents. In the company's UAE E-Invoicing tab, confirm identity, select a sandbox ASP binding and optionally enable queuing on posting. An explicit invoice binding overrides the company default. The controlled external process sends committed intents; API acceptance does not confirm delivery or FTA reporting. These Alpha modules are not approved for production fiscal transmission.
 
+For a separate billing query account, assign **UAE Integration → Billing Status Reader**
+to a plain active internal user with only its permitted companies. The native Odoo20
+JSON2 API provides scoped status, preserved PINT XML and paginated event facts without
+accounting or sending privileges. Preparing an existing posted sandbox invoice is a
+separate operation requiring native Invoice/write permissions. See
+[the billing API contract](https://github.com/kmee/l10n-eua/blob/20.0-add-uae-edi/docs/controlled-executor.md#billing-api)
+and the PT/EN scenario manuals. Native API keys belong to Odoo; the addon adds no key
+store or credential fields. Full client creation/callback integration remains pending.
+
 For an outbound self-billed purchase, use a native self-billing purchase journal and
 select a UAE Self-Billing Agreement in the invoice's UAE tab. Accounting managers open **Invoicing → Configuration → UAE Self-Billing Agreements**
 to maintain buyer-role agreements for the company and commercial supplier, including reference,

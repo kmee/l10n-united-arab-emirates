@@ -20,4 +20,12 @@
             name="comment"
         >Send committed controlled UAE issues and reconcile their original attempts for authorized companies without accounting or configuration write access.</field>
     </record>
+    <record id="group_billing_reader" model="res.groups">
+        <field name="name">Billing Status Reader</field>
+        <field name="privilege_id" ref="privilege_uae_integration" />
+        <field name="implied_ids" eval="[(4, ref('base.group_user'))]" />
+        <field
+            name="comment"
+        >Query frozen UAE document status and evidence for authorized companies without accounting, sending or configuration access.</field>
+    </record>
 </odoo>
