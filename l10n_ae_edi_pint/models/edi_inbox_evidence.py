@@ -54,6 +54,10 @@ class UaeEdiInboxEvidence(models.Model):
         "credit_reference_snapshot",
         "processing_history_ids",
         "processing_history_ids.validation_report_hash",
+        "retention_ids",
+        "retention_ids.write_date",
+        "retention_ids.hold_ids",
+        "retention_ids.hold_ids.write_date",
     )
     def _compute_received_evidence_archive(self):
         for inbox in self:
@@ -146,6 +150,10 @@ class UaeEdiInboxEvidence(models.Model):
                 )
         preserve_json("processing-history.json", metadata)
         preserve_json("credit-references.json", inbox.credit_reference_snapshot or [])
+        retention = inbox.env["l10n_ae.edi.retention"]._evidence_appendix(
+            inbox, "inbox_id"
+        )
+        preserve_json("retention.json", retention)
         manifest = {
             "format": "kmee-uae-evidence-1",
             "scope": "received_original",
@@ -156,7 +164,13 @@ class UaeEdiInboxEvidence(models.Model):
                 "remote_id": inbox.remote_id,
                 "move_id": inbox.move_id.id or False,
             },
-            "relationships": {"processing_history": history.ids},
+            "relationships": {
+                "processing_history": history.ids,
+                "retention_obligations": [
+                    row["id"] for row in retention["obligations"]
+                ],
+                "retention_holds": [row["id"] for row in retention["holds"]],
+            },
             "artifacts": {
                 name: {
                     "sha256": hashlib.sha256(content).hexdigest(),

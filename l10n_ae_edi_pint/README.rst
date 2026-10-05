@@ -31,6 +31,11 @@ evidence and economic accounting roles. Additional scenario fields,
 foreign currency and the full conformance matrix remain under
 development. This module does not submit directly to Peppol or the FTA.
 
+Received evidence packages preserve the exact original XML, processing
+evidence and a versioned retention appendix. Reviewed obligations and
+active/released holds remain portable without processing the original or
+creating accounting entries.
+
 .. IMPORTANT::
    This is an alpha version, the data model and design can change at any time without warning.
    Only for development or testing purpose, do not use in production.

@@ -1,6 +1,9 @@
 # Copyright 2026 KMEE
 # License AGPL-3.0 or later (https://www.gnu.org/licenses/agpl).
 import hashlib
+import io
+import json
+import zipfile
 from datetime import date
 
 from odoo.exceptions import AccessError, ValidationError
@@ -32,6 +35,184 @@ class TestUaeReceivedRetention(AccountTestInvoicingCommon):
                 "routing_endpoint": "1000000002",
             }
         )
+
+    def test_received_package_preserves_reviewed_retention_and_hold_history(self):
+        content = b'<!DOCTYPE Invoice SYSTEM "file:///etc/passwd"><Invoice/>'
+        inbox = self.env["l10n_ae.edi.inbox"].receive_controlled_document(
+            self.binding.id, "synthetic-received-retention-package", content
+        )
+        self.assertFalse(inbox.action_process())
+        original = (
+            inbox.original_xml.content,
+            inbox.xml_hash,
+            inbox.state,
+            inbox.move_id.id,
+        )
+
+        def appendix():
+            with zipfile.ZipFile(io.BytesIO(inbox.evidence_archive.content)) as archive:
+                manifest = json.loads(archive.read("manifest.json"))
+                raw = archive.read("retention.json")
+                self.assertEqual(archive.read("document.xml"), content)
+                self.assertEqual(
+                    manifest["artifacts"]["retention.json"],
+                    {
+                        "sha256": hashlib.sha256(raw).hexdigest(),
+                        "size": len(raw),
+                    },
+                )
+                return json.loads(raw), manifest
+
+        empty, _manifest = appendix()
+        self.assertEqual(
+            empty,
+            {
+                "format": "kmee-uae-retention-1",
+                "source": {
+                    "model": "l10n_ae.edi.inbox",
+                    "id": inbox.id,
+                    "company_id": self.env.company.id,
+                },
+                "obligations": [],
+                "holds": [],
+            },
+        )
+        policies = self.env["l10n_ae.edi.retention"]
+        for purpose, years in (("vat", 5), ("corporate_tax", 7)):
+            policies |= self.env["l10n_ae.edi.retention"].create(
+                {
+                    "name": "Synthetic portable reviewed basis",
+                    "inbox_id": inbox.id,
+                    "record_class": "evidence",
+                    "tax_purpose": purpose,
+                    "anchor_kind": "tax_period_end",
+                    "period_start": "2026-01-01",
+                    "anchor_date": "2026-12-31",
+                    "retention_years": years,
+                    "source_reference": "Synthetic reviewed source; not ratified",
+                    "policy_version": "synthetic-appendix-1",
+                    "review_note": "Independent fixture interval",
+                }
+            )
+        policies.action_approve()
+        hold = self.env["l10n_ae.edi.retention.hold"].create(
+            {
+                "retention_id": policies[0].id,
+                "reason": "Synthetic unresolved audit",
+                "source_reference": "Synthetic audit reference",
+            }
+        )
+        active, manifest = appendix()
+        self.assertEqual(
+            manifest["relationships"]["retention_obligations"], policies.ids
+        )
+        self.assertEqual(manifest["relationships"]["retention_holds"], hold.ids)
+        self.assertEqual(
+            [row["retain_until"] for row in active["obligations"]],
+            ["2031-12-31", "2033-12-31"],
+        )
+        self.assertEqual(
+            [row["approved_by_id"] for row in active["obligations"]],
+            [self.env.uid, self.env.uid],
+        )
+        self.assertEqual(
+            [row["policy_version"] for row in active["obligations"]],
+            ["synthetic-appendix-1", "synthetic-appendix-1"],
+        )
+        placement = active["holds"][0]
+        self.assertEqual(placement["state"], "active")
+        self.assertEqual(placement["placed_by_id"], self.env.uid)
+        self.assertTrue(placement["placed_at"])
+        self.assertFalse(placement["released_at"])
+        hold.action_release("Synthetic reviewed resolution")
+        released, _manifest = appendix()
+        for field in ("reason", "source_reference", "placed_by_id", "placed_at"):
+            self.assertEqual(released["holds"][0][field], placement[field])
+        self.assertEqual(released["holds"][0]["state"], "released")
+        self.assertEqual(released["holds"][0]["released_by_id"], self.env.uid)
+        self.assertTrue(released["holds"][0]["released_at"])
+        self.assertEqual(
+            released["holds"][0]["release_reason"], "Synthetic reviewed resolution"
+        )
+        saved = inbox.evidence_archive.content
+        auditor = new_test_user(
+            self.env,
+            login="synthetic-portable-retention-auditor",
+            groups="base.group_user,base.group_allow_export,l10n_ae_edi.group_fiscal_auditor",
+            company_ids=self.env.company.ids,
+            company_id=self.env.company.id,
+        )
+        self.assertEqual(inbox.with_user(auditor).evidence_archive.content, saved)
+        self.assertEqual(
+            (inbox.original_xml.content, inbox.xml_hash, inbox.state, inbox.move_id.id),
+            original,
+        )
+
+    def test_issued_package_keeps_original_bytes_when_retention_is_reviewed(self):
+        invoice = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
+        )
+        invoice.l10n_ae_binding_id = self.binding
+        invoice.action_l10n_ae_prepare()
+        issue = invoice.l10n_ae_transmission_id
+        with zipfile.ZipFile(io.BytesIO(issue.evidence_archive.content)) as archive:
+            original_payload = archive.read("snapshot.json")
+            original_xml = archive.read("document.xml")
+            self.assertEqual(
+                json.loads(archive.read("retention.json"))["obligations"], []
+            )
+        policy = self.env["l10n_ae.edi.retention"].create(
+            {
+                "name": "Synthetic issued portable basis",
+                "transmission_id": issue.id,
+                "record_class": "invoice",
+                "tax_purpose": "vat",
+                "anchor_kind": "tax_period_end",
+                "period_start": "2026-01-01",
+                "anchor_date": "2026-12-31",
+                "retention_years": 5,
+                "source_reference": "Synthetic reviewed source; not ratified",
+                "policy_version": "synthetic-issued-appendix-1",
+                "review_note": "Independent fixture interval",
+            }
+        )
+        with zipfile.ZipFile(io.BytesIO(issue.evidence_archive.content)) as archive:
+            draft = json.loads(archive.read("retention.json"))["obligations"][0]
+            self.assertEqual(draft["state"], "draft")
+            self.assertFalse(draft["approved_by_id"])
+            self.assertFalse(draft["retain_until"])
+        policy.action_approve()
+        with zipfile.ZipFile(io.BytesIO(issue.evidence_archive.content)) as archive:
+            raw = archive.read("retention.json")
+            manifest = json.loads(archive.read("manifest.json"))
+            appendix = json.loads(raw)
+            self.assertEqual(
+                appendix["source"],
+                {
+                    "model": "l10n_ae.edi.transmission",
+                    "id": issue.id,
+                    "company_id": self.env.company.id,
+                },
+            )
+            self.assertEqual(
+                manifest["relationships"]["retention_obligations"], policy.ids
+            )
+            self.assertEqual(manifest["relationships"]["retention_holds"], [])
+            self.assertEqual(appendix["holds"], [])
+            self.assertEqual(appendix["obligations"][0]["retain_until"], "2031-12-31")
+            self.assertEqual(appendix["obligations"][0]["approved_by_id"], self.env.uid)
+            self.assertEqual(
+                manifest["artifacts"]["retention.json"],
+                {
+                    "sha256": hashlib.sha256(raw).hexdigest(),
+                    "size": len(raw),
+                },
+            )
+            self.assertEqual(archive.read("snapshot.json"), original_payload)
+            self.assertEqual(archive.read("document.xml"), original_xml)
+        self.assertEqual(invoice.state, "posted")
+        self.assertEqual(invoice.amount_total, 105)
+        self.assertFalse(issue.attempt_ids)
 
     def test_manager_classifies_received_original_through_native_form(self):
         content = b'<!DOCTYPE Invoice SYSTEM "file:///etc/passwd"><Invoice/>'
