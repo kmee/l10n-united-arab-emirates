@@ -12,10 +12,18 @@ class UaeEdiRetention(models.Model):
 
     name = fields.Char(required=True)
     company_id = fields.Many2one(
-        "res.company", required=True, readonly=True, index=True
+        "res.company",
+        required=True,
+        readonly=True,
+        index=True,
+        default=lambda self: self.env.company,
     )
     transmission_id = fields.Many2one(
-        "l10n_ae.edi.transmission", check_company=True, ondelete="restrict", index=True
+        "l10n_ae.edi.transmission",
+        string="Issued Original",
+        check_company=True,
+        ondelete="restrict",
+        index=True,
     )
     record_class = fields.Selection(
         [
@@ -248,6 +256,57 @@ class UaeEdiRetention(models.Model):
                 )
         return True
 
+    def action_open_hold(self):
+        self.ensure_one()
+        self._check_current_editor()
+        self.with_user(self.env.uid).check_access("read")
+        self._check_current_document(self._document())
+        if self.state != "approved":
+            raise ValidationError(
+                self.env._("Review the retention obligation before placing a hold.")
+            )
+        return {
+            "type": "ir.actions.act_window",
+            "name": self.env._("Place Retention Hold"),
+            "res_model": "l10n_ae.edi.retention.hold.wizard",
+            "view_mode": "form",
+            "view_id": self.env.ref("l10n_ae_edi.edi_retention_hold_wizard_form").id,
+            "target": "new",
+            "context": {"default_retention_id": self.id},
+        }
+
+    def action_assess_original(self, as_of=None):
+        self.ensure_one()
+        self.with_user(self.env.uid).check_access("read")
+        status = self._document().get_retention_status(as_of)
+        labels = {
+            "unclassified": self.env._("Unclassified"),
+            "review_required": self.env._("Requires Review"),
+            "retained": self.env._("Retained"),
+            "held": self.env._("Held"),
+            "reviewable": self.env._("Disposition Review Permitted"),
+        }
+        return {
+            "type": "ir.actions.client",
+            "tag": "display_notification",
+            "params": {
+                "title": self.env._("Original Retention Assessment"),
+                "message": self.env._(
+                    "Status: %(state)s. Assessed on: %(date)s. "
+                    "Latest reviewed deadline: %(deadline)s. "
+                    "Obligations: %(obligations)s. Active holds: %(holds)s. "
+                    "Disposition review does not authorize deletion.",
+                    state=labels[status["state"]],
+                    date=status["as_of"],
+                    deadline=status["retain_until"] or self.env._("Not Reviewed"),
+                    obligations=status["obligation_count"],
+                    holds=status["active_hold_count"],
+                ),
+                "type": "info",
+                "sticky": True,
+            },
+        }
+
     @api.ondelete(at_uninstall=False)
     def _unlink_except_reviewed_obligation(self):
         self._check_current_editor()
@@ -431,6 +490,27 @@ class UaeEdiRetentionHold(models.Model):
                 "released_at": fields.Datetime.now(),
             }
         )
+
+    def action_open_release(self):
+        self.ensure_one()
+        self.env["l10n_ae.edi.retention"]._check_current_editor()
+        self.with_user(self.env.uid).check_access("write")
+        self.retention_id._check_current_document(self.retention_id._document())
+        if self.state != "active":
+            raise UserError(
+                self.env._(
+                    "This UAE hold has already been released; its history is immutable."
+                )
+            )
+        return {
+            "type": "ir.actions.act_window",
+            "name": self.env._("Release Retention Hold"),
+            "res_model": "l10n_ae.edi.retention.release.wizard",
+            "view_mode": "form",
+            "view_id": self.env.ref("l10n_ae_edi.edi_retention_release_wizard_form").id,
+            "target": "new",
+            "context": {"default_hold_id": self.id},
+        }
 
     @api.ondelete(at_uninstall=False)
     def _unlink_except_hold_history(self):

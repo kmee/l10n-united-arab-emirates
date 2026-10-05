@@ -3,7 +3,7 @@
 from datetime import date
 
 from odoo.exceptions import AccessError, UserError, ValidationError
-from odoo.tests import tagged
+from odoo.tests import Form, tagged
 from odoo.tests.common import new_test_user
 
 from odoo.addons.account.tests.common import AccountTestInvoicingCommon
@@ -73,6 +73,164 @@ class TestUaeRetention(AccountTestInvoicingCommon):
         self.assertEqual(status["obligation_count"], 0)
         self.assertFalse(status["retain_until"])
         self.assertFalse(status["disposition_reviewable"])
+
+    def test_manager_reviews_issued_obligation_through_native_form(self):
+        issue = self.issue()
+        with Form(
+            self.env["l10n_ae.edi.retention"],
+            view="l10n_ae_edi.edi_retention_form",
+        ) as form:
+            form.name = "Synthetic native form review"
+            form.transmission_id = issue
+            form.record_class = "invoice"
+            form.tax_purpose = "vat"
+            form.anchor_kind = "tax_period_end"
+            form.period_start = date(2026, 1, 1)
+            form.anchor_date = date(2026, 12, 31)
+            form.retention_years = 5
+            form.source_reference = "Synthetic reviewed source, not ratified"
+            form.policy_version = "synthetic-ui-1"
+            form.review_note = "Explicit engineering example, not a legal policy"
+        policy = form.record
+        self.assertEqual(policy.company_id, issue.company_id)
+        self.assertEqual(policy.state, "draft")
+        policy.action_approve()
+        self.assertEqual(policy.retain_until, date(2031, 12, 31))
+        self.assertEqual(policy.approved_by_id, self.env.user)
+        self.assertTrue(policy.approved_at)
+        self.assertEqual(issue.get_retention_status("2030-01-01")["state"], "retained")
+
+    def test_auditor_assesses_all_original_obligations_without_mutation(self):
+        issue = self.issue()
+        vat = self.obligation(issue)
+        corporate = self.obligation(issue, 7, "corporate_tax")
+        (vat | corporate).action_approve()
+        before = (issue.payload, issue.idempotency_key, issue.move_id.amount_total)
+        action = vat.with_user(self.auditor).action_assess_original("2032-01-01")
+        self.assertEqual(action["tag"], "display_notification")
+        self.assertIn("Retained", action["params"]["message"])
+        self.assertIn("2033-12-31", action["params"]["message"])
+        self.assertIn("Obligations: 2", action["params"]["message"])
+        self.assertIn("does not authorize deletion", action["params"]["message"])
+        self.assertEqual(
+            before, (issue.payload, issue.idempotency_key, issue.move_id.amount_total)
+        )
+
+    def test_auditor_native_retention_form_is_readonly(self):
+        policy = self.obligation(self.issue())
+        policy.action_approve()
+        with Form(
+            policy.with_user(self.auditor),
+            view="l10n_ae_edi.edi_audit_retention_form",
+        ) as form:
+            self.assertEqual(form.retain_until, "2031-12-31")
+            with self.assertRaises(AssertionError):
+                form.name = "Unauthorized rewritten review"
+        self.assertEqual(policy.name, "Synthetic reviewed obligation")
+        draft = self.obligation(policy.transmission_id)
+        with (
+            Form(
+                draft.with_user(self.auditor),
+                view="l10n_ae_edi.edi_audit_retention_form",
+            ) as form,
+            self.assertRaises(AssertionError),
+        ):
+            form.name = "Unauthorized draft review"
+
+    def test_manager_places_hold_through_native_dialog(self):
+        issue = self.issue()
+        policy = self.obligation(issue)
+        policy.action_approve()
+        action = policy.action_open_hold()
+        model = self.env[action["res_model"]].with_context(**action["context"])
+        with Form(model, view=action["view_id"]) as dialog:
+            dialog.reason = "Synthetic open audit, not a real audit"
+            dialog.source_reference = "Synthetic support review reference"
+        dialog.record.action_confirm()
+        hold = policy.hold_ids
+        self.assertEqual(len(hold), 1)
+        self.assertEqual(hold.reason, "Synthetic open audit, not a real audit")
+        self.assertEqual(hold.placed_by_id, self.env.user)
+        self.assertTrue(hold.placed_at)
+        self.assertEqual(issue.get_retention_status("2034-01-01")["state"], "held")
+
+    def test_manager_releases_hold_through_native_dialog_without_rewriting_it(self):
+        issue = self.issue()
+        policy = self.obligation(issue)
+        policy.action_approve()
+        hold = self.env["l10n_ae.edi.retention.hold"].create(
+            {
+                "retention_id": policy.id,
+                "reason": "Synthetic placement review",
+                "source_reference": "Synthetic source reference",
+            }
+        )
+        placement = (
+            hold.reason,
+            hold.source_reference,
+            hold.placed_at,
+            hold.placed_by_id,
+        )
+        action = hold.action_open_release()
+        model = self.env[action["res_model"]].with_context(**action["context"])
+        with Form(model, view=action["view_id"]) as dialog:
+            dialog.reason = "Synthetic closed audit, not a real audit"
+        dialog.record.action_confirm()
+        self.assertEqual(hold.state, "released")
+        self.assertEqual(
+            hold.release_reason, "Synthetic closed audit, not a real audit"
+        )
+        self.assertEqual(hold.released_by_id, self.env.user)
+        self.assertTrue(hold.released_at)
+        self.assertEqual(
+            placement,
+            (hold.reason, hold.source_reference, hold.placed_at, hold.placed_by_id),
+        )
+        self.assertTrue(
+            issue.get_retention_status("2034-01-01")["disposition_reviewable"]
+        )
+
+    def test_transient_dialog_confirmation_rechecks_current_active_reviewer(self):
+        policy = self.obligation(self.issue())
+        policy.action_approve()
+        hold = self.env["l10n_ae.edi.retention.hold"].create(
+            {
+                "retention_id": policy.id,
+                "reason": "Synthetic preserved audit",
+                "source_reference": "Synthetic placement source",
+            }
+        )
+        manager = new_test_user(
+            self.env,
+            login="synthetic-retention-dialog-manager",
+            groups="account.group_account_manager",
+            company_id=self.env.company.id,
+            company_ids=self.env.company.ids,
+        )
+        placement = (
+            self.env["l10n_ae.edi.retention.hold.wizard"]
+            .with_user(manager)
+            .create(
+                {
+                    "retention_id": policy.id,
+                    "reason": "Synthetic new placement",
+                    "source_reference": "Synthetic source",
+                }
+            )
+        )
+        release = (
+            self.env["l10n_ae.edi.retention.release.wizard"]
+            .with_user(manager)
+            .create({"hold_id": hold.id, "reason": "Synthetic reviewed release"})
+        )
+        manager.active = False
+        for wizard in (placement, release):
+            with self.cr.savepoint(), self.assertRaises(AccessError):
+                wizard.sudo().action_confirm()
+        self.assertEqual(policy.hold_ids, hold)
+        self.assertEqual(hold.state, "active")
+        self.assertFalse(hold.released_at)
+        self.assertFalse(hold.release_reason)
 
     def test_longer_tax_purpose_protects_original_after_shorter_expiry(self):
         issue = self.issue()
@@ -364,3 +522,35 @@ class TestUaeRetention(AccountTestInvoicingCommon):
             allowed_company_ids=company_a.ids
         ).unlink()
         self.assertFalse(own_draft.exists())
+
+        foreign_draft.action_approve()
+        foreign_hold = self.env["l10n_ae.edi.retention.hold"].create(
+            {
+                "retention_id": foreign_draft.id,
+                "reason": "Synthetic foreign audit",
+                "source_reference": "Synthetic foreign source",
+            }
+        )
+        # Crafted readonly dialog references must still use the final native
+        # source/company authority, even when the caller elevates the wizard.
+        model = self.env["l10n_ae.edi.retention.hold.wizard"].with_user(manager_a)
+        placement = model.create(
+            {
+                "retention_id": foreign_draft.id,
+                "reason": "Unauthorized foreign placement",
+                "source_reference": "Synthetic crafted reference",
+            }
+        )
+        release = (
+            self.env["l10n_ae.edi.retention.release.wizard"]
+            .with_user(manager_a)
+            .create(
+                {"hold_id": foreign_hold.id, "reason": "Unauthorized foreign release"}
+            )
+        )
+        for wizard in (placement, release):
+            with self.cr.savepoint(), self.assertRaises(AccessError):
+                wizard.sudo().action_confirm()
+        self.assertEqual(foreign_draft.hold_ids, foreign_hold)
+        self.assertEqual(foreign_hold.state, "active")
+        self.assertFalse(foreign_hold.released_at)
