@@ -215,25 +215,53 @@ class UaeEdiInbox(models.Model):
             return False
         if self.move_id:
             return True
+        report = False
         try:
             with self.env.cr.savepoint():
+                content = self.original_xml.content
+                if hashlib.sha256(content).hexdigest() != self.xml_hash:
+                    raise UserError(
+                        self.env._("Received XML failed its integrity check.")
+                    )
+                tree = parse_invoice_xml(content)
+                directory = os.environ.get("KMEE_UAE_NORMATIVE_DIR")
+                if not directory:
+                    raise UserError(
+                        self.env._(
+                            "Configure the offline UAE normative resource directory."
+                        )
+                    )
+                report = OfflinePintValidator(directory).validate(content)
+                # Preserve the specific cardinality diagnostic alongside the report.
+                self._received_beneficiary_id(tree)
+                self.env["account.move"]._l10n_ae_check_pint_report(report)
                 move = self.with_company(self.company_id)._process_received_xml()
         except (UserError, UnsafeInvoiceXml, ValidationUnavailable) as error:
             super(UaeEdiInbox, self.sudo()).write(
                 {"state": "review", "diagnostic": str(error)}
             )
-            self._record_processing_history("review", diagnostic=str(error))
+            self._record_processing_history(
+                "review", diagnostic=str(error), validation_report=report
+            )
             return False
         super(UaeEdiInbox, self.sudo()).write(
             {"state": "processed", "diagnostic": False, "move_id": move.id}
         )
-        self._record_processing_history("processed", move=move)
+        self._record_processing_history(
+            "processed", move=move, validation_report=report
+        )
         return True
 
-    def _record_processing_history(self, outcome, diagnostic=False, move=False):
+    def _record_processing_history(
+        self, outcome, diagnostic=False, move=False, validation_report=False
+    ):
         self.ensure_one()
         return self.env["l10n_ae.edi.inbox.review"]._record(
-            self, outcome, diagnostic=diagnostic, move=move
+            self,
+            outcome,
+            diagnostic=diagnostic,
+            move=move,
+            validation_report=validation_report,
         )
 
     def action_open_move(self):
@@ -256,13 +284,6 @@ class UaeEdiInbox(models.Model):
             raise UserError(self.env._("Received XML failed its integrity check."))
         tree = parse_invoice_xml(content)
         beneficiary_id = self._received_beneficiary_id(tree)
-        directory = os.environ.get("KMEE_UAE_NORMATIVE_DIR")
-        if not directory:
-            raise UserError(
-                self.env._("Configure the offline UAE normative resource directory.")
-            )
-        report = OfflinePintValidator(directory).validate(content)
-        self.env["account.move"]._l10n_ae_check_pint_report(report)
         is_credit = tree.tag == (
             "{urn:oasis:names:specification:ubl:schema:xsd:CreditNote-2}CreditNote"
         )

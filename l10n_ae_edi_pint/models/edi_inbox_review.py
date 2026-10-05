@@ -1,5 +1,8 @@
 # Copyright 2026 KMEE
 # License AGPL-3.0 or later (https://www.gnu.org/licenses/agpl).
+import hashlib
+import json
+
 from odoo import api, fields, models
 from odoo.exceptions import UserError
 
@@ -33,6 +36,10 @@ class UaeEdiInboxReview(models.Model):
         readonly=True,
     )
     diagnostic = fields.Text(readonly=True)
+    validation_report = fields.Text(string="Retained PINT Validation", readonly=True)
+    validation_report_hash = fields.Char(
+        string="Validation Report SHA-256", readonly=True
+    )
     move_id = fields.Many2one(
         "account.move",
         string="Accounting Document",
@@ -56,7 +63,9 @@ class UaeEdiInboxReview(models.Model):
     def _unlink_except_processing_evidence(self):
         raise UserError(self.env._("Received processing history cannot be deleted."))
 
-    def _record(self, inbox, outcome, diagnostic=False, move=False):
+    def _record(
+        self, inbox, outcome, diagnostic=False, move=False, validation_report=False
+    ):
         inbox.ensure_one()
         inbox = self.env["l10n_ae.edi.inbox"].browse(inbox.id)
         inbox._check_operator()
@@ -66,6 +75,16 @@ class UaeEdiInboxReview(models.Model):
         # pylint: disable=context-overridden
         history = self.sudo().with_context(
             {"allowed_company_ids": [inbox.company_id.id]}
+        )
+        report_text = (
+            json.dumps(
+                validation_report,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            if validation_report
+            else False
         )
         return (
             super(UaeEdiInboxReview, history)
@@ -78,6 +97,12 @@ class UaeEdiInboxReview(models.Model):
                     "xml_hash": inbox.xml_hash,
                     "outcome": outcome,
                     "diagnostic": diagnostic,
+                    "validation_report": report_text,
+                    "validation_report_hash": (
+                        hashlib.sha256(report_text.encode("utf-8")).hexdigest()
+                        if report_text
+                        else False
+                    ),
                     "move_id": move.id if move else False,
                 }
             )

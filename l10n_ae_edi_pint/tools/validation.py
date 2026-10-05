@@ -108,7 +108,10 @@ class OfflinePintValidator:
 class _PinnedResources:
     def __init__(self, directory):
         self.directory = Path(directory)
-        self.manifest = json.loads(MANIFEST.read_bytes())
+        manifest_content = MANIFEST.read_bytes()
+        self.manifest = json.loads(manifest_content)
+        self.manifest_hash = hashlib.sha256(manifest_content).hexdigest()
+        self.verified = {}
 
     def verified_bytes(self, name):
         metadata = self.manifest["files"][name]
@@ -124,6 +127,7 @@ class _PinnedResources:
             or hashlib.sha256(content).hexdigest() != metadata["sha256"]
         ):
             raise ValidationUnavailable("Normative resource integrity check failed.")
+        self.verified[name] = {"sha256": metadata["sha256"], "size": metadata["size"]}
         return content
 
 
@@ -209,6 +213,10 @@ def _validate_offline(content, directory):
         "xsd_valid": xsd_valid,
         "profile": profile,
         "ruleset": resources.manifest["version"],
+        "resources": {
+            "manifest_sha256": resources.manifest_hash,
+            "files": resources.verified,
+        },
         "layers": [],
         "xsd_errors": [
             {"line": issue.line, "code": issue.type_name} for issue in schema.error_log
@@ -224,9 +232,8 @@ def _validate_offline(content, directory):
             ("shared", "PINT-UBL-validation-preprocessed.xslt"),
             ("ae", "PINT-jurisdiction-aligned-rules.xslt"),
         ]:
-            stylesheet = resources.verified_bytes(
-                f"{package}/{transaction}/schematron/{filename}"
-            )
+            resource_name = f"{package}/{transaction}/schematron/{filename}"
+            stylesheet = resources.verified_bytes(resource_name)
             executable = compiler.compile_stylesheet(
                 stylesheet_text=stylesheet.decode("utf-8")
             )
@@ -242,7 +249,9 @@ def _validate_offline(content, directory):
                 }
                 for assertion in result.iter(f"{{{SVRL_NS}}}failed-assert")
             ]
-            report["layers"].append({"name": name, "failures": failures})
+            report["layers"].append(
+                {"name": name, "resource": resource_name, "failures": failures}
+            )
     report["valid"] = all(not layer["failures"] for layer in report["layers"])
     return report
 

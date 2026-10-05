@@ -288,6 +288,16 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
                 self.assertIn("beneficiary", inbox.diagnostic)
                 self.assertFalse(inbox.move_id)
                 self.assertEqual(inbox.original_xml.content, content)
+                history = inbox.processing_history_ids
+                self.assertEqual(len(history), 1)
+                report = json.loads(history.validation_report)
+                self.assertEqual(
+                    history.validation_report_hash,
+                    hashlib.sha256(history.validation_report.encode()).hexdigest(),
+                )
+                if path != "cac:BuyerCustomerParty/cac:Party/cac:PartyIdentification":
+                    self.assertFalse(report["xsd_valid"])
+                    self.assertFalse(report["valid"])
                 self.assertEqual(
                     self.env["account.move"].search_count(
                         [("move_type", "=", "in_invoice")]

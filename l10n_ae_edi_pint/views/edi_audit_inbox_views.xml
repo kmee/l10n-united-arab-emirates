@@ -66,6 +66,8 @@
                                     <field name="outcome" />
                                     <field name="xml_hash" />
                                     <field name="diagnostic" />
+                                    <field name="validation_report_hash" />
+                                    <field name="validation_report" />
                                 </group>
                             </form>
                         </field>
