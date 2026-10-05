@@ -74,6 +74,14 @@ correction allows a draft bill. Use **Process Received Document** again after th
 correction; do not replace XML. A successful replay does not create another draft or
 history entry. Fiscal auditors see read-only history without accounting access.
 
+With native **Export: Allowed**, download **Received Evidence Package** in the
+received original's form or UAE Audit inbox. It preserves exact XML, protected receipt
+details, every processing attempt and retained report, credit references and a
+SHA256/size manifest. Hash mismatch or a missing recorded report blocks export. Attempts
+without reports retain that absence. Repeated downloads are deterministic until new
+processing adds evidence. Download never revalidates or creates accounting/attachments.
+This package is not a restorable database backup; retention and restore remain required.
+
 For a received combined credit, process or review its original invoices first, then
 inspect **Received Invoice References** in the inbox and accounting UAE tab. Authentic
 numbers and optional XML dates are preserved. The draft keeps the credit's own lines
