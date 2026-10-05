@@ -13,3 +13,4 @@ from . import edi_attempt
 from . import edi_event
 from . import edi_correction
 from . import edi_billing
+from . import edi_billing_request

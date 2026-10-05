@@ -2,14 +2,322 @@
 # License AGPL-3.0 or later (https://www.gnu.org/licenses/agpl).
 import hashlib
 import json
+import math
+from datetime import date
 
-from odoo import api, fields, models
-from odoo.exceptions import AccessError, UserError
+from psycopg2.errors import UniqueViolation
+
+from odoo import Command, api, fields, models
+from odoo.exceptions import AccessError, ConcurrencyError, UserError
+
+from .account_move import UAE_TRANSACTION_FLAG_FIELDS
+
+BILLING_HEADER_FIELDS = {
+    "move_type",
+    "partner_id",
+    "journal_id",
+    "currency_id",
+    "invoice_date",
+    "date",
+    "invoice_date_due",
+    "invoice_payment_term_id",
+    "partner_bank_id",
+    "partner_shipping_id",
+    "ref",
+    "narration",
+    "invoice_origin",
+    "payment_reference",
+    "invoice_incoterm_id",
+    "reversed_entry_id",
+    "l10n_ae_binding_id",
+    "l10n_ae_document_category",
+    "l10n_ae_beneficiary_id",
+    "l10n_ae_credit_reason",
+    "l10n_ae_selfbilling_agreement_id",
+    "l10n_ae_tax_exchange_rate",
+    "l10n_ae_tax_exchange_date",
+    "l10n_ae_tax_exchange_source",
+    "l10n_ae_buyer_not_implemented",
+    "l10n_ae_buyer_onboarding_review_date",
+    "l10n_ae_buyer_onboarding_review_reference",
+    *UAE_TRANSACTION_FLAG_FIELDS,
+}
+BILLING_LINE_FIELDS = {
+    "product_id",
+    "name",
+    "quantity",
+    "price_unit",
+    "discount",
+    "account_id",
+    "product_uom_id",
+}
+BILLING_CREDIT_FIELDS = {
+    "invoice_id",
+    "number",
+    "issue_date",
+    "allocated_net",
+    "allocated_tax",
+    "review_evidence",
+}
 
 
 class UaeEdiBilling(models.AbstractModel):
     _name = "l10n_ae.edi.billing"
     _description = "UAE Billing Integration"
+
+    @api.model
+    def submit_document(
+        self,
+        company_id,
+        environment,
+        process,
+        origin_system,
+        origin_document_id,
+        invoice,
+    ):
+        """Create/post/prepare atomically; controlled dispatch is a separate worker."""
+        identity = self._billing_identity(
+            company_id, environment, process, origin_system, origin_document_id
+        )
+        principal = self.env.user.with_user(self.env.uid).sudo(False)
+        if not principal.has_group("account.group_account_invoice"):
+            raise AccessError(
+                self.env._("Native invoice create/write permissions are required.")
+            )
+        if environment != "sandbox":
+            raise UserError(
+                self.env._("Only controlled sandbox submission is available.")
+            )
+        # Semantic input cannot smuggle ORM defaults or accounting bypass flags.
+        # pylint: disable=context-overridden
+        billing = self.sudo(False).with_context(
+            {"allowed_company_ids": [company_id], "lang": self.env.lang}
+        )
+        moves = billing.env["account.move"].with_company(company_id)
+        moves.check_access("create")
+        values = self._billing_invoice_values(moves, invoice, process)
+        request_hash = hashlib.sha256(
+            json.dumps(
+                self._billing_fingerprint_value(invoice),
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+                allow_nan=False,
+            ).encode()
+        ).hexdigest()
+        receipts = billing.env["l10n_ae.edi.billing.request"]
+        receipt = receipts.search(
+            [(field, "=", value) for field, value in identity.items()], limit=1
+        )
+        if receipt:
+            if receipt.request_hash != request_hash:
+                raise UserError(
+                    self.env._(
+                        "This billing origin conflicts with the original "
+                        "request content."
+                    )
+                )
+            receipt.move_id.check_access("write")
+            return billing._billing_submission_result(identity, receipt)
+        if self._billing_issue(identity, None) or moves.search_count(
+            [
+                ("company_id", "=", company_id),
+                ("l10n_ae_origin_system", "=", origin_system),
+                ("l10n_ae_origin_document_id", "=", origin_document_id),
+            ]
+        ):
+            raise UserError(
+                self.env._(
+                    "This billing origin already belongs to an "
+                    "independently existing invoice."
+                )
+            )
+        try:
+            with self.env.cr.savepoint():
+                move = moves.create(
+                    {
+                        **values,
+                        "state": "draft",
+                        "company_id": company_id,
+                        "l10n_ae_origin_system": origin_system,
+                        "l10n_ae_origin_document_id": origin_document_id,
+                    }
+                )
+                move.check_access("write")
+                move.action_post()
+                billing.prepare_document(**identity, move_id=move.id)
+                receipt = receipts._record_prepared_request(
+                    identity, request_hash, move
+                )
+                return billing._billing_submission_result(identity, receipt)
+        except UniqueViolation as error:
+            transmissions = billing.env["l10n_ae.edi.transmission"]
+            identity_constraints = {
+                receipts._origin_identity_unique.full_name(receipts),
+                transmissions._business_revision_unique.full_name(transmissions),
+            }
+            if error.diag.constraint_name not in identity_constraints:
+                raise
+            # A competing commit can be outside this repeatable-read snapshot.
+            # Let Odoo retry the entire request, including native accounting.
+            raise ConcurrencyError(
+                self.env._("Retry the concurrent original billing request.")
+            ) from error
+
+    def _billing_fingerprint_value(self, value):
+        if isinstance(value, dict):
+            return {
+                key: self._billing_fingerprint_value(item)
+                for key, item in value.items()
+            }
+        if isinstance(value, list):
+            return [self._billing_fingerprint_value(item) for item in value]
+        if type(value) is float and value.is_integer():
+            return int(value)
+        return value
+
+    def _billing_checked_values(self, model, values, allowed):
+        if not isinstance(values, dict) or set(values) - allowed:
+            raise UserError(self.env._("Supply only documented billing input fields."))
+        result = {}
+        for name, value in values.items():
+            field = model._fields[name]
+            valid = False
+            if field.type == "many2one":
+                valid = type(value) is int and 1 <= value <= 2147483647
+            elif field.type in {"float", "monetary", "integer"}:
+                try:
+                    valid = type(value) in {int, float} and math.isfinite(value)
+                except OverflowError:
+                    valid = False
+            elif field.type == "boolean":
+                valid = type(value) is bool
+            elif field.type == "date":
+                try:
+                    valid = (
+                        isinstance(value, str)
+                        and date.fromisoformat(value).isoformat() == value
+                    )
+                except ValueError:
+                    valid = False
+            elif field.type == "selection":
+                valid = isinstance(value, str) and value in field.get_values(model.env)
+            elif field.type in {"char", "text", "html"}:
+                valid = isinstance(value, str)
+            if not valid:
+                raise UserError(self.env._("Invalid typed billing field: %s", name))
+            result[name] = value
+        return result
+
+    def _billing_invoice_values(self, moves, invoice, process):
+        required = {
+            "move_type",
+            "partner_id",
+            "journal_id",
+            "currency_id",
+            "invoice_date",
+            "l10n_ae_binding_id",
+            "lines",
+        }
+        if (
+            not isinstance(invoice, dict)
+            or not required <= set(invoice)
+            or set(invoice) - (BILLING_HEADER_FIELDS | {"lines", "credit_references"})
+        ):
+            raise UserError(
+                self.env._("Supply the documented invoice identity and billing lines.")
+            )
+        allowed_types = (
+            {"out_invoice", "out_refund"}
+            if process == "billing"
+            else {"in_invoice", "in_refund"}
+        )
+        if (
+            not isinstance(invoice["move_type"], str)
+            or invoice["move_type"] not in allowed_types
+        ):
+            raise UserError(
+                self.env._(
+                    "The accounting invoice orientation does not match "
+                    "the billing process."
+                )
+            )
+        values = self._billing_checked_values(
+            moves,
+            {
+                key: value
+                for key, value in invoice.items()
+                if key in BILLING_HEADER_FIELDS
+            },
+            BILLING_HEADER_FIELDS,
+        )
+        lines = invoice["lines"]
+        if not isinstance(lines, list) or not lines:
+            raise UserError(
+                self.env._("Supply a nonempty list of billing invoice lines.")
+            )
+        commands = []
+        for line in lines:
+            if (
+                not isinstance(line, dict)
+                or not {"name", "quantity", "price_unit", "tax_ids"} <= set(line)
+                or set(line) - (BILLING_LINE_FIELDS | {"tax_ids"})
+            ):
+                raise UserError(
+                    self.env._(
+                        "Supply documented native billing line fields "
+                        "and explicit taxes."
+                    )
+                )
+            line_values = self._billing_checked_values(
+                self.env["account.move.line"],
+                {key: value for key, value in line.items() if key != "tax_ids"},
+                BILLING_LINE_FIELDS,
+            )
+            taxes = line["tax_ids"]
+            if not isinstance(taxes, list) or any(
+                type(value) is not int or not 1 <= value <= 2147483647
+                for value in taxes
+            ):
+                raise UserError(
+                    self.env._("Supply existing tax IDs, without ORM commands.")
+                )
+            line_values["tax_ids"] = [Command.set(taxes)]
+            commands.append(Command.create(line_values))
+        values["invoice_line_ids"] = commands
+        if "credit_references" in invoice:
+            references = invoice["credit_references"]
+            if not isinstance(references, list):
+                raise UserError(
+                    self.env._("Supply structured credit reference objects.")
+                )
+            values["l10n_ae_credit_reference_ids"] = [
+                Command.create(
+                    self._billing_checked_values(
+                        self.env["l10n_ae.credit.reference"], ref, BILLING_CREDIT_FIELDS
+                    )
+                )
+                for ref in references
+            ]
+        return values
+
+    def _billing_submission_result(self, identity, receipt):
+        move = receipt.move_id
+        move.check_access("read")
+        return {
+            **self.get_document(**identity),
+            "request_sha256": receipt.request_hash,
+            "accounting": {
+                "move_id": move.id,
+                "number": move.name,
+                "state": move.state,
+                "move_type": move.move_type,
+                "currency_id": move.currency_id.id,
+                "amount_untaxed": move.amount_untaxed,
+                "amount_tax": move.amount_tax,
+                "amount_total": move.amount_total,
+            },
+        }
 
     @api.model
     def prepare_document(
