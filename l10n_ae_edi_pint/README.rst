@@ -61,6 +61,18 @@ This inbox currently receives from the separately configured KMEE
 loopback mock worker. It does not connect to an accredited provider
 sandbox or constitute FTA acceptance.
 
+For periodic controlled receipt, enable **Automatic Controlled
+Receiving** on a sandbox binding and assign the native **UAE: Controlled
+Document Receiving** scheduled action to a dedicated **Controlled
+Document Receiver** account. Support configures the loopback service
+outside ordinary binding fields. Each invocation preserves one bounded
+queue page without importing or posting it. The binding displays a
+protected receiving cursor/route and any configuration or retrieval
+review code. Failed pages remain retrievable; the cursor cannot be reset
+through ordinary editing. Accounting managers review each original
+separately in **Received UAE Documents**. See scenario22 in the PT/EN
+user manuals for the tested workflow and suspension semantics.
+
 An administrator may assign **UAE Integration / Controlled Document
 Receiver** to a dedicated internal service account with only the
 required companies. The controlled worker uses ``process=False`` for

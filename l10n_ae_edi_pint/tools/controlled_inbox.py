@@ -7,11 +7,14 @@ from psycopg2.errors import SerializationFailure, UniqueViolation
 from odoo import api
 from odoo.exceptions import AccessError, UserError
 
-from odoo.addons.l10n_ae_edi.tools.controlled_client import ControlledAspClient
+from odoo.addons.l10n_ae_edi.tools.controlled_client import (
+    ControlledAspClient,
+    ControlledAspError,
+)
 
 
 class ControlledInboxWorker:
-    """Loopback test service only; the caller supplies an authenticated remote ID."""
+    """Loopback receipt of a known original or a retained recipient queue page."""
 
     def __init__(self, registry, uid, company_id, endpoint, token):
         self.registry, self.uid, self.company_id = registry, uid, company_id
@@ -103,5 +106,84 @@ class ControlledInboxWorker:
                     cursor.commit()
                     return result
             except SerializationFailure:
+                if attempt == 2:
+                    raise
+
+    def _receiving_route(self, binding):
+        tin = binding.company_id.l10n_ae_tin
+        if not tin or not binding.company_id.l10n_ae_tin_confirmed:
+            raise UserError(
+                binding.env._(
+                    "Confirm the UAE recipient TIN before retrieving documents."
+                )
+            )
+        route = binding.provider + ":" + tin
+        if (
+            binding.controlled_inbound_route
+            and binding.controlled_inbound_route != route
+        ):
+            raise UserError(
+                binding.env._("The retained UAE receiving route has changed.")
+            )
+        return tin, binding.provider, route
+
+    def run_page(self, binding_id, limit=20):
+        """Commit a whole fetched page with its cursor, without accounting import."""
+        with self.registry.cursor() as cursor:
+            binding = self._binding(cursor, binding_id)
+            tin, provider, route = self._receiving_route(binding)
+            checkpoint = binding.controlled_inbound_cursor or ""
+        # Neither listing nor artifact retrieval keeps a database transaction open.
+        client = ControlledAspClient(self.endpoint, self.token, provider)
+        page = client.list_inbound(tin, checkpoint, limit=limit)
+        originals = []
+        for document in page["documents"]:
+            receipt = client.lookup_inbound(tin, document["remote_id"])
+            if receipt is None:
+                raise ControlledAspError("missing_inbound_artifact")
+            if receipt["xml_sha256"] != document["xml_sha256"]:
+                raise ControlledAspError("correlation")
+            originals.append((document["remote_id"], receipt["xml"].encode()))
+        for attempt in range(3):
+            try:
+                with self.registry.cursor() as cursor:
+                    binding = self._binding(cursor, binding_id)
+                    if self._receiving_route(binding) != (tin, provider, route):
+                        raise UserError(
+                            binding.env._(
+                                "The UAE receiving route changed during retrieval."
+                            )
+                        )
+                    cursor.execute(
+                        "SELECT id FROM l10n_ae_edi_binding WHERE id=%s FOR UPDATE",
+                        [binding.id],
+                    )
+                    binding.invalidate_recordset(["controlled_inbound_cursor"])
+                    current = binding.controlled_inbound_cursor or ""
+                    if current != checkpoint:
+                        return {
+                            "state": "stale_page",
+                            "inbox_ids": [],
+                            "next_cursor": current,
+                            "has_more": False,
+                        }
+                    inbox_ids = []
+                    for remote_id, content in originals:
+                        inbox = binding.env[
+                            "l10n_ae.edi.inbox"
+                        ].receive_controlled_document(binding.id, remote_id, content)
+                        inbox_ids.append(inbox.id)
+                    if originals:
+                        binding._store_controlled_inbound_checkpoint(
+                            page["next_cursor"], route
+                        )
+                    cursor.commit()
+                    return {
+                        "state": "received" if originals else "empty",
+                        "inbox_ids": inbox_ids,
+                        "next_cursor": page["next_cursor"],
+                        "has_more": page["has_more"],
+                    }
+            except (SerializationFailure, UniqueViolation):
                 if attempt == 2:
                     raise

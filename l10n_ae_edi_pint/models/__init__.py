@@ -6,4 +6,5 @@ from . import account_move_send
 from . import edi_transmission
 from . import account_edi_inbound
 from . import edi_inbox
+from . import edi_binding
 from . import res_partner
