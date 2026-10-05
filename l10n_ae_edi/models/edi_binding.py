@@ -91,9 +91,17 @@ class UaeEdiBinding(models.Model):
     def _cron_dispatch_controlled(self):
         if not self.env.context.get("cron_id"):
             raise UserError(self.env._("Use the native UAE scheduled action."))
-        if not self.env.user.has_group("account.group_account_manager"):
+        principal = self.env.user.exists()
+        if (
+            not principal
+            or not principal.active
+            or not (
+                principal.has_group("l10n_ae_edi.group_controlled_sender")
+                or principal.has_group("account.group_account_manager")
+            )
+        ):
             raise AccessError(
-                self.env._("Only accounting managers can execute UAE sending.")
+                self.env._("An active authorized UAE sending account is required.")
             )
         bindings = self.with_context(active_test=False).search(
             [
@@ -134,7 +142,8 @@ class UaeEdiBinding(models.Model):
         self.ensure_one()
         if not failed and not self.controlled_dispatch_error:
             return
-        return super().write(
+        self.check_access("read")
+        return super(UaeEdiBinding, self.sudo()).write(
             {
                 "controlled_dispatch_error": "configuration" if failed else False,
                 "controlled_dispatch_error_at": fields.Datetime.now()

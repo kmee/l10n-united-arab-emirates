@@ -6,6 +6,10 @@
         <field name="state">code</field>
         <field name="code">model._cron_dispatch_controlled()</field>
         <field name="user_id" ref="base.user_admin" />
+        <field
+            name="group_ids"
+            eval="[Command.link(ref('group_controlled_sender')), Command.link(ref('account.group_account_manager'))]"
+        />
         <field name="interval_number" eval="1" />
         <field name="interval_type">minutes</field>
         <field name="active" eval="True" />

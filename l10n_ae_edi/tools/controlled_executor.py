@@ -26,14 +26,27 @@ class ControlledExecutor:
         self.clock = clock or fields.Datetime.now
         self.retry_jitter = retry_jitter or (lambda: random.randint(0, 15))
 
-    def _record(self, cursor, transmission_id):
+    def _environment(self, cursor):
         env = api.Environment(
             cursor, self.uid, {"allowed_company_ids": [self.company_id]}
         )
-        if not env.user.has_group("account.group_account_manager"):
-            raise AccessError(
-                env._("Only accounting managers can execute UAE sending.")
+        principal = env.user.exists()
+        if (
+            not principal
+            or not principal.active
+            or not (
+                principal.has_group("l10n_ae_edi.group_controlled_sender")
+                or principal.has_group("account.group_account_manager")
             )
+            or self.company_id not in principal.company_ids.ids
+        ):
+            raise AccessError(
+                env._("An active authorized UAE sending account is required.")
+            )
+        return env
+
+    def _record(self, cursor, transmission_id):
+        env = self._environment(cursor)
         record = env["l10n_ae.edi.transmission"].browse(transmission_id).exists()
         record.ensure_one()
         record.check_access("read")
@@ -59,7 +72,8 @@ class ControlledExecutor:
                 and record.next_attempt_at > self.clock()
             ):
                 return "unknown"
-            validation = record._validate_controlled_document()
+            # Validate only this accessible frozen issue; do not grant invoice ACLs.
+            validation = record.sudo()._validate_controlled_document()
             document = {
                 "contract_version": "kmee-controlled-1",
                 "snapshot": record.payload,
@@ -147,13 +161,7 @@ class ControlledExecutor:
         if not isinstance(limit, int) or not 1 <= limit <= 200:
             raise ValueError("The controlled batch limit must be between 1 and 200.")
         with self.registry.cursor() as cursor:
-            env = api.Environment(
-                cursor, self.uid, {"allowed_company_ids": [self.company_id]}
-            )
-            if not env.user.has_group("account.group_account_manager"):
-                raise AccessError(
-                    env._("Only accounting managers can execute UAE sending.")
-                )
+            env = self._environment(cursor)
             binding = env["l10n_ae.edi.binding"].browse(binding_id).exists()
             binding.ensure_one()
             binding.check_access("read")
