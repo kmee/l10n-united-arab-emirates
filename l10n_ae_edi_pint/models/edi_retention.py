@@ -8,7 +8,11 @@ class UaeEdiRetention(models.Model):
     _inherit = "l10n_ae.edi.retention"
 
     inbox_id = fields.Many2one(
-        "l10n_ae.edi.inbox", check_company=True, ondelete="restrict", index=True
+        "l10n_ae.edi.inbox",
+        string="Received Original",
+        check_company=True,
+        ondelete="restrict",
+        index=True,
     )
 
     @api.model_create_multi

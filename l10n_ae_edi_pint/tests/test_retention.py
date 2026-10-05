@@ -4,7 +4,7 @@ import hashlib
 from datetime import date
 
 from odoo.exceptions import AccessError, ValidationError
-from odoo.tests import tagged
+from odoo.tests import Form, tagged
 from odoo.tests.common import new_test_user
 
 from odoo.addons.account.tests.common import AccountTestInvoicingCommon
@@ -31,6 +31,43 @@ class TestUaeReceivedRetention(AccountTestInvoicingCommon):
                 "routing_scheme": "0235",
                 "routing_endpoint": "1000000002",
             }
+        )
+
+    def test_manager_classifies_received_original_through_native_form(self):
+        content = b'<!DOCTYPE Invoice SYSTEM "file:///etc/passwd"><Invoice/>'
+        inbox = self.env["l10n_ae.edi.inbox"].receive_controlled_document(
+            self.binding.id, "synthetic-received-retention-form", content
+        )
+        self.assertFalse(inbox.action_process())
+        before = (
+            inbox.original_xml.content,
+            inbox.xml_hash,
+            inbox.state,
+            inbox.move_id.id,
+        )
+        with Form(
+            self.env["l10n_ae.edi.retention"],
+            view="l10n_ae_edi.edi_retention_form",
+        ) as form:
+            form.name = "Synthetic received native form review"
+            form.inbox_id = inbox
+            form.record_class = "evidence"
+            form.tax_purpose = "vat"
+            form.anchor_kind = "tax_period_end"
+            form.period_start = date(2026, 1, 1)
+            form.anchor_date = date(2026, 12, 31)
+            form.retention_years = 5
+            form.source_reference = "Synthetic reviewed reference"
+            form.policy_version = "synthetic-ui-1"
+            form.review_note = "Illustrative interval; no content approval"
+        policy = form.record
+        self.assertEqual(policy.inbox_id, inbox)
+        self.assertFalse(policy.transmission_id)
+        policy.action_approve()
+        self.assertEqual(policy.retain_until, date(2031, 12, 31))
+        self.assertEqual(
+            before,
+            (inbox.original_xml.content, inbox.xml_hash, inbox.state, inbox.move_id.id),
         )
 
     def test_source_defaults_cannot_attach_a_second_original(self):
