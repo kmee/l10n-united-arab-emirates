@@ -4,7 +4,7 @@ import hashlib
 import os
 import re
 
-from odoo import models
+from odoo import api, fields, models
 from odoo.exceptions import UserError
 
 from ..tools.validation import OfflinePintValidator, ValidationUnavailable
@@ -12,6 +12,24 @@ from ..tools.validation import OfflinePintValidator, ValidationUnavailable
 
 class AccountMove(models.Model):
     _inherit = "account.move"
+
+    l10n_ae_received_inbox_ids = fields.One2many(
+        "l10n_ae.edi.inbox", "move_id", readonly=True
+    )
+    l10n_ae_received_credit_reference_summary = fields.Text(
+        string="Received Invoice References",
+        compute="_compute_l10n_ae_received_credit_reference_summary",
+    )
+
+    @api.depends("l10n_ae_received_inbox_ids.credit_reference_snapshot")
+    def _compute_l10n_ae_received_credit_reference_summary(self):
+        for move in self:
+            original = move.l10n_ae_received_inbox_ids.sorted("id").filtered(
+                "credit_reference_snapshot"
+            )[:1]
+            move.l10n_ae_received_credit_reference_summary = (
+                original.credit_reference_summary or False
+            )
 
     def action_l10n_ae_validate(self):
         result = super().action_l10n_ae_validate()

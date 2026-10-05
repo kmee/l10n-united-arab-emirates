@@ -64,6 +64,27 @@ class UaeEdiInbox(models.Model):
         "inbox_id",
         readonly=True,
     )
+    credit_reference_snapshot = fields.Json(readonly=True)
+    credit_reference_summary = fields.Text(
+        string="Received Invoice References",
+        compute="_compute_credit_reference_summary",
+    )
+
+    @api.depends("credit_reference_snapshot")
+    def _compute_credit_reference_summary(self):
+        for inbox in self:
+            inbox.credit_reference_summary = (
+                "\n".join(
+                    reference["number"]
+                    + (
+                        f" ({reference['issue_date']})"
+                        if reference["issue_date"]
+                        else ""
+                    )
+                    for reference in inbox.credit_reference_snapshot or []
+                )
+                or False
+            )
 
     _received_identity = models.UniqueIndex(
         "(binding_id, remote_id, xml_hash)",
@@ -311,6 +332,9 @@ class UaeEdiInbox(models.Model):
                 limit=1,
             )
             if len(prior) == 1 and same_bytes:
+                super(UaeEdiInbox, self.sudo()).write(
+                    {"credit_reference_snapshot": same_bytes.credit_reference_snapshot}
+                )
                 return prior
             raise UserError(
                 self.env._("Received fiscal UUID reused with different document bytes.")
@@ -397,10 +421,12 @@ class UaeEdiInbox(models.Model):
             self.env["account.edi.ubl.kmee_ae.inbound"]._import_invoice_ubl_cii(
                 move, {"xml_tree": tree, "attachment": False}, new=True
             )
+        reference_snapshot = False
         if is_credit:
-            move.reversed_entry_id = self._resolve_received_credit_reference(
+            originals, reference_snapshot = self._resolve_received_credit_references(
                 tree, move, selfbilling
             )
+            move.reversed_entry_id = originals if len(originals) == 1 else False
         expected = [
             ("TaxExclusiveAmount", move.amount_untaxed),
             ("TaxInclusiveAmount", move.amount_total),
@@ -413,6 +439,9 @@ class UaeEdiInbox(models.Model):
                         "Received totals do not match the draft accounting document."
                     )
                 )
+        super(UaeEdiInbox, self.sudo()).write(
+            {"credit_reference_snapshot": reference_snapshot}
+        )
         self.env["ir.attachment"].create(
             {
                 "name": "received-pint-ae.xml",
@@ -602,9 +631,9 @@ class UaeEdiInbox(models.Model):
             )
         return partner, agreement
 
-    def _resolve_received_credit_reference(self, tree, move, selfbilling):
+    def _resolve_received_credit_references(self, tree, move, selfbilling):
         references = tree.findall("./{*}BillingReference/{*}InvoiceDocumentReference")
-        if len(references) != 1:
+        if not references:
             raise UserError(
                 self.env._("This received credit requires reference review.")
             )
@@ -613,32 +642,49 @@ class UaeEdiInbox(models.Model):
             ("partner_id", "=", move.partner_id.id),
             ("move_type", "=", "out_invoice" if selfbilling else "in_invoice"),
             ("currency_id", "=", move.currency_id.id),
+            ("l10n_ae_document_category", "=", move.l10n_ae_document_category),
             ("state", "!=", "cancel"),
         ]
-        number = references[0].findtext("./{*}ID")
         if selfbilling:
-            domain += [
-                ("l10n_ae_received_process", "=", "selfbilling"),
-                "|",
-                ("ref", "=", number),
-                ("name", "=", number),
-            ]
+            domain.append(("l10n_ae_received_process", "=", "selfbilling"))
         else:
-            domain.append(("ref", "=", number))
-        if date := references[0].findtext("./{*}IssueDate"):
-            domain.append(("invoice_date", "=", date))
-        original = self.env["account.move"].search(domain, limit=2)
-        if len(original) != 1:
-            raise UserError(
-                self.env._(
-                    "The received credit's original self-billed sale requires review."
-                )
+            domain += [
+                ("l10n_ae_received_process", "!=", "selfbilling"),
+                ("is_self_billing", "=", False),
+            ]
+        originals = self.env["account.move"]
+        snapshot = []
+        for reference in references:
+            number = reference.findtext("./{*}ID")
+            date = reference.findtext("./{*}IssueDate") or False
+            matching = (
+                ["|", ("ref", "=", number), ("name", "=", number)]
                 if selfbilling
-                else self.env._(
-                    "The received credit's original supplier bill requires review."
-                )
+                else [("ref", "=", number)]
             )
-        return original
+            if date:
+                matching.append(("invoice_date", "=", date))
+            original = self.env["account.move"].search(domain + matching, limit=2)
+            if len(original) != 1:
+                raise UserError(
+                    self.env._(
+                        "The received credit's original self-billed sale "
+                        "requires review."
+                    )
+                    if selfbilling
+                    else self.env._(
+                        "The received credit's original supplier bill requires review."
+                    )
+                )
+            if original in originals:
+                raise UserError(
+                    self.env._("Repeated received invoice references require review.")
+                )
+            originals |= original
+            snapshot.append(
+                {"number": number, "issue_date": date, "move_id": original.id}
+            )
+        return originals, snapshot
 
     def _find_existing_selfbilling_move(self, tree, partner, move_type):
         number = tree.findtext("./{*}ID")

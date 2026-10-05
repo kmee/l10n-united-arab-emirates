@@ -44,6 +44,17 @@
                     <group string="Review Diagnostic" invisible="not diagnostic">
                         <field name="diagnostic" nolabel="1" />
                     </group>
+                    <group
+                        string="Received Invoice References"
+                        col="1"
+                        invisible="not credit_reference_summary"
+                    >
+                        <field
+                            name="credit_reference_summary"
+                            readonly="1"
+                            nolabel="1"
+                        />
+                    </group>
                     <group string="Processing History" col="1">
                         <field name="processing_history_ids" readonly="1" nolabel="1">
                             <list create="false" edit="false" delete="false">

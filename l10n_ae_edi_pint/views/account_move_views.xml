@@ -15,6 +15,11 @@
                 />
             </xpath>
             <xpath expr="//page[@name='uae_edi']/group[1]" position="inside">
+                <field
+                    name="l10n_ae_received_credit_reference_summary"
+                    readonly="1"
+                    invisible="not l10n_ae_received_credit_reference_summary"
+                />
                 <button
                     name="action_l10n_ae_download_xml"
                     type="object"

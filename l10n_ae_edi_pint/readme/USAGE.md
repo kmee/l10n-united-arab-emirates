@@ -45,7 +45,7 @@ and refunds when the local company is the XML supplier. A manager must maintain 
 valid UAE agreement with local role **Supplier Receiving Self-Billing** for the known
 buyer. Existing matching billing drafts are reused without replacing their lines or
 origin identifiers; differences remain in review. A received self-billed credit needs
-one matching original self-billed sale. The agreement reference at receipt remains
+one or more uniquely matching original self-billed sales. The agreement reference at receipt remains
 available after later agreement changes. Posting received sales never emits them again.
 
 When the sender declares a prepaid amount, the accounting history identifies it as a
@@ -73,3 +73,12 @@ its operator, time, diagnostic and original XML hash even after reviewed master-
 correction allows a draft bill. Use **Process Received Document** again after the
 correction; do not replace XML. A successful replay does not create another draft or
 history entry. Fiscal auditors see read-only history without accounting access.
+
+For a received combined credit, process or review its original invoices first, then
+inspect **Received Invoice References** in the inbox and accounting UAE tab. Authentic
+numbers and optional XML dates are preserved. The draft keeps the credit's own lines
+and totals; receipt creates no allocation, reconciliation or payment. Multiple
+originals leave the singular native reversal relation empty. Missing or ambiguous
+originals keep the whole credit in review. A reviewed legacy bill can be entered through
+normal supplier accounting before retrying the same original XML. Never fabricate an
+original or rewrite receipt evidence to bypass review.
