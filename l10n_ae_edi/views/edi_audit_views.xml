@@ -1,0 +1,328 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<odoo>
+    <menuitem
+        id="edi_audit_root"
+        name="UAE Audit"
+        groups="l10n_ae_edi.group_fiscal_auditor"
+        sequence="95"
+    />
+    <record id="edi_audit_issue_list" model="ir.ui.view">
+        <field name="name">l10n_ae.edi.transmission.audit.list</field>
+        <field name="model">l10n_ae.edi.transmission</field>
+        <field name="priority" eval="30" />
+        <field name="arch" type="xml">
+            <list create="false" edit="false" delete="false">
+                <field name="origin_document_id" />
+                <field name="company_id" options="{'no_open': True}" />
+                <field name="process" />
+                <field name="revision" />
+                <field name="submission_state" />
+                <field name="confirmation_state" />
+            </list>
+        </field>
+    </record>
+    <record id="edi_audit_issue_form" model="ir.ui.view">
+        <field name="name">l10n_ae.edi.transmission.audit.form</field>
+        <field name="model">l10n_ae.edi.transmission</field>
+        <field name="priority" eval="30" />
+        <field name="arch" type="xml">
+            <form create="false" edit="false" delete="false" duplicate="false">
+                <sheet>
+                    <group>
+                        <field name="origin_system" />
+                        <field name="origin_document_id" />
+                        <field name="company_id" options="{'no_open': True}" />
+                        <field name="process" />
+                        <field name="revision" />
+                        <field name="provider" />
+                        <field name="environment" />
+                        <field name="remote_id" />
+                        <field name="submission_state" />
+                        <field name="validation_c2_state" />
+                        <field name="delivery_c3_state" />
+                        <field name="reporting_c2_state" />
+                        <field name="reporting_c3_state" />
+                        <field name="confirmation_state" />
+                        <field name="payload_hash" />
+                        <field name="xml_hash" />
+                        <field name="xml_download_filename" invisible="1" />
+                        <field
+                            name="xml_download"
+                            widget="binary"
+                            filename="xml_download_filename"
+                        />
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+    <record id="edi_audit_issue_action" model="ir.actions.act_window">
+        <field name="name">Issued Documents</field>
+        <field name="res_model">l10n_ae.edi.transmission</field>
+        <field name="view_mode">list,form</field>
+    </record>
+    <record id="edi_audit_issue_action_list" model="ir.actions.act_window.view">
+        <field name="sequence" eval="1" />
+        <field name="view_mode">list</field>
+        <field name="view_id" ref="edi_audit_issue_list" />
+        <field name="act_window_id" ref="edi_audit_issue_action" />
+    </record>
+    <record id="edi_audit_issue_action_form" model="ir.actions.act_window.view">
+        <field name="sequence" eval="2" />
+        <field name="view_mode">form</field>
+        <field name="view_id" ref="edi_audit_issue_form" />
+        <field name="act_window_id" ref="edi_audit_issue_action" />
+    </record>
+    <menuitem
+        id="edi_audit_issue_menu"
+        name="Issued Documents"
+        parent="edi_audit_root"
+        action="edi_audit_issue_action"
+        sequence="1"
+    />
+    <record id="edi_audit_attempt_list" model="ir.ui.view">
+        <field name="name">l10n_ae.edi.attempt.audit.list</field>
+        <field name="model">l10n_ae.edi.attempt</field>
+        <field name="priority" eval="30" />
+        <field name="arch" type="xml">
+            <list create="false" edit="false" delete="false">
+                <field name="transmission_id" />
+                <field name="company_id" options="{'no_open': True}" />
+                <field name="operation" />
+                <field name="started_at" />
+                <field name="completed_at" />
+                <field name="state" />
+            </list>
+        </field>
+    </record>
+    <record id="edi_audit_attempt_form" model="ir.ui.view">
+        <field name="name">l10n_ae.edi.attempt.audit.form</field>
+        <field name="model">l10n_ae.edi.attempt</field>
+        <field name="priority" eval="30" />
+        <field name="arch" type="xml">
+            <form create="false" edit="false" delete="false" duplicate="false">
+                <sheet>
+                    <group>
+                        <field name="transmission_id" />
+                        <field name="company_id" options="{'no_open': True}" />
+                        <field name="operation" />
+                        <field name="started_at" />
+                        <field name="completed_at" />
+                        <field name="state" />
+                        <field name="create_uid" options="{'no_open': True}" />
+                        <field name="error_kind" />
+                        <field name="receipt" />
+                        <field name="validation_receipt" />
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+    <record id="edi_audit_attempt_action" model="ir.actions.act_window">
+        <field name="name">Submission Attempts</field>
+        <field name="res_model">l10n_ae.edi.attempt</field>
+        <field name="view_mode">list,form</field>
+    </record>
+    <record id="edi_audit_attempt_action_list" model="ir.actions.act_window.view">
+        <field name="sequence" eval="1" />
+        <field name="view_mode">list</field>
+        <field name="view_id" ref="edi_audit_attempt_list" />
+        <field name="act_window_id" ref="edi_audit_attempt_action" />
+    </record>
+    <record id="edi_audit_attempt_action_form" model="ir.actions.act_window.view">
+        <field name="sequence" eval="2" />
+        <field name="view_mode">form</field>
+        <field name="view_id" ref="edi_audit_attempt_form" />
+        <field name="act_window_id" ref="edi_audit_attempt_action" />
+    </record>
+    <menuitem
+        id="edi_audit_attempt_menu"
+        name="Submission Attempts"
+        parent="edi_audit_root"
+        action="edi_audit_attempt_action"
+        sequence="2"
+    />
+    <record id="edi_audit_event_list" model="ir.ui.view">
+        <field name="name">l10n_ae.edi.event.audit.list</field>
+        <field name="model">l10n_ae.edi.event</field>
+        <field name="priority" eval="30" />
+        <field name="arch" type="xml">
+            <list create="false" edit="false" delete="false">
+                <field name="event_id" />
+                <field name="transmission_id" />
+                <field name="company_id" options="{'no_open': True}" />
+                <field name="dimension" />
+                <field name="fact_state" />
+                <field name="received_at" />
+                <field name="outcome" />
+            </list>
+        </field>
+    </record>
+    <record id="edi_audit_event_form" model="ir.ui.view">
+        <field name="name">l10n_ae.edi.event.audit.form</field>
+        <field name="model">l10n_ae.edi.event</field>
+        <field name="priority" eval="30" />
+        <field name="arch" type="xml">
+            <form create="false" edit="false" delete="false" duplicate="false">
+                <sheet>
+                    <group>
+                        <field name="event_id" />
+                        <field name="transmission_id" />
+                        <field name="company_id" options="{'no_open': True}" />
+                        <field name="dimension" />
+                        <field name="fact_state" />
+                        <field name="sequence" />
+                        <field name="occurred_at" />
+                        <field name="received_at" />
+                        <field name="outcome" />
+                        <field name="body_hash" />
+                        <field name="original_body" />
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+    <record id="edi_audit_event_action" model="ir.actions.act_window">
+        <field name="name">Confirmation Events</field>
+        <field name="res_model">l10n_ae.edi.event</field>
+        <field name="view_mode">list,form</field>
+    </record>
+    <record id="edi_audit_event_action_list" model="ir.actions.act_window.view">
+        <field name="sequence" eval="1" />
+        <field name="view_mode">list</field>
+        <field name="view_id" ref="edi_audit_event_list" />
+        <field name="act_window_id" ref="edi_audit_event_action" />
+    </record>
+    <record id="edi_audit_event_action_form" model="ir.actions.act_window.view">
+        <field name="sequence" eval="2" />
+        <field name="view_mode">form</field>
+        <field name="view_id" ref="edi_audit_event_form" />
+        <field name="act_window_id" ref="edi_audit_event_action" />
+    </record>
+    <menuitem
+        id="edi_audit_event_menu"
+        name="Confirmation Events"
+        parent="edi_audit_root"
+        action="edi_audit_event_action"
+        sequence="3"
+    />
+    <record id="edi_audit_billing_list" model="ir.ui.view">
+        <field name="name">l10n_ae.edi.billing.request.audit.list</field>
+        <field name="model">l10n_ae.edi.billing.request</field>
+        <field name="priority" eval="30" />
+        <field name="arch" type="xml">
+            <list create="false" edit="false" delete="false">
+                <field name="origin_document_id" />
+                <field name="company_id" options="{'no_open': True}" />
+                <field name="origin_system" />
+                <field name="process" />
+                <field name="environment" />
+                <field name="create_date" />
+            </list>
+        </field>
+    </record>
+    <record id="edi_audit_billing_form" model="ir.ui.view">
+        <field name="name">l10n_ae.edi.billing.request.audit.form</field>
+        <field name="model">l10n_ae.edi.billing.request</field>
+        <field name="priority" eval="30" />
+        <field name="arch" type="xml">
+            <form create="false" edit="false" delete="false" duplicate="false">
+                <sheet>
+                    <group>
+                        <field name="origin_document_id" />
+                        <field name="company_id" options="{'no_open': True}" />
+                        <field name="origin_system" />
+                        <field name="process" />
+                        <field name="environment" />
+                        <field name="request_hash" />
+                        <field name="create_date" />
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+    <record id="edi_audit_billing_action" model="ir.actions.act_window">
+        <field name="name">Billing Receipts</field>
+        <field name="res_model">l10n_ae.edi.billing.request</field>
+        <field name="view_mode">list,form</field>
+    </record>
+    <record id="edi_audit_billing_action_list" model="ir.actions.act_window.view">
+        <field name="sequence" eval="1" />
+        <field name="view_mode">list</field>
+        <field name="view_id" ref="edi_audit_billing_list" />
+        <field name="act_window_id" ref="edi_audit_billing_action" />
+    </record>
+    <record id="edi_audit_billing_action_form" model="ir.actions.act_window.view">
+        <field name="sequence" eval="2" />
+        <field name="view_mode">form</field>
+        <field name="view_id" ref="edi_audit_billing_form" />
+        <field name="act_window_id" ref="edi_audit_billing_action" />
+    </record>
+    <menuitem
+        id="edi_audit_billing_menu"
+        name="Billing Receipts"
+        parent="edi_audit_root"
+        action="edi_audit_billing_action"
+        sequence="4"
+    />
+    <record id="edi_audit_correction_list" model="ir.ui.view">
+        <field name="name">l10n_ae.edi.correction.audit.list</field>
+        <field name="model">l10n_ae.edi.correction</field>
+        <field name="priority" eval="30" />
+        <field name="arch" type="xml">
+            <list create="false" edit="false" delete="false">
+                <field name="source_transmission_id" />
+                <field name="replacement_transmission_id" />
+                <field name="company_id" options="{'no_open': True}" />
+                <field name="started_by" options="{'no_open': True}" />
+                <field name="started_at" />
+                <field name="state" />
+            </list>
+        </field>
+    </record>
+    <record id="edi_audit_correction_form" model="ir.ui.view">
+        <field name="name">l10n_ae.edi.correction.audit.form</field>
+        <field name="model">l10n_ae.edi.correction</field>
+        <field name="priority" eval="30" />
+        <field name="arch" type="xml">
+            <form create="false" edit="false" delete="false" duplicate="false">
+                <sheet>
+                    <group>
+                        <field name="source_transmission_id" />
+                        <field name="replacement_transmission_id" />
+                        <field name="company_id" options="{'no_open': True}" />
+                        <field name="started_by" options="{'no_open': True}" />
+                        <field name="started_at" />
+                        <field name="completed_at" />
+                        <field name="state" />
+                        <field name="reason" />
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+    <record id="edi_audit_correction_action" model="ir.actions.act_window">
+        <field name="name">Correction History</field>
+        <field name="res_model">l10n_ae.edi.correction</field>
+        <field name="view_mode">list,form</field>
+    </record>
+    <record id="edi_audit_correction_action_list" model="ir.actions.act_window.view">
+        <field name="sequence" eval="1" />
+        <field name="view_mode">list</field>
+        <field name="view_id" ref="edi_audit_correction_list" />
+        <field name="act_window_id" ref="edi_audit_correction_action" />
+    </record>
+    <record id="edi_audit_correction_action_form" model="ir.actions.act_window.view">
+        <field name="sequence" eval="2" />
+        <field name="view_mode">form</field>
+        <field name="view_id" ref="edi_audit_correction_form" />
+        <field name="act_window_id" ref="edi_audit_correction_action" />
+    </record>
+    <menuitem
+        id="edi_audit_correction_menu"
+        name="Correction History"
+        parent="edi_audit_root"
+        action="edi_audit_correction_action"
+        sequence="5"
+    />
+</odoo>

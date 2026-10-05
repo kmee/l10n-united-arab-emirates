@@ -50,6 +50,15 @@ class UaeEdiTransmission(models.Model):
     payload_hash = fields.Char(required=True, readonly=True)
     xml_content = fields.Text(readonly=True)
     xml_hash = fields.Char(readonly=True)
+    xml_download = fields.Binary(
+        string="Original PINT XML",
+        compute="_compute_xml_download",
+        compute_sudo=False,
+        attachment=False,
+    )
+    xml_download_filename = fields.Char(
+        compute="_compute_xml_download_filename", compute_sudo=False
+    )
     conventional_html_content = fields.Text(readonly=True, copy=False)
     conventional_html_hash = fields.Char(readonly=True, copy=False)
     conventional_report_id = fields.Many2one(
@@ -149,6 +158,26 @@ class UaeEdiTransmission(models.Model):
         ],
         compute="_compute_confirmation_state",
     )
+
+    @api.depends("revision")
+    def _compute_xml_download_filename(self):
+        for record in self:
+            record.xml_download_filename = f"pint-ae-{record.id}-r{record.revision}.xml"
+
+    @api.depends("xml_content", "xml_hash")
+    def _compute_xml_download(self):
+        for record in self:
+            if not record.xml_content:
+                record.xml_download = False
+                continue
+            original = record.xml_content.encode("utf-8")
+            if hashlib.sha256(original).hexdigest() != record.xml_hash:
+                raise UserError(
+                    self.env._(
+                        "The preserved UAE XML does not match its recorded hash."
+                    )
+                )
+            record.xml_download = BinaryBytes(original)
 
     @api.depends(
         "exchange_mode",
