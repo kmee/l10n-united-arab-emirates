@@ -65,24 +65,41 @@ class UaeEdiInbox(models.Model):
         "These received document bytes already exist.",
     )
 
-    def _check_operator(self):
-        if not self.env.su and not self.env.user.has_group(
-            "account.group_account_manager"
+    def _check_operator(self, process=True):
+        principal = self.env.user.exists()
+        if (
+            not principal
+            or not principal.active
+            or not (
+                principal.has_group("account.group_account_manager")
+                or not process
+                and principal.has_group("l10n_ae_edi_pint.group_document_receiver")
+            )
         ):
             raise AccessError(
                 self.env._(
-                    "Only an accounting manager can receive or process UAE documents."
+                    "An active authorized UAE document receiving account is required."
                 )
+            )
+
+    def _check_receiving_company(self, company):
+        if (
+            company not in self.env.user.company_ids
+            or company not in self.env.companies
+        ):
+            raise AccessError(
+                self.env._("The received document company is not authorized.")
             )
 
     @api.model
     def receive_controlled_document(self, binding_id, remote_id, content):
         """Persist controlled authenticated bytes without an accounting commit."""
-        self._check_operator()
+        self._check_operator(process=False)
         binding = self.env["l10n_ae.edi.binding"].browse(binding_id).exists()
         binding.check_access("read")
         if not binding or not binding.active or binding.environment != "sandbox":
             raise UserError(self.env._("Select an active controlled sandbox binding."))
+        self._check_receiving_company(binding.company_id)
         if not isinstance(remote_id, str) or not 1 <= len(remote_id) <= 256:
             raise UserError(self.env._("Invalid received document identifier."))
         if not isinstance(content, bytes) or not 0 < len(content) <= MAX_XML_BYTES:
@@ -143,6 +160,7 @@ class UaeEdiInbox(models.Model):
         self.ensure_one()
         self._check_operator()
         self.check_access("read")
+        self._check_receiving_company(self.company_id)
         self.env.cr.execute(
             "SELECT id FROM l10n_ae_edi_binding WHERE id = %s FOR UPDATE",
             [self.binding_id.id],

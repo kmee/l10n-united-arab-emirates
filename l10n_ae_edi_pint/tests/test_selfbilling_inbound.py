@@ -103,10 +103,14 @@ class TestUaeSelfBillingInbound(AccountTestInvoicingCommon):
         supplier = self.env.company
         source, recipient_agreement, binding = self._selfbilling_fixture()
         content = source.preview_l10n_ae_pint().encode()
-        inbox = self.env["l10n_ae.edi.inbox"].receive_controlled_document(
-            binding.id,
-            "buyer-issued-invoice",
-            content,
+        inbox = (
+            self.env["l10n_ae.edi.inbox"]
+            .with_user(self.simple_accountman)
+            .receive_controlled_document(
+                binding.id,
+                "buyer-issued-invoice",
+                content,
+            )
         )
         self.assertTrue(inbox.action_process(), inbox.diagnostic)
         sale = inbox.move_id
@@ -129,7 +133,7 @@ class TestUaeSelfBillingInbound(AccountTestInvoicingCommon):
 
     def test_received_self_billed_credit_links_the_original_supplier_sale(self):
         source, agreement, binding = self._selfbilling_fixture()
-        inbox_model = self.env["l10n_ae.edi.inbox"]
+        inbox_model = self.env["l10n_ae.edi.inbox"].with_user(self.simple_accountman)
         original = inbox_model.receive_controlled_document(
             binding.id,
             "buyer-original",
@@ -196,10 +200,14 @@ class TestUaeSelfBillingInbound(AccountTestInvoicingCommon):
         )
         existing.invoice_line_ids.name = "Internal affiliate billing memo"
         content = source.preview_l10n_ae_pint().encode()
-        inbox = self.env["l10n_ae.edi.inbox"].receive_controlled_document(
-            binding.id,
-            "existing-billing-sale",
-            content,
+        inbox = (
+            self.env["l10n_ae.edi.inbox"]
+            .with_user(self.simple_accountman)
+            .receive_controlled_document(
+                binding.id,
+                "existing-billing-sale",
+                content,
+            )
         )
         self.assertTrue(inbox.action_process(), inbox.diagnostic)
         self.assertEqual(inbox.move_id, existing)
@@ -229,10 +237,14 @@ class TestUaeSelfBillingInbound(AccountTestInvoicingCommon):
             etree.Comment("Synthetic annotation")
         )
         content = etree.tostring(tree)
-        inbox = self.env["l10n_ae.edi.inbox"].receive_controlled_document(
-            binding.id,
-            "annotated-billing-sale",
-            content,
+        inbox = (
+            self.env["l10n_ae.edi.inbox"]
+            .with_user(self.simple_accountman)
+            .receive_controlled_document(
+                binding.id,
+                "annotated-billing-sale",
+                content,
+            )
         )
         self.assertTrue(inbox.action_process(), inbox.diagnostic)
         self.assertEqual(inbox.move_id, existing)
@@ -262,8 +274,10 @@ class TestUaeSelfBillingInbound(AccountTestInvoicingCommon):
             }
         )
         content = source.preview_l10n_ae_pint().encode()
-        inbox = self.env["l10n_ae.edi.inbox"].receive_controlled_document(
-            binding.id, "freezone-existing-sale", content
+        inbox = (
+            self.env["l10n_ae.edi.inbox"]
+            .with_user(self.simple_accountman)
+            .receive_controlled_document(binding.id, "freezone-existing-sale", content)
         )
         before = self.env["account.move"].search_count(
             [("move_type", "=", "out_invoice")]
@@ -297,10 +311,14 @@ class TestUaeSelfBillingInbound(AccountTestInvoicingCommon):
 
     def test_received_agreement_evidence_survives_later_contract_changes(self):
         source, agreement, binding = self._selfbilling_fixture()
-        inbox = self.env["l10n_ae.edi.inbox"].receive_controlled_document(
-            binding.id,
-            "agreement-evidence",
-            source.preview_l10n_ae_pint().encode(),
+        inbox = (
+            self.env["l10n_ae.edi.inbox"]
+            .with_user(self.simple_accountman)
+            .receive_controlled_document(
+                binding.id,
+                "agreement-evidence",
+                source.preview_l10n_ae_pint().encode(),
+            )
         )
         self.assertTrue(inbox.action_process(), inbox.diagnostic)
         sale = inbox.move_id
@@ -339,10 +357,14 @@ class TestUaeSelfBillingInbound(AccountTestInvoicingCommon):
         existing.ref = source.name
         self.assertEqual(existing.amount_total, 105)
         content = source.preview_l10n_ae_pint().encode()
-        inbox = self.env["l10n_ae.edi.inbox"].receive_controlled_document(
-            binding.id,
-            "different-billing-quantities",
-            content,
+        inbox = (
+            self.env["l10n_ae.edi.inbox"]
+            .with_user(self.simple_accountman)
+            .receive_controlled_document(
+                binding.id,
+                "different-billing-quantities",
+                content,
+            )
         )
         before = self.env["account.move"].search_count(
             [("move_type", "=", "out_invoice")]
@@ -365,10 +387,14 @@ class TestUaeSelfBillingInbound(AccountTestInvoicingCommon):
     def test_ineligible_or_ambiguous_receiving_agreement_stays_in_review(self):
         source, agreement, binding = self._selfbilling_fixture()
         content = source.preview_l10n_ae_pint().encode()
-        inbox = self.env["l10n_ae.edi.inbox"].receive_controlled_document(
-            binding.id,
-            "review-agreement",
-            content,
+        inbox = (
+            self.env["l10n_ae.edi.inbox"]
+            .with_user(self.simple_accountman)
+            .receive_controlled_document(
+                binding.id,
+                "review-agreement",
+                content,
+            )
         )
         before = self.env["account.move"].search_count(
             [("move_type", "=", "out_invoice")]
@@ -400,7 +426,7 @@ class TestUaeSelfBillingInbound(AccountTestInvoicingCommon):
 
     def test_sender_prepaid_credit_does_not_claim_a_local_payment_in_the_history(self):
         source, _agreement, binding = self._selfbilling_fixture()
-        inbox_model = self.env["l10n_ae.edi.inbox"]
+        inbox_model = self.env["l10n_ae.edi.inbox"].with_user(self.simple_accountman)
         original = inbox_model.receive_controlled_document(
             binding.id,
             "prepaid-original",

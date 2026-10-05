@@ -61,6 +61,16 @@ This inbox currently receives from the separately configured KMEE
 loopback mock worker. It does not connect to an accredited provider
 sandbox or constitute FTA acceptance.
 
+An administrator may assign **UAE Integration / Controlled Document
+Receiver** to a dedicated internal service account with only the
+required companies. The controlled worker uses ``process=False`` for
+that account and preserves original XML without creating an accounting
+draft. An active accounting manager then processes the inbox through the
+native form. Archiving the service or removing its role/company access
+stops subsequent retrieval and receipt; support can resume lookup of the
+original after reviewed restoration. The role grants no accounting,
+sending, confirmation-event or binding configuration permissions.
+
 Received tax credit notes in AED can become draft supplier refunds when
 their single preceding invoice reference matches an existing supplier
 bill. The declared credit reason, prepaid amount and payable amount

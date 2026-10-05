@@ -56,7 +56,7 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         binding = self.env["l10n_ae.edi.binding"].create(
             {"name": "Incoming USD credit"}
         )
-        inbox_model = self.env["l10n_ae.edi.inbox"]
+        inbox_model = self.env["l10n_ae.edi.inbox"].with_user(self.simple_accountman)
         original = inbox_model.receive_controlled_document(
             binding.id,
             "usd-credit-original",
@@ -107,10 +107,14 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         for node in tree.xpath("//*[@currencyID='USD']"):
             node.set("currencyID", "CHF")
         binding = self.env["l10n_ae.edi.binding"].create({"name": "Inactive CHF"})
-        inbox = self.env["l10n_ae.edi.inbox"].receive_controlled_document(
-            binding.id,
-            "inactive-chf",
-            etree.tostring(tree),
+        inbox = (
+            self.env["l10n_ae.edi.inbox"]
+            .with_user(self.simple_accountman)
+            .receive_controlled_document(
+                binding.id,
+                "inactive-chf",
+                etree.tostring(tree),
+            )
         )
         self.assertFalse(inbox.action_process())
         self.assertEqual(inbox.state, "review")
@@ -126,10 +130,14 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         binding = self.env["l10n_ae.edi.binding"].create(
             {"name": "Incoming USD evidence"}
         )
-        inbox = self.env["l10n_ae.edi.inbox"].receive_controlled_document(
-            binding.id,
-            "received-usd-1",
-            content,
+        inbox = (
+            self.env["l10n_ae.edi.inbox"]
+            .with_user(self.simple_accountman)
+            .receive_controlled_document(
+                binding.id,
+                "received-usd-1",
+                content,
+            )
         )
         self.assertTrue(inbox.action_process(), inbox.diagnostic)
         bill = inbox.move_id
@@ -204,7 +212,7 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         )
         content = etree.tostring(self._received_test_xml(source))
         binding = self.env["l10n_ae.edi.binding"].create({"name": "Received Free Zone"})
-        inbox_model = self.env["l10n_ae.edi.inbox"]
+        inbox_model = self.env["l10n_ae.edi.inbox"].with_user(self.simple_accountman)
         inbox = inbox_model.receive_controlled_document(
             binding.id, "received-free-zone", content
         )
@@ -267,8 +275,12 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
             node = tree.find(path, NS)
             node.addnext(etree.fromstring(etree.tostring(node)))
             content = etree.tostring(tree)
-            inbox = self.env["l10n_ae.edi.inbox"].receive_controlled_document(
-                binding.id, f"ambiguous-beneficiary-{index}", content
+            inbox = (
+                self.env["l10n_ae.edi.inbox"]
+                .with_user(self.simple_accountman)
+                .receive_controlled_document(
+                    binding.id, f"ambiguous-beneficiary-{index}", content
+                )
             )
             with self.subTest(path=path):
                 self.assertFalse(inbox.action_process())
@@ -312,10 +324,14 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
                 tree.find("cbc:UUID", NS).text = f"aaaaaaac-2222-4222-8222-{index:012d}"
                 tree.find(xpath, NS).text = value
                 content = etree.tostring(tree)
-                inbox = self.env["l10n_ae.edi.inbox"].receive_controlled_document(
-                    binding.id,
-                    f"bad-fx-header-{index}",
-                    content,
+                inbox = (
+                    self.env["l10n_ae.edi.inbox"]
+                    .with_user(self.simple_accountman)
+                    .receive_controlled_document(
+                        binding.id,
+                        f"bad-fx-header-{index}",
+                        content,
+                    )
                 )
                 self.assertFalse(inbox.action_process())
                 self.assertEqual(inbox.state, "review")
@@ -353,10 +369,14 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
                 if currency:
                     node.set("currencyID", currency)
                 content = etree.tostring(tree)
-                inbox = self.env["l10n_ae.edi.inbox"].receive_controlled_document(
-                    binding.id,
-                    f"bad-fx-line-{index}",
-                    content,
+                inbox = (
+                    self.env["l10n_ae.edi.inbox"]
+                    .with_user(self.simple_accountman)
+                    .receive_controlled_document(
+                        binding.id,
+                        f"bad-fx-line-{index}",
+                        content,
+                    )
                 )
                 self.assertFalse(inbox.action_process())
                 self.assertEqual(inbox.state, "review")
@@ -397,10 +417,14 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         binding = self.env["l10n_ae.edi.binding"].create(
             {"name": "Incoming fractional quantity"}
         )
-        inbox = self.env["l10n_ae.edi.inbox"].receive_controlled_document(
-            binding.id,
-            "fractional-quantity",
-            etree.tostring(tree),
+        inbox = (
+            self.env["l10n_ae.edi.inbox"]
+            .with_user(self.simple_accountman)
+            .receive_controlled_document(
+                binding.id,
+                "fractional-quantity",
+                etree.tostring(tree),
+            )
         )
         self.assertTrue(inbox.action_process(), inbox.diagnostic)
         bill = inbox.move_id
@@ -422,7 +446,7 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         binding = self.env["l10n_ae.edi.binding"].create(
             {"name": "Incoming supplier adjustment"}
         )
-        inbox_model = self.env["l10n_ae.edi.inbox"]
+        inbox_model = self.env["l10n_ae.edi.inbox"].with_user(self.simple_accountman)
         received = inbox_model.receive_controlled_document(
             binding.id,
             "original-bill",
@@ -493,8 +517,12 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         binding = self.env["l10n_ae.edi.binding"].create(
             {"name": "Incoming endpoint check"}
         )
-        inbox = self.env["l10n_ae.edi.inbox"].receive_controlled_document(
-            binding.id, "supplier-mismatch", etree.tostring(tree)
+        inbox = (
+            self.env["l10n_ae.edi.inbox"]
+            .with_user(self.simple_accountman)
+            .receive_controlled_document(
+                binding.id, "supplier-mismatch", etree.tostring(tree)
+            )
         )
         inbox.action_process()
         self.assertEqual(inbox.state, "review")
@@ -508,8 +536,10 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
             {"name": "Received currency evidence"}
         )
         content = etree.tostring(self._received_test_xml())
-        inbox = self.env["l10n_ae.edi.inbox"].receive_controlled_document(
-            binding.id, "received-currency", content
+        inbox = (
+            self.env["l10n_ae.edi.inbox"]
+            .with_user(self.simple_accountman)
+            .receive_controlled_document(binding.id, "received-currency", content)
         )
         self.assertTrue(inbox.action_process(), inbox.diagnostic)
         bill = inbox.move_id
@@ -561,8 +591,10 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         binding = self.env["l10n_ae.edi.binding"].create(
             {"name": "Incoming commercial document"}
         )
-        inbox = self.env["l10n_ae.edi.inbox"].receive_controlled_document(
-            binding.id, "non-vat-commercial", content
+        inbox = (
+            self.env["l10n_ae.edi.inbox"]
+            .with_user(self.simple_accountman)
+            .receive_controlled_document(binding.id, "non-vat-commercial", content)
         )
         self.assertTrue(inbox.action_process(), inbox.diagnostic)
         bill = inbox.move_id
@@ -590,8 +622,10 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         binding = self.env["l10n_ae.edi.binding"].create(
             {"name": "Incoming unknown license"}
         )
-        inbox = self.env["l10n_ae.edi.inbox"].receive_controlled_document(
-            binding.id, "unknown-license", content
+        inbox = (
+            self.env["l10n_ae.edi.inbox"]
+            .with_user(self.simple_accountman)
+            .receive_controlled_document(binding.id, "unknown-license", content)
         )
         self.assertFalse(inbox.action_process())
         self.assertEqual(inbox.state, "review")
@@ -615,7 +649,7 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         binding = self.env["l10n_ae.edi.binding"].create(
             {"name": "Incoming commercial adjustment"}
         )
-        model = self.env["l10n_ae.edi.inbox"]
+        model = self.env["l10n_ae.edi.inbox"].with_user(self.simple_accountman)
         original = model.receive_controlled_document(
             binding.id, "commercial-original", etree.tostring(tree)
         )
@@ -665,7 +699,7 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         binding = self.env["l10n_ae.edi.binding"].create(
             {"name": "Incoming credit reference review"}
         )
-        inbox_model = self.env["l10n_ae.edi.inbox"]
+        inbox_model = self.env["l10n_ae.edi.inbox"].with_user(self.simple_accountman)
         received = inbox_model.receive_controlled_document(
             binding.id,
             "original-bill",
@@ -701,7 +735,7 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         binding = self.env["l10n_ae.edi.binding"].create(
             {"name": "Incoming duplicate check"}
         )
-        inbox_model = self.env["l10n_ae.edi.inbox"]
+        inbox_model = self.env["l10n_ae.edi.inbox"].with_user(self.simple_accountman)
         first = inbox_model.receive_controlled_document(
             binding.id, "remote-first", content
         )
@@ -717,8 +751,10 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
     def test_unsafe_received_xml_is_preserved_without_creating_a_bill(self):
         content = b'<!DOCTYPE Invoice [<!ENTITY ex SYSTEM "file:///etc/passwd">]><Invoice>&ex;</Invoice>'
         binding = self.env["l10n_ae.edi.binding"].create({"name": "Incoming XML check"})
-        inbox = self.env["l10n_ae.edi.inbox"].receive_controlled_document(
-            binding.id, "unsafe-xml", content
+        inbox = (
+            self.env["l10n_ae.edi.inbox"]
+            .with_user(self.simple_accountman)
+            .receive_controlled_document(binding.id, "unsafe-xml", content)
         )
         inbox.action_process()
         self.assertEqual(inbox.original_xml.content, content)
@@ -738,15 +774,17 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
             login="uae-inbox-readonly",
             groups="account.group_account_readonly",
         )
-        inbox = self.env["l10n_ae.edi.inbox"].receive_controlled_document(
-            binding.id, "read-only", b"<Invoice/>"
+        inbox = (
+            self.env["l10n_ae.edi.inbox"]
+            .with_user(self.simple_accountman)
+            .receive_controlled_document(binding.id, "read-only", b"<Invoice/>")
         )
         with self.assertRaises(AccessError):
             inbox.with_user(reader).action_process()
         with self.assertRaises(AccessError):
-            self.env["l10n_ae.edi.inbox"].with_user(reader).receive_controlled_document(
-                binding.id, "read-only-2", b"<Invoice/>"
-            )
+            self.env["l10n_ae.edi.inbox"].with_user(self.simple_accountman).with_user(
+                reader
+            ).receive_controlled_document(binding.id, "read-only-2", b"<Invoice/>")
 
     def test_received_document_bytes_are_isolated_from_other_companies(self):
         other = (
@@ -759,9 +797,17 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
             .sudo()
             .create({"name": "Other receiving ASP", "company_id": other.id})
         )
+        foreign_manager = new_test_user(
+            self.env,
+            login="uae-foreign-document-manager",
+            groups="account.group_account_manager",
+            company_id=other.id,
+            company_ids=[(6, 0, other.ids)],
+        )
         foreign = (
             self.env["l10n_ae.edi.inbox"]
-            .sudo()
+            .with_user(foreign_manager)
+            .with_company(other)
             .receive_controlled_document(
                 foreign_binding.id, "foreign-original", b"<Invoice/>"
             )
@@ -780,7 +826,7 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
 
     def test_received_identity_with_changed_bytes_preserves_both_for_review(self):
         binding = self.env["l10n_ae.edi.binding"].create({"name": "Inbound replay ASP"})
-        inbox_model = self.env["l10n_ae.edi.inbox"]
+        inbox_model = self.env["l10n_ae.edi.inbox"].with_user(self.simple_accountman)
         first = inbox_model.receive_controlled_document(
             binding.id, "same-id", b"<original/>"
         )
@@ -814,8 +860,10 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         customer.append(supplier_party)
         content = etree.tostring(tree)
         binding = self.env["l10n_ae.edi.binding"].create({"name": "Inbound test ASP"})
-        inbox = self.env["l10n_ae.edi.inbox"].receive_controlled_document(
-            binding.id, "received-invoice-1", content
+        inbox = (
+            self.env["l10n_ae.edi.inbox"]
+            .with_user(self.simple_accountman)
+            .receive_controlled_document(binding.id, "received-invoice-1", content)
         )
         inbox.action_process()
         bill = inbox.move_id
