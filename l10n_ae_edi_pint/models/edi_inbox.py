@@ -59,6 +59,11 @@ class UaeEdiInbox(models.Model):
         check_company=True,
         ondelete="restrict",
     )
+    processing_history_ids = fields.One2many(
+        "l10n_ae.edi.inbox.review",
+        "inbox_id",
+        readonly=True,
+    )
 
     _received_identity = models.UniqueIndex(
         "(binding_id, remote_id, xml_hash)",
@@ -130,8 +135,13 @@ class UaeEdiInbox(models.Model):
         }
         if other:
             super(UaeEdiInbox, other.sudo()).write(conflict)
+        # Caller defaults must not fabricate receipt state or accounting links.
+        # pylint: disable=context-overridden
+        receiver = self.sudo().with_context(
+            {"allowed_company_ids": [binding.company_id.id]}
+        )
         return (
-            self.sudo()
+            super(UaeEdiInbox, receiver)
             .create(
                 {
                     "binding_id": binding.id,
@@ -142,10 +152,21 @@ class UaeEdiInbox(models.Model):
                     ),
                     "xml_hash": digest,
                     "received_at": fields.Datetime.now(),
+                    "state": "received",
+                    "diagnostic": False,
+                    "identity_conflict": False,
+                    "move_id": False,
                     **(conflict if other else {}),
                 }
             )
             .with_env(self.env)
+        )
+
+    @api.model_create_multi
+    def create(self, vals_list):
+        # pylint: disable=method-required-super
+        raise UserError(
+            self.env._("Received UAE evidence is created by the authorized receiver.")
         )
 
     def write(self, vals):
@@ -180,11 +201,19 @@ class UaeEdiInbox(models.Model):
             super(UaeEdiInbox, self.sudo()).write(
                 {"state": "review", "diagnostic": str(error)}
             )
+            self._record_processing_history("review", diagnostic=str(error))
             return False
         super(UaeEdiInbox, self.sudo()).write(
             {"state": "processed", "diagnostic": False, "move_id": move.id}
         )
+        self._record_processing_history("processed", move=move)
         return True
+
+    def _record_processing_history(self, outcome, diagnostic=False, move=False):
+        self.ensure_one()
+        return self.env["l10n_ae.edi.inbox.review"]._record(
+            self, outcome, diagnostic=diagnostic, move=move
+        )
 
     def action_open_move(self):
         self.ensure_one()

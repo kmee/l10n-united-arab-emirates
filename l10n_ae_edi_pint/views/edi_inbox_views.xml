@@ -44,6 +44,34 @@
                     <group string="Review Diagnostic" invisible="not diagnostic">
                         <field name="diagnostic" nolabel="1" />
                     </group>
+                    <group string="Processing History" col="1">
+                        <field name="processing_history_ids" readonly="1" nolabel="1">
+                            <list create="false" edit="false" delete="false">
+                                <field name="occurred_at" />
+                                <field name="operator_id" options="{'no_open': True}" />
+                                <field name="outcome" />
+                                <field name="diagnostic" />
+                                <field name="xml_hash" optional="hide" />
+                            </list>
+                            <form
+                                create="false"
+                                edit="false"
+                                delete="false"
+                                duplicate="false"
+                            >
+                                <group>
+                                    <field name="occurred_at" />
+                                    <field
+                                        name="operator_id"
+                                        options="{'no_open': True}"
+                                    />
+                                    <field name="outcome" />
+                                    <field name="xml_hash" />
+                                    <field name="diagnostic" />
+                                </group>
+                            </form>
+                        </field>
+                    </group>
                 </sheet>
             </form>
         </field>

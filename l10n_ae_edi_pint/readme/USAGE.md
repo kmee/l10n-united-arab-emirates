@@ -67,3 +67,9 @@ UAE tab. Document currency, declared exchange rate, fiscal AED VAT and gross amo
 remain protected. They do not set the local reviewed quote or create a payment. Currency
 must already be active; inconsistent fiscal values stay in the inbox for review. Worked
 USD invoice/partial-credit vectors are tested; full combinations remain pending.
+
+The received-document form retains **Processing History**. Failed processing keeps
+its operator, time, diagnostic and original XML hash even after reviewed master-data
+correction allows a draft bill. Use **Process Received Document** again after the
+correction; do not replace XML. A successful replay does not create another draft or
+history entry. Fiscal auditors see read-only history without accounting access.

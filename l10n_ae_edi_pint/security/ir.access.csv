@@ -4,3 +4,7 @@ access_uae_inbox_accountant,UAE inbox accountant,l10n_ae.edi.inbox,account.group
 access_uae_inbox_invoice,UAE inbox invoice user,l10n_ae.edi.inbox,account.group_account_invoice,r,
 access_uae_document_receiver_inbox,UAE document receiver inbox,l10n_ae.edi.inbox,l10n_ae_edi_pint.group_document_receiver,r,
 access_uae_document_receiver_binding,UAE document receiver binding,l10n_ae.edi.binding,l10n_ae_edi_pint.group_document_receiver,r,
+access_uae_inbox_review_auditor,UAE audit processing history,l10n_ae.edi.inbox.review,l10n_ae_edi.group_fiscal_auditor,r,
+access_uae_inbox_review_accountant,UAE accountant processing history,l10n_ae.edi.inbox.review,account.group_account_readonly,r,
+access_uae_inbox_review_invoice,UAE invoice user processing history,l10n_ae.edi.inbox.review,account.group_account_invoice,r,
+access_uae_inbox_review_receiver,UAE receiver processing history,l10n_ae.edi.inbox.review,l10n_ae_edi_pint.group_document_receiver,r,
