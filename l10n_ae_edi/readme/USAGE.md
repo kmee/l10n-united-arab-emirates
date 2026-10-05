@@ -90,3 +90,11 @@ API acceptance leaves fiscal/delivery confirmations pending. Missing scheduler
 configuration leaves the invoice queued; ask support to inspect native Scheduled Actions.
 Archiving prevents new submissions but retains reconciliation of existing attempts while
 scheduling stays enabled. Disabling scheduling also stops automatic lookup.
+
+Fiscal Evidence Auditor users with separate native Data Export permission can download
+an issued revision's **Fiscal Evidence Package** from UAE Audit. Its versioned ZIP
+preserves the snapshot/XML, attempts, original events and related billing/correction
+metadata with a hash inventory. Existing preserved conventional files are included
+without rendering. Corrupt originals and partial access are refused. See scenario25 in
+the PT/EN manuals. This audit export does not replace backups, retention/holds or a
+restored-database verification.

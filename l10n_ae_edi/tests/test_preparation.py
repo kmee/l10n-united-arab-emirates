@@ -324,3 +324,22 @@ class TestUaeInvoicePreparation(AccountTestInvoicingCommon):
         invoice.action_l10n_ae_prepare()
         with self.assertRaisesRegex(UserError, "immutable"):
             invoice.l10n_ae_transmission_id.sudo().unlink()
+
+    def test_prepared_invoice_audit_matches_installed_format_capability(self):
+        pint_installed = bool(
+            self.env["ir.module.module"].search(
+                [("name", "=", "l10n_ae_edi_pint"), ("state", "=", "installed")]
+            )
+        )
+        invoice = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
+        )
+        invoice.l10n_ae_binding_id = self.binding
+        invoice.action_l10n_ae_prepare()
+        issue = invoice.l10n_ae_transmission_id
+        # Exercise both supported installations through the native preparation action.
+        self.assertEqual(bool(issue.xml_content), pint_installed)
+        records = issue.read(["evidence_archive", "payload_hash", "submission_state"])
+        self.assertEqual(bool(records[0]["evidence_archive"]), pint_installed)
+        self.assertEqual(records[0]["submission_state"], "queued")
+        self.assertEqual(invoice.amount_total, 105)
