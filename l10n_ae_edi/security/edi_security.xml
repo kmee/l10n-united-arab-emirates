@@ -1,5 +1,17 @@
 <?xml version="1.0" encoding="UTF-8" ?>
 <odoo>
+    <record id="edi_retention_company_rule" model="ir.access">
+        <field name="name">UAE retention company isolation</field>
+        <field name="model_id" ref="model_l10n_ae_edi_retention" />
+        <field name="operation">crud</field>
+        <field name="domain">[('company_id', 'in', company_ids)]</field>
+    </record>
+    <record id="edi_retention_hold_company_rule" model="ir.access">
+        <field name="name">UAE hold history company isolation</field>
+        <field name="model_id" ref="model_l10n_ae_edi_retention_hold" />
+        <field name="operation">crud</field>
+        <field name="domain">[('company_id', 'in', company_ids)]</field>
+    </record>
     <record id="edi_billing_request_company_rule" model="ir.access">
         <field name="name">UAE original billing request company isolation</field>
         <field name="model_id" ref="model_l10n_ae_edi_billing_request" />

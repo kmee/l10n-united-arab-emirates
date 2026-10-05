@@ -1,4 +1,12 @@
 id,name,model_id,group_id/id,operation,domain
+access_uae_retention_manager,UAE retention manager,l10n_ae.edi.retention,account.group_account_manager,crud,
+access_uae_retention_auditor,UAE retention auditor,l10n_ae.edi.retention,group_fiscal_auditor,r,
+access_uae_retention_accountant,UAE retention accountant,l10n_ae.edi.retention,account.group_account_readonly,r,
+access_uae_retention_invoice,UAE retention invoice reader,l10n_ae.edi.retention,account.group_account_invoice,r,
+access_uae_retention_hold_manager,UAE retention hold manager,l10n_ae.edi.retention.hold,account.group_account_manager,crud,
+access_uae_retention_hold_auditor,UAE retention hold auditor,l10n_ae.edi.retention.hold,group_fiscal_auditor,r,
+access_uae_retention_hold_accountant,UAE retention hold accountant,l10n_ae.edi.retention.hold,account.group_account_readonly,r,
+access_uae_retention_hold_invoice,UAE retention hold invoice reader,l10n_ae.edi.retention.hold,account.group_account_invoice,r,
 access_uae_attempt_auditor,UAE audit transport attempt reader,l10n_ae.edi.attempt,group_fiscal_auditor,r,
 access_uae_billing_request_auditor,UAE audit original billing request reader,l10n_ae.edi.billing.request,group_fiscal_auditor,r,
 access_uae_correction_auditor,UAE audit local correction reader,l10n_ae.edi.correction,group_fiscal_auditor,r,
