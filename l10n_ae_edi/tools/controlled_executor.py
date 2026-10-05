@@ -43,6 +43,7 @@ class ControlledExecutor:
             raise AccessError(
                 env._("An active authorized UAE sending account is required.")
             )
+        env["l10n_ae.edi.binding"]._check_transport_allowed()
         return env
 
     def _record(self, cursor, transmission_id):

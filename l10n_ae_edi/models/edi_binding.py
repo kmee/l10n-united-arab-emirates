@@ -88,6 +88,15 @@ class UaeEdiBinding(models.Model):
             )
 
     @api.model
+    def _check_transport_allowed(self):
+        # Callers first validate the actual account and company. Read only the
+        # native database safety flag, without granting parameter ACLs to workers.
+        if self.env["ir.config_parameter"].sudo().get_bool("database.is_neutralized"):
+            raise AccessError(
+                self.env._("UAE integration is blocked in a neutralized database.")
+            )
+
+    @api.model
     def _cron_dispatch_controlled(self):
         if not self.env.context.get("cron_id"):
             raise UserError(self.env._("Use the native UAE scheduled action."))
@@ -103,6 +112,7 @@ class UaeEdiBinding(models.Model):
             raise AccessError(
                 self.env._("An active authorized UAE sending account is required.")
             )
+        self._check_transport_allowed()
         bindings = self.with_context(active_test=False).search(
             [
                 ("controlled_dispatch_enabled", "=", True),

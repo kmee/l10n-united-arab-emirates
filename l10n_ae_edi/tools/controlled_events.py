@@ -135,6 +135,7 @@ class ControlledEventReceiver:
                 raise AccessError(env._("The UAE binding belongs to another company."))
             if binding.environment != "sandbox":
                 raise UserError(env._("Controlled events require a sandbox binding."))
+            binding._check_transport_allowed()
             cursor.execute(
                 "SELECT id FROM l10n_ae_edi_binding WHERE id = %s FOR UPDATE",
                 [binding.id],
