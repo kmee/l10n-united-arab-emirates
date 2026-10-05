@@ -159,8 +159,12 @@ class UaeEdiBinding(models.Model):
 
     @api.model_create_multi
     def create(self, vals_list):
+        checkpoint_defaults = self.default_get(sorted(SCHEDULED_DIAGNOSTIC_FIELDS))
         if any(
-            any(vals.get(field) for field in SCHEDULED_DIAGNOSTIC_FIELDS)
+            any(
+                vals.get(field, checkpoint_defaults.get(field))
+                for field in SCHEDULED_DIAGNOSTIC_FIELDS
+            )
             for vals in vals_list
         ):
             raise UserError(
