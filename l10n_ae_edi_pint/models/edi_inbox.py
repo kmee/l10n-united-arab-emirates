@@ -126,6 +126,7 @@ class UaeEdiInbox(models.Model):
         if not binding or not binding.active or binding.environment != "sandbox":
             raise UserError(self.env._("Select an active controlled sandbox binding."))
         self._check_receiving_company(binding.company_id)
+        binding._check_transport_allowed()
         if not isinstance(remote_id, str) or not 1 <= len(remote_id) <= 256:
             raise UserError(self.env._("Invalid received document identifier."))
         if not isinstance(content, bytes) or not 0 < len(content) <= MAX_XML_BYTES:

@@ -47,6 +47,7 @@ class ControlledInboxWorker:
             raise AccessError(env._("The UAE binding belongs to another company."))
         if not binding.active or binding.environment != "sandbox":
             raise UserError(env._("An active controlled sandbox binding is required."))
+        binding._check_transport_allowed()
         return binding
 
     def run_once(self, binding_id, remote_id, process=True):

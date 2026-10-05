@@ -116,6 +116,7 @@ class UaeEdiBinding(models.Model):
                     "An active authorized UAE document receiving account is required."
                 )
             )
+        self._check_transport_allowed()
         bindings = self.search(
             [
                 ("controlled_receive_enabled", "=", True),
