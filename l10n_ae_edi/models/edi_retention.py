@@ -319,6 +319,92 @@ class UaeEdiRetention(models.Model):
             )
 
     @api.model
+    def _evidence_appendix(self, document, target_field):
+        self._check_current_document(document)
+        obligations = (
+            self.sudo()
+            .search([(target_field, "=", document.id)], order="id")
+            .with_user(self.env.uid)
+        )
+        obligations.check_access("read")
+        holds = (
+            self.env["l10n_ae.edi.retention.hold"]
+            .sudo()
+            .search([("retention_id", "in", obligations.ids)], order="id")
+            .with_user(self.env.uid)
+        )
+        holds.check_access("read")
+        if any(record.company_id != document.company_id for record in obligations):
+            raise UserError(
+                self.env._("Retention evidence has an inconsistent company.")
+            )
+        if any(record.company_id != document.company_id for record in holds):
+            raise UserError(self.env._("Hold evidence has an inconsistent company."))
+
+        def metadata(records, names):
+            rows = []
+            for record in records:
+                row = {"id": record.id}
+                for name in names:
+                    value = record[name]
+                    kind = record._fields[name].type
+                    if kind == "many2one":
+                        value = value.id or False
+                    elif kind == "date":
+                        value = fields.Date.to_string(value) if value else False
+                    elif kind == "datetime":
+                        value = fields.Datetime.to_string(value) if value else False
+                    row[name] = value
+                rows.append(row)
+            return rows
+
+        names = [
+            "name",
+            "company_id",
+            "transmission_id",
+            "record_class",
+            "tax_purpose",
+            "anchor_kind",
+            "period_start",
+            "anchor_date",
+            "retention_years",
+            "extended_until",
+            "source_reference",
+            "policy_version",
+            "review_note",
+            "state",
+            "approved_by_id",
+            "approved_at",
+            "retain_until",
+        ]
+        if "inbox_id" in self._fields:
+            names.append("inbox_id")
+        return {
+            "format": "kmee-uae-retention-1",
+            "source": {
+                "model": document._name,
+                "id": document.id,
+                "company_id": document.company_id.id,
+            },
+            "obligations": metadata(obligations, names),
+            "holds": metadata(
+                holds,
+                [
+                    "company_id",
+                    "retention_id",
+                    "reason",
+                    "source_reference",
+                    "state",
+                    "placed_by_id",
+                    "placed_at",
+                    "released_by_id",
+                    "released_at",
+                    "release_reason",
+                ],
+            ),
+        }
+
+    @api.model
     def _assess(self, document, as_of, target_field):
         self._check_current_document(document)
         try:
@@ -515,15 +601,3 @@ class UaeEdiRetentionHold(models.Model):
     @api.ondelete(at_uninstall=False)
     def _unlink_except_hold_history(self):
         raise UserError(self.env._("UAE hold history cannot be deleted."))
-
-
-class UaeEdiTransmission(models.Model):
-    _inherit = "l10n_ae.edi.transmission"
-
-    retention_ids = fields.One2many(
-        "l10n_ae.edi.retention", "transmission_id", readonly=True
-    )
-
-    def get_retention_status(self, as_of=None):
-        self.ensure_one()
-        return self.env["l10n_ae.edi.retention"]._assess(self, as_of, "transmission_id")

@@ -30,6 +30,12 @@ after commit. Authenticated controlled events preserve independent
 validation, delivery and tax-report evidence. Production preparation is
 disabled; the mock contract is KMEE's own.
 
+Authenticated fiscal evidence packages include reviewed retention
+obligations and the complete hold/release history in a versioned
+appendix. Native read and Data Export rights apply to every linked row;
+restricted history refuses export. Classification does not change the
+original fiscal bytes or authorize deletion.
+
 .. IMPORTANT::
    This is an alpha version, the data model and design can change at any time without warning.
    Only for development or testing purpose, do not use in production.

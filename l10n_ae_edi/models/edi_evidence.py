@@ -30,6 +30,9 @@ def _evidence_metadata(records, names):
 class UaeEdiEvidence(models.Model):
     _inherit = "l10n_ae.edi.transmission"
 
+    retention_ids = fields.One2many(
+        "l10n_ae.edi.retention", "transmission_id", readonly=True
+    )
     evidence_archive = fields.Binary(
         string="Fiscal Evidence Package",
         compute="_compute_evidence_archive",
@@ -41,6 +44,10 @@ class UaeEdiEvidence(models.Model):
         compute="_compute_evidence_archive_filename", compute_sudo=False
     )
 
+    def get_retention_status(self, as_of=None):
+        self.ensure_one()
+        return self.env["l10n_ae.edi.retention"]._assess(self, as_of, "transmission_id")
+
     @api.depends("revision")
     def _compute_evidence_archive_filename(self):
         for issue in self:
@@ -48,6 +55,12 @@ class UaeEdiEvidence(models.Model):
                 f"uae-evidence-{issue.id}-r{issue.revision}.zip"
             )
 
+    @api.depends(
+        "retention_ids",
+        "retention_ids.write_date",
+        "retention_ids.hold_ids",
+        "retention_ids.hold_ids.write_date",
+    )
     @api.depends_context("uid", "allowed_company_ids")
     def _compute_evidence_archive(self):
         for issue in self:
@@ -210,6 +223,10 @@ class UaeEdiEvidence(models.Model):
                 issue.conventional_pdf_hash,
             )
             optional["conventional_pdf"] = True
+        retention = issue.env["l10n_ae.edi.retention"]._evidence_appendix(
+            issue, "transmission_id"
+        )
+        preserve_json("retention.json", retention)
         identity = {
             name: issue[name]
             for name in [
@@ -251,6 +268,10 @@ class UaeEdiEvidence(models.Model):
                 "events": events.sorted("id").ids,
                 "billing_receipts": receipts.sorted("id").ids,
                 "local_corrections": corrections.sorted("id").ids,
+                "retention_obligations": [
+                    row["id"] for row in retention["obligations"]
+                ],
+                "retention_holds": [row["id"] for row in retention["holds"]],
             },
             "optional_artifacts": optional,
             "artifacts": {
