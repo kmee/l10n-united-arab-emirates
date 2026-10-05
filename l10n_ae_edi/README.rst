@@ -64,6 +64,16 @@ and the PT/EN scenario manuals. Native API keys belong to Odoo; the
 addon adds no key store or credential fields. Full client
 creation/callback integration remains pending.
 
+**Fiscal Evidence Auditor** adds read access to transport attempts,
+original billing receipts, local correction history and received
+documents. It inherits Billing Status Reader and grants no accounting,
+provider configuration, dispatch or processing rights. Native Data
+Export must be granted separately; internal worker tokens stay
+restricted. The dedicated audit application, XML download and complete
+browser/company isolation journeys are still under development. See `the
+auditor access
+evidence <https://github.com/kmee/l10n-eua/blob/20.0-add-uae-edi/docs/evidence/fiscal-auditor-access-2026-10-05.md>`__.
+
 For an outbound self-billed purchase, use a native self-billing purchase
 journal and select a UAE Self-Billing Agreement in the invoice's UAE
 tab. Accounting managers open **Invoicing → Configuration → UAE

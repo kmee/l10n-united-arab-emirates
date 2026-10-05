@@ -1,4 +1,7 @@
 id,name,model_id,group_id/id,operation,domain
+access_uae_attempt_auditor,UAE audit transport attempt reader,l10n_ae.edi.attempt,group_fiscal_auditor,r,
+access_uae_billing_request_auditor,UAE audit original billing request reader,l10n_ae.edi.billing.request,group_fiscal_auditor,r,
+access_uae_correction_auditor,UAE audit local correction reader,l10n_ae.edi.correction,group_fiscal_auditor,r,
 access_uae_billing_request_invoice,UAE original billing request invoice reader,l10n_ae.edi.billing.request,account.group_account_invoice,r,
 access_uae_billing_request_accountant,UAE original billing request accountant reader,l10n_ae.edi.billing.request,account.group_account_readonly,r,
 access_uae_transmission_billing,UAE billing frozen issue reader,l10n_ae.edi.transmission,group_billing_reader,r,

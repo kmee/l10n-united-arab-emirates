@@ -28,4 +28,12 @@
             name="comment"
         >Query frozen UAE document status and evidence for authorized companies without accounting, sending or configuration access.</field>
     </record>
+    <record id="group_fiscal_auditor" model="res.groups">
+        <field name="name">Fiscal Evidence Auditor</field>
+        <field name="privilege_id" ref="privilege_uae_integration" />
+        <field name="implied_ids" eval="[(4, ref('group_billing_reader'))]" />
+        <field
+            name="comment"
+        >Read frozen UAE fiscal evidence for authorized companies without accounting, configuration, sending or processing permissions. Data export requires a separate native permission.</field>
+    </record>
 </odoo>
