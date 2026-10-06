@@ -98,3 +98,14 @@ metadata with a hash inventory. Existing preserved conventional files are includ
 without rendering. Corrupt originals and partial access are refused. See scenario25 in
 the PT/EN manuals. This audit export does not replace backups, retention/holds or a
 restored-database verification.
+
+Accounting managers can open **Invoicing → Configuration → UAE Document Deadlines**
+to review an explicit basis, inclusive due date, reminder date, responsible user and
+requested fact for an invoice or credit note. Approve the reviewed basis before
+requesting an activity. **Assess Deadline** is read-only and uses the current UAE day;
+**Schedule Internal Reminder** creates one native To-Do when eligible. The hourly
+job checks approved records and isolates records requiring renewed owner/access
+review. API receipt and fiscal confirmations remain distinct. Completion of an activity
+does not reset reminder history. See scenario28 in the PT/EN manuals. These internal
+reminders do not determine legal timeliness or notify the FTA; full incident/calendar
+and escalation requirements remain open.

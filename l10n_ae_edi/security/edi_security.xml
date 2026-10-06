@@ -1,5 +1,11 @@
 <?xml version="1.0" encoding="UTF-8" ?>
 <odoo>
+    <record id="edi_deadline_company_rule" model="ir.access">
+        <field name="name">UAE reviewed deadline company isolation</field>
+        <field name="model_id" ref="model_l10n_ae_edi_deadline" />
+        <field name="operation">crud</field>
+        <field name="domain">[('company_id', 'in', company_ids)]</field>
+    </record>
     <record id="edi_retention_company_rule" model="ir.access">
         <field name="name">UAE retention company isolation</field>
         <field name="model_id" ref="model_l10n_ae_edi_retention" />

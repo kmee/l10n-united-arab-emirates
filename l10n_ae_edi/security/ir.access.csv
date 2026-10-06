@@ -1,4 +1,7 @@
 id,name,model_id,group_id/id,operation,domain
+access_uae_deadline_manager,UAE deadline manager,l10n_ae.edi.deadline,account.group_account_manager,crud,
+access_uae_deadline_accountant,UAE deadline accountant,l10n_ae.edi.deadline,account.group_account_readonly,r,
+access_uae_deadline_invoice,UAE deadline invoice reader,l10n_ae.edi.deadline,account.group_account_invoice,r,
 access_uae_retention_manager,UAE retention manager,l10n_ae.edi.retention,account.group_account_manager,crud,
 access_uae_retention_hold_wizard_manager,UAE retention hold dialog,l10n_ae.edi.retention.hold.wizard,account.group_account_manager,crud,
 access_uae_retention_release_wizard_manager,UAE retention release dialog,l10n_ae.edi.retention.release.wizard,account.group_account_manager,crud,

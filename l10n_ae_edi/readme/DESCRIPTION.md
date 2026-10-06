@@ -4,3 +4,10 @@ Authenticated fiscal evidence packages include reviewed retention obligations an
 complete hold/release history in a versioned appendix. Native read and Data Export
 rights apply to every linked row; restricted history refuses export. Classification
 does not change the original fiscal bytes or authorize deletion.
+
+Reviewed document deadlines retain an explicit rule, event, calendar, dates and owner.
+Native read-only assessments distinguish API receipts from complete confirmations.
+Internal reminders use the current UAE date, native activities and a bounded scheduled
+action; duplicate requests preserve one reminder. A record requiring review does not
+block other eligible reminders. No legal date is inferred from the invoice date and
+no internal reminder dispatches or reports a fiscal document.
