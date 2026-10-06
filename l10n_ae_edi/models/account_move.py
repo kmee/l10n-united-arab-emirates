@@ -149,6 +149,12 @@ class AccountMove(models.Model):
     )
     l10n_ae_ecommerce = fields.Boolean(string="Supply Through E-Commerce", copy=False)
     l10n_ae_exports = fields.Boolean(string="Exports", copy=False)
+    l10n_ae_export_buyer_no_peppol = fields.Boolean(
+        string="Export Buyer Not Registered in Peppol",
+        copy=False,
+        help="Confirm the reviewed recipient status for this export. "
+        "Missing data or a failed lookup is insufficient.",
+    )
     l10n_ae_buyer_not_implemented = fields.Boolean(
         string="UAE Business Buyer Not Yet Implemented",
         copy=False,
@@ -326,6 +332,7 @@ class AccountMove(models.Model):
             "l10n_ae_credit_reason",
             "l10n_ae_credit_reference_ids",
             "l10n_ae_buyer_not_implemented",
+            "l10n_ae_export_buyer_no_peppol",
             "l10n_ae_buyer_onboarding_review_date",
             "l10n_ae_buyer_onboarding_review_reference",
         } | set(UAE_TRANSACTION_FLAG_FIELDS)
@@ -367,6 +374,14 @@ class AccountMove(models.Model):
 
     def _l10n_ae_destination_override(self):
         self.ensure_one()
+        buyer = (
+            self.company_id.partner_id
+            if self.is_self_billing
+            else self.partner_id.commercial_partner_id
+        )
+        destination = self._l10n_ae_export_destination(buyer)
+        if destination:
+            return destination
         if self.l10n_ae_buyer_not_implemented and (
             self.l10n_ae_deemed_supply or self.l10n_ae_exports or self.is_self_billing
         ):
@@ -431,6 +446,72 @@ class AccountMove(models.Model):
             "reason": "deemed_supply",
         }
 
+    def _l10n_ae_export_destination(self, buyer):
+        if self.l10n_ae_exports and self.l10n_ae_document_category == "commercial":
+            raise UserError(
+                self.env._(
+                    "Exports do not apply to a commercial invoice or credit note "
+                    "under UAE Electronic Invoicing Guidelines section 10.4. "
+                    "Review the document category and transaction classification."
+                )
+            )
+        if self.l10n_ae_export_buyer_no_peppol:
+            if not self.l10n_ae_exports:
+                raise UserError(
+                    self.env._(
+                        "Select Exports before confirming a non-Peppol export buyer."
+                    )
+                )
+            if self.l10n_ae_buyer_not_implemented:
+                raise UserError(
+                    self.env._(
+                        "Review the conflicting buyer status declarations before "
+                        "selecting a predefined destination."
+                    )
+                )
+            if self.l10n_ae_deemed_supply:
+                raise UserError(
+                    self.env._(
+                        "Review the combined export and deemed-supply routing policy "
+                        "before selecting a predefined destination."
+                    )
+                )
+            if buyer.routing_endpoint:
+                raise UserError(
+                    self.env._(
+                        "Review the existing Participant ID before confirming "
+                        "a non-Peppol export buyer. It cannot be replaced by "
+                        "a predefined destination."
+                    )
+                )
+            if (
+                not self.l10n_ae_buyer_onboarding_review_date
+                or not (self.l10n_ae_buyer_onboarding_review_reference or "").strip()
+            ):
+                raise UserError(
+                    self.env._(
+                        "Record the export buyer status review date and source "
+                        "before using the predefined export destination."
+                    )
+                )
+            return {
+                "scheme": "0235",
+                "endpoint": "9900000099",
+                "reason": "export_buyer_no_peppol",
+            }
+        if (
+            self.l10n_ae_exports
+            and not buyer.routing_endpoint
+            and not self.l10n_ae_buyer_not_implemented
+        ):
+            raise UserError(
+                self.env._(
+                    "Review the export buyer's Peppol status. Missing endpoint "
+                    "data does not establish that the recipient is unregistered."
+                )
+            )
+        return None
+
     def _l10n_ae_snapshot(self):
         self.ensure_one()
         company = self.company_id
@@ -441,6 +522,11 @@ class AccountMove(models.Model):
             return str(Decimal(str(value)).quantize(scale))
 
         def party(record):
+            foreign_identifier = (
+                record._get_preferred_legal_entity_identifier_vals()
+                if record.country_id.code != "AE"
+                else {}
+            )
             return {
                 "name": record.name,
                 "vat": record.vat or None,
@@ -456,11 +542,15 @@ class AccountMove(models.Model):
                 "endpoint": record.routing_endpoint or None
                 if "routing_endpoint" in record._fields
                 else None,
-                "legal_registration": record._l10n_ae_legal_registration_number()
+                "legal_registration": foreign_identifier.get("value")
+                or record._l10n_ae_legal_registration_number()
                 or None,
-                "legal_registration_type": record.l10n_ae_registration_type or None,
+                "legal_registration_type": foreign_identifier.get("key")
+                or record.l10n_ae_registration_type
+                or None,
                 "legal_registration_authority": record.l10n_ae_registration_authority
                 or None,
+                "additional_identifiers": dict(record.additional_identifiers or {}),
             }
 
         company_party = {**party(company.partner_id), "tin": company.l10n_ae_tin}
@@ -477,13 +567,17 @@ class AccountMove(models.Model):
             "destination": destination,
             "exchange_mode": "reporting_only" if destination else "exchange",
             "buyer_onboarding_review": {
-                "status": "not_implemented",
+                "status": (
+                    "not_registered_in_peppol"
+                    if self.l10n_ae_export_buyer_no_peppol
+                    else "not_implemented"
+                ),
                 "date": fields.Date.to_string(
                     self.l10n_ae_buyer_onboarding_review_date
                 ),
                 "source": self.l10n_ae_buyer_onboarding_review_reference,
             }
-            if self.l10n_ae_buyer_not_implemented
+            if self.l10n_ae_buyer_not_implemented or self.l10n_ae_export_buyer_no_peppol
             else None,
             "alternative_delivery": {
                 "required": True,

@@ -96,6 +96,10 @@
                             readonly="l10n_ae_transmission_id or l10n_ae_received_document"
                         />
                         <field
+                            name="l10n_ae_exports"
+                            readonly="l10n_ae_transmission_id or l10n_ae_received_document"
+                        />
+                        <field
                             name="l10n_ae_beneficiary_id"
                             invisible="not l10n_ae_free_zone"
                             required="l10n_ae_free_zone"
@@ -127,15 +131,20 @@
                             readonly="l10n_ae_transmission_id or l10n_ae_received_document"
                         />
                         <field
+                            name="l10n_ae_export_buyer_no_peppol"
+                            invisible="not l10n_ae_exports"
+                            readonly="l10n_ae_transmission_id or l10n_ae_received_document"
+                        />
+                        <field
                             name="l10n_ae_buyer_onboarding_review_date"
-                            invisible="not l10n_ae_buyer_not_implemented"
-                            required="l10n_ae_buyer_not_implemented"
+                            invisible="not l10n_ae_buyer_not_implemented and not l10n_ae_export_buyer_no_peppol"
+                            required="l10n_ae_buyer_not_implemented or l10n_ae_export_buyer_no_peppol"
                             readonly="l10n_ae_transmission_id or l10n_ae_received_document"
                         />
                         <field
                             name="l10n_ae_buyer_onboarding_review_reference"
-                            invisible="not l10n_ae_buyer_not_implemented"
-                            required="l10n_ae_buyer_not_implemented"
+                            invisible="not l10n_ae_buyer_not_implemented and not l10n_ae_export_buyer_no_peppol"
+                            required="l10n_ae_buyer_not_implemented or l10n_ae_export_buyer_no_peppol"
                             readonly="l10n_ae_transmission_id or l10n_ae_received_document"
                         />
                         <label
