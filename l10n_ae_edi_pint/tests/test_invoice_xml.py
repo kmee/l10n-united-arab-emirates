@@ -206,6 +206,473 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
                 ),
             )
 
+    def test_new_commercial_issue_keeps_b_package_when_deployment_returns_to_a(self):
+        # Three separate ordinary supplies: AED100/200/300, O/0%, VAT0;
+        # exclusive/inclusive/payable equals each independently chosen amount.
+        self.env.company.partner_id.vat = False
+        tax = self.tax_sale_a.copy(
+            {
+                "name": "Synthetic reverse-cycle O",
+                "amount": 0,
+                "ubl_cii_tax_category_code": "O",
+            }
+        )
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {"name": "Synthetic new-document version cycle"}
+        )
+        packages = [
+            ("kmee-pint-ae-1.0.3-ubl-2.1", "/opt/uae-addons/.runtime/normative-1.0.3"),
+            ("kmee-pint-ae-1.0.4-ubl-2.1", "/opt/uae-addons/.runtime/normative"),
+        ]
+        originals = []
+        cycle = []
+        for index, (amount, package) in enumerate(
+            [(100, packages[0]), (200, packages[1]), (300, packages[0])], start=1
+        ):
+            with patch.dict(
+                os.environ,
+                {
+                    "KMEE_UAE_NORMATIVE_RULESET": package[0],
+                    "KMEE_UAE_NORMATIVE_DIR": package[1],
+                },
+            ):
+                move = self.init_invoice("out_invoice", amounts=[amount], taxes=tax)
+                move.write(
+                    {
+                        "l10n_ae_document_category": "commercial",
+                        "l10n_ae_binding_id": binding.id,
+                        "l10n_ae_fiscal_uuid": f"abababac-2222-4222-8222-{index:012d}",
+                    }
+                )
+                move = move.with_user(self.simple_accountman).with_context(
+                    allowed_company_ids=[self.env.company.id]
+                )
+                self.assertFalse(move.env.su)
+                move.action_post()
+                move.action_l10n_ae_prepare()
+                report = move.validate_l10n_ae_pint()
+                self.assertTrue(report["valid"], report)
+                self.assertEqual(report["profile"], "billing")
+                self.assertEqual(report["ruleset"], package[0])
+                issue = move.l10n_ae_transmission_id
+                pin = json.loads(issue.payload)["normative"]
+                self.assertEqual(
+                    pin,
+                    {
+                        "ruleset": package[0],
+                        "manifest_sha256": report["resources"]["manifest_sha256"],
+                    },
+                )
+                self.assertEqual(
+                    (move.amount_untaxed, move.amount_tax, move.amount_total),
+                    (amount, 0, amount),
+                )
+                xml = etree.fromstring(issue.xml_content.encode())
+                self.assertEqual(
+                    xml.findtext("cbc:InvoiceTypeCode", namespaces=NS), "480"
+                )
+                for term in [
+                    "TaxExclusiveAmount",
+                    "TaxInclusiveAmount",
+                    "PayableAmount",
+                ]:
+                    self.assertEqual(
+                        Decimal(
+                            xml.findtext(
+                                f"cac:LegalMonetaryTotal/cbc:{term}", namespaces=NS
+                            )
+                        ),
+                        Decimal(amount),
+                    )
+                self.assertEqual(
+                    Decimal(xml.findtext("cac:TaxTotal/cbc:TaxAmount", namespaces=NS)),
+                    0,
+                )
+                subtotals = xml.findall("cac:TaxTotal/cac:TaxSubtotal", namespaces=NS)
+                self.assertEqual(len(subtotals), 1)
+                self.assertEqual(
+                    subtotals[0].findtext("cac:TaxCategory/cbc:ID", namespaces=NS), "O"
+                )
+                self.assertEqual(
+                    Decimal(subtotals[0].findtext("cbc:TaxableAmount", namespaces=NS)),
+                    Decimal(amount),
+                )
+                self.assertEqual(
+                    Decimal(subtotals[0].findtext("cbc:TaxAmount", namespaces=NS)), 0
+                )
+                self.assertEqual(
+                    xml.findtext(
+                        "cac:InvoiceLine/cac:Item/cac:ClassifiedTaxCategory/cbc:ID",
+                        namespaces=NS,
+                    ),
+                    "O",
+                )
+                emitted_sha = hashlib.sha256(issue.xml_content.encode()).hexdigest()
+                self.assertEqual(issue.xml_hash, emitted_sha)
+                originals.append(
+                    {
+                        "move": move,
+                        "issue": issue,
+                        "report": report,
+                        "amount": amount,
+                        "pin": pin,
+                        "facts": (
+                            issue.id,
+                            issue.payload,
+                            issue.xml_content,
+                            issue.idempotency_key,
+                            issue.create_date,
+                            issue.write_date,
+                        ),
+                        "ledger": move.line_ids.read(
+                            [
+                                "account_id",
+                                "currency_id",
+                                "debit",
+                                "credit",
+                                "balance",
+                                "amount_currency",
+                                "tax_ids",
+                                "create_date",
+                                "write_date",
+                            ]
+                        ),
+                    }
+                )
+                refusals = []
+                for prior in originals:
+                    old_move, old_issue = prior["move"], prior["issue"]
+                    if prior["pin"]["ruleset"] != package[0]:
+                        with self.assertRaisesRegex(UserError, "(?i)pinned.*package"):
+                            old_move.validate_l10n_ae_pint()
+                        refusals.append(old_issue.id)
+                    else:
+                        self.assertEqual(
+                            old_move.validate_l10n_ae_pint(), prior["report"]
+                        )
+                    self.assertEqual(
+                        old_move.l10n_ae_normative_ruleset, prior["pin"]["ruleset"]
+                    )
+                    self.assertEqual(
+                        old_move.l10n_ae_normative_manifest_sha256,
+                        prior["pin"]["manifest_sha256"],
+                    )
+                    self.assertEqual(
+                        old_move.preview_l10n_ae_pint(), old_issue.xml_content
+                    )
+                    self.assertEqual(
+                        old_move.line_ids.read(list(prior["ledger"][0].keys())),
+                        prior["ledger"],
+                    )
+                    self.assertEqual(
+                        (
+                            old_issue.id,
+                            old_issue.payload,
+                            old_issue.xml_content,
+                            old_issue.idempotency_key,
+                            old_issue.create_date,
+                            old_issue.write_date,
+                        ),
+                        prior["facts"],
+                    )
+                    self.assertEqual(old_move.l10n_ae_transmission_id, old_issue)
+                    self.assertFalse(old_issue.attempt_ids)
+                    self.assertFalse(old_issue.validation_receipt)
+                    self.assertFalse(old_issue.remote_id)
+                cycle.append(
+                    {
+                        "package": package[0],
+                        "new_issue": issue.id,
+                        "amounts": [amount, 0, amount],
+                        "pin": pin,
+                        "xml_sha256": emitted_sha,
+                        "refused_issues": refusals,
+                    }
+                )
+        self.assertEqual(len({item["issue"].id for item in originals}), 3)
+        self.assertEqual(len({item["issue"].idempotency_key for item in originals}), 3)
+        self.assertEqual(cycle[1]["refused_issues"], [originals[0]["issue"].id])
+        self.assertEqual(cycle[2]["refused_issues"], [originals[1]["issue"].id])
+        _logger.info(
+            "UAE_COMMERCIAL_REVERSE_VERSION=%s",
+            json.dumps(
+                {
+                    "cycle": cycle,
+                    "originals_preserved": True,
+                    "ledger_preserved": True,
+                    "scope": (
+                        "Three new public commercial issues; "
+                        "in-process configuration only"
+                    ),
+                },
+                sort_keys=True,
+            ),
+        )
+
+    def test_emitted_tax_credit_exposes_real_official_payment_rule_delta(self):
+        # Independent worksheet, no reconciliation: original100+5=105;
+        # partial consideration credit40+2=42. Both stay fully open.
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {"name": "Synthetic emitted tax-credit corpus"}
+        )
+        packages = [
+            ("kmee-pint-ae-1.0.3-ubl-2.1", "/opt/uae-addons/.runtime/normative-1.0.3"),
+            ("kmee-pint-ae-1.0.4-ubl-2.1", "/opt/uae-addons/.runtime/normative"),
+        ]
+        original = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a
+        ).with_user(self.simple_accountman)
+        self.assertFalse(original.env.su)
+        original.action_post()
+        credit = self.init_invoice("out_refund", amounts=[40], taxes=self.tax_sale_a)
+        credit.write(
+            {
+                "l10n_ae_binding_id": binding.id,
+                "l10n_ae_credit_reason": "DL8.61.1.C",
+                "l10n_ae_fiscal_uuid": "abababac-3333-4333-8333-333333333333",
+                "l10n_ae_credit_reference_ids": [
+                    (
+                        0,
+                        0,
+                        {
+                            "invoice_id": original.id,
+                            "allocated_net": 40,
+                            "allocated_tax": 2,
+                        },
+                    )
+                ],
+            }
+        )
+        credit = credit.with_user(self.simple_accountman).with_context(
+            allowed_company_ids=[self.env.company.id]
+        )
+        self.assertFalse(original.env.su)
+        self.assertFalse(credit.env.su)
+        with patch.dict(
+            os.environ,
+            {
+                "KMEE_UAE_NORMATIVE_RULESET": packages[1][0],
+                "KMEE_UAE_NORMATIVE_DIR": packages[1][1],
+            },
+        ):
+            credit.action_post()
+            credit.action_l10n_ae_prepare()
+            issue = credit.l10n_ae_transmission_id
+            public_b = credit.validate_l10n_ae_pint()
+            self.assertTrue(public_b["valid"], public_b)
+            self.assertEqual(public_b["ruleset"], packages[1][0])
+            self.assertEqual(public_b["profile"], "billing")
+            self.assertEqual(
+                (
+                    original.amount_untaxed,
+                    original.amount_tax,
+                    original.amount_total,
+                    original.amount_residual,
+                ),
+                (100, 5, 105, 105),
+            )
+            self.assertEqual(
+                (
+                    credit.amount_untaxed,
+                    credit.amount_tax,
+                    credit.amount_total,
+                    credit.amount_residual,
+                ),
+                (40, 2, 42, 42),
+            )
+            frozen = (
+                issue.id,
+                issue.payload,
+                issue.xml_content,
+                issue.idempotency_key,
+                issue.create_date,
+                issue.write_date,
+            )
+            ledger_fields = [
+                "account_id",
+                "partner_id",
+                "currency_id",
+                "debit",
+                "credit",
+                "balance",
+                "amount_currency",
+                "tax_ids",
+                "create_date",
+                "write_date",
+            ]
+            ledgers = [move.line_ids.read(ledger_fields) for move in (original, credit)]
+            emitted = issue.xml_content.encode()
+            emitted_sha = hashlib.sha256(emitted).hexdigest()
+            self.assertEqual(issue.xml_hash, emitted_sha)
+            xml = etree.fromstring(emitted)
+            self.assertEqual(etree.QName(xml).localname, "CreditNote")
+            self.assertEqual(
+                xml.findtext("cbc:CreditNoteTypeCode", namespaces=NS), "381"
+            )
+            self.assertEqual(
+                xml.findtext("cbc:ProfileExecutionID", namespaces=NS), "00000000"
+            )
+            self.assertEqual(
+                xml.findtext("cbc:CustomizationID", namespaces=NS),
+                "urn:peppol:pint:billing-1@ae-1",
+            )
+            self.assertEqual(
+                xml.findtext("cac:DiscrepancyResponse/cbc:ResponseCode", namespaces=NS),
+                "DL8.61.1.C",
+            )
+            self.assertEqual(
+                xml.findtext(
+                    "cac:BillingReference/cac:InvoiceDocumentReference/cbc:ID",
+                    namespaces=NS,
+                ),
+                original.name,
+            )
+            self.assertTrue(
+                xml.findall("cac:PaymentMeans/cbc:PaymentMeansCode", namespaces=NS)
+            )
+            for term, expected in [
+                ("TaxExclusiveAmount", 40),
+                ("TaxInclusiveAmount", 42),
+                ("PayableAmount", 42),
+            ]:
+                self.assertEqual(
+                    Decimal(
+                        xml.findtext(
+                            f"cac:LegalMonetaryTotal/cbc:{term}", namespaces=NS
+                        )
+                    ),
+                    Decimal(expected),
+                )
+            self.assertEqual(
+                Decimal(xml.findtext("cac:TaxTotal/cbc:TaxAmount", namespaces=NS)),
+                Decimal(2),
+            )
+            subtotals = xml.findall("cac:TaxTotal/cac:TaxSubtotal", namespaces=NS)
+            self.assertEqual(len(subtotals), 1)
+            self.assertEqual(
+                subtotals[0].findtext("cac:TaxCategory/cbc:ID", namespaces=NS), "S"
+            )
+            self.assertEqual(
+                Decimal(subtotals[0].findtext("cbc:TaxableAmount", namespaces=NS)),
+                Decimal(40),
+            )
+            self.assertEqual(
+                Decimal(subtotals[0].findtext("cbc:TaxAmount", namespaces=NS)),
+                Decimal(2),
+            )
+            self.assertEqual(
+                Decimal(
+                    subtotals[0].findtext("cac:TaxCategory/cbc:Percent", namespaces=NS)
+                ),
+                Decimal(5),
+            )
+            self.assertEqual(
+                xml.findtext(
+                    "cac:CreditNoteLine/cac:Item/cac:ClassifiedTaxCategory/cbc:ID",
+                    namespaces=NS,
+                ),
+                "S",
+            )
+            self.assertEqual(
+                Decimal(
+                    xml.findtext(
+                        "cac:CreditNoteLine/cac:ItemPriceExtension/cbc:Amount",
+                        namespaces=NS,
+                    )
+                ),
+                Decimal(42),
+            )
+            reports = []
+            for ruleset, directory in [packages[1], packages[0], packages[1]]:
+                # Compare the exact native output; never remove PaymentMeans
+                # or modify either official package to make the old one pass.
+                report = OfflinePintValidator(directory, ruleset=ruleset).validate(
+                    emitted
+                )
+                self.assertTrue(report["xsd_valid"], report)
+                self.assertEqual(report["xsd_errors"], [])
+                self.assertEqual(report["profile"], "billing")
+                self.assertEqual(report["ruleset"], ruleset)
+                failures = {
+                    failure["code"]
+                    for layer in report["layers"]
+                    for failure in layer["failures"]
+                }
+                if ruleset == packages[0][0]:
+                    self.assertFalse(report["valid"], report)
+                    self.assertEqual(failures, {"ibr-191-ae"}, report)
+                else:
+                    self.assertTrue(report["valid"], report)
+                    self.assertEqual(failures, set())
+                reports.append(report)
+            self.assertEqual(reports[0], reports[2])
+            self.assertEqual(public_b, reports[0])
+            self.assertNotEqual(
+                reports[0]["resources"]["manifest_sha256"],
+                reports[1]["resources"]["manifest_sha256"],
+            )
+            with patch.dict(
+                os.environ,
+                {
+                    "KMEE_UAE_NORMATIVE_RULESET": packages[0][0],
+                    "KMEE_UAE_NORMATIVE_DIR": packages[0][1],
+                },
+            ):
+                with self.assertRaisesRegex(UserError, "(?i)pinned.*package"):
+                    credit.validate_l10n_ae_pint()
+                self.assertEqual(credit.preview_l10n_ae_pint().encode(), emitted)
+                self.assertEqual(credit.l10n_ae_normative_ruleset, packages[1][0])
+            self.assertEqual(credit.validate_l10n_ae_pint(), public_b)
+            self.assertEqual(
+                json.loads(issue.payload)["normative"],
+                {
+                    "ruleset": packages[1][0],
+                    "manifest_sha256": public_b["resources"]["manifest_sha256"],
+                },
+            )
+            credit.action_l10n_ae_prepare()
+            self.assertEqual(credit.l10n_ae_transmission_id, issue)
+            self.assertEqual(
+                (
+                    issue.id,
+                    issue.payload,
+                    issue.xml_content,
+                    issue.idempotency_key,
+                    issue.create_date,
+                    issue.write_date,
+                ),
+                frozen,
+            )
+            self.assertEqual(
+                [move.line_ids.read(ledger_fields) for move in (original, credit)],
+                ledgers,
+            )
+            self.assertFalse(issue.attempt_ids)
+            self.assertFalse(issue.validation_receipt)
+            self.assertFalse(issue.remote_id)
+            _logger.info(
+                "UAE_EMITTED_TAX_CREDIT_VERSION=%s",
+                json.dumps(
+                    {
+                        "code": "381",
+                        "category": "S",
+                        "original_amounts": [100, 5, 105],
+                        "credit_amounts": [40, 2, 42],
+                        "credit_payable": 42,
+                        "original_residual": 105,
+                        "credit_residual": 42,
+                        "payment_means_present": True,
+                        "xml_sha256": emitted_sha,
+                        "operator_sudo": False,
+                        "reports": reports,
+                        "public_drift_refused": True,
+                        "ledger_preserved": True,
+                        "scope": "One native tax credit; in-process B/A/B only",
+                    },
+                    sort_keys=True,
+                ),
+            )
+
     def test_received_commercial_credit_pins_package_while_original_bill_is_missing(
         self,
     ):
