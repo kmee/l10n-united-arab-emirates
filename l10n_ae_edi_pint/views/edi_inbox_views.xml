@@ -72,6 +72,9 @@
                         <field name="identity_review_pending" />
                         <field name="event_review_pending" />
                     </group>
+                    <group string="Received Delivery" invisible="not delivery_summary">
+                        <field name="delivery_summary" readonly="1" nolabel="1" />
+                    </group>
                     <group string="Review Diagnostic" invisible="not diagnostic">
                         <field name="diagnostic" nolabel="1" />
                     </group>

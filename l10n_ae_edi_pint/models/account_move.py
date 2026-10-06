@@ -20,6 +20,17 @@ class AccountMove(models.Model):
         string="Received Invoice References",
         compute="_compute_l10n_ae_received_credit_reference_summary",
     )
+    l10n_ae_received_delivery_summary = fields.Text(
+        string="Received Delivery", compute="_compute_l10n_ae_received_delivery_summary"
+    )
+
+    @api.depends("l10n_ae_received_inbox_ids.delivery_snapshot")
+    def _compute_l10n_ae_received_delivery_summary(self):
+        for move in self:
+            original = move.l10n_ae_received_inbox_ids.sorted("id").filtered(
+                "delivery_snapshot"
+            )[:1]
+            move.l10n_ae_received_delivery_summary = original.delivery_summary or False
 
     @api.depends("l10n_ae_received_inbox_ids.credit_reference_snapshot")
     def _compute_l10n_ae_received_credit_reference_summary(self):

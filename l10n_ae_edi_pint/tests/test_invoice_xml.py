@@ -1889,6 +1889,177 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         bill.action_post()
         self.assertFalse(bill.l10n_ae_transmission_id)
 
+    def test_received_ecommerce_preserves_declared_delivery_separately_from_partners(
+        self,
+    ):
+        tree = self._received_test_xml()
+        tree.find("cbc:ProfileExecutionID", NS).text = "00000010"
+        tree.find("cbc:UUID", NS).text = "eeeeeeec-1111-4111-8111-111111111111"
+        delivery = tree.find("cac:Delivery", NS)
+        self.assertIsNotNone(delivery)
+        location = delivery.find("cac:DeliveryLocation", NS)
+        self.assertIsNotNone(location)
+        old_address = location.find("cac:Address", NS)
+        self.assertIsNotNone(old_address)
+        location.remove(old_address)
+        address = etree.SubElement(location, etree.QName(NS["cac"], "Address"))
+        for name, value in (
+            ("StreetName", "Synthetic delivery-only street"),
+            ("AdditionalStreetName", "Synthetic dock seven"),
+            ("CityName", "Dubai"),
+            ("PostalZone", "00000"),
+            ("CountrySubentity", "DXB"),
+        ):
+            etree.SubElement(address, etree.QName(NS["cbc"], name)).text = value
+        line = etree.SubElement(address, etree.QName(NS["cac"], "AddressLine"))
+        etree.SubElement(
+            line, etree.QName(NS["cbc"], "Line")
+        ).text = "Synthetic warehouse seven"
+        country = etree.SubElement(address, etree.QName(NS["cac"], "Country"))
+        etree.SubElement(
+            country, etree.QName(NS["cbc"], "IdentificationCode")
+        ).text = "AE"
+        content = etree.tostring(tree, encoding="UTF-8", xml_declaration=True)
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {"name": "Received e-commerce delivery"}
+        )
+        receiver = self.env["l10n_ae.edi.inbox"].with_user(self.simple_accountman)
+        inbox = receiver.receive_controlled_document(
+            binding.id, "ecommerce-delivery-one", content
+        )
+        processed = inbox.action_process()
+        report = json.loads(inbox.processing_history_ids.validation_report)
+        # The gate, not a malformed fixture, must account for the first RED.
+        self.assertTrue(report["xsd_valid"], report)
+        self.assertTrue(report["valid"], report)
+        self.assertTrue(processed, inbox.diagnostic)
+        bill = inbox.move_id
+        self.assertEqual((bill.move_type, bill.state), ("in_invoice", "draft"))
+        self.assertEqual(bill.partner_id, self.partner_a)
+        self.assertEqual(bill.company_id, self.env.company)
+        self.assertTrue(bill.l10n_ae_ecommerce)
+        self.assertEqual(
+            (bill.amount_untaxed, bill.amount_tax, bill.amount_total), (100, 5, 105)
+        )
+        self.assertEqual(inbox.original_xml.content, content)
+        self.assertEqual(
+            bill.l10n_ae_fiscal_uuid, "eeeeeeec-1111-4111-8111-111111111111"
+        )
+        expected_address = {
+            "street_name": "Synthetic delivery-only street",
+            "additional_street_name": "Synthetic dock seven",
+            "address_lines": ["Synthetic warehouse seven"],
+            "city_name": "Dubai",
+            "postal_zone": "00000",
+            "country_subentity": "DXB",
+            "country_subentity_code": False,
+            "country_code": "AE",
+            "country_name": False,
+        }
+        self.assertEqual(inbox.delivery_snapshot["address"], expected_address)
+        self.assertIn("Synthetic delivery-only street", inbox.delivery_summary)
+        self.assertEqual(bill.l10n_ae_received_delivery_summary, inbox.delivery_summary)
+        for party in (bill.partner_id, self.env.company.partner_id):
+            self.assertNotEqual(
+                inbox.delivery_snapshot["address"]["street_name"], party.street
+            )
+        snapshot = inbox.delivery_snapshot
+        self.partner_a.street = "Later edited supplier billing street"
+        self.env.company.partner_id.street = "Later edited buyer billing street"
+        self.assertEqual(inbox.delivery_snapshot, snapshot)
+        self.assertIn(
+            "Synthetic warehouse seven", bill.l10n_ae_received_delivery_summary
+        )
+        with self.assertRaises(UserError):
+            inbox.write({"delivery_snapshot": {"address": {"street_name": "Forged"}}})
+        with self.assertRaisesRegex(UserError, "received"):
+            bill.write({"l10n_ae_ecommerce": False})
+        replay = receiver.receive_controlled_document(
+            binding.id, "ecommerce-delivery-one", content
+        )
+        self.assertEqual(replay, inbox)
+        self.assertTrue(replay.action_process())
+        self.assertEqual(len(inbox.processing_history_ids), 1)
+        other_reference = receiver.receive_controlled_document(
+            binding.id, "ecommerce-delivery-two", content
+        )
+        self.assertTrue(other_reference.action_process(), other_reference.diagnostic)
+        self.assertEqual(other_reference.move_id, bill)
+        self.assertEqual(other_reference.delivery_snapshot, snapshot)
+        self.assertFalse(bill.l10n_ae_transmission_id)
+        self.assertEqual(
+            self.env["account.move"].search_count(
+                [
+                    ("company_id", "=", self.env.company.id),
+                    ("l10n_ae_received_document", "=", True),
+                    (
+                        "l10n_ae_fiscal_uuid",
+                        "=",
+                        "eeeeeeec-1111-4111-8111-111111111111",
+                    ),
+                ]
+            ),
+            1,
+        )
+        with self.assertRaises(AccessError):
+            inbox.read(["evidence_archive"])
+        auditor = new_test_user(
+            self.env,
+            login="synthetic-ecommerce-delivery-auditor",
+            groups="l10n_ae_edi.group_fiscal_auditor,base.group_allow_export",
+            company_id=self.env.company.id,
+            company_ids=self.env.company.ids,
+        )
+        audit = inbox.with_user(auditor)
+        with zipfile.ZipFile(io.BytesIO(audit.evidence_archive.content)) as archive:
+            exported_delivery = archive.read("delivery.json")
+            self.assertEqual(json.loads(exported_delivery), snapshot)
+            self.assertEqual(archive.read("document.xml"), content)
+            manifest = json.loads(archive.read("manifest.json"))
+            self.assertEqual(
+                manifest["artifacts"]["delivery.json"]["sha256"],
+                hashlib.sha256(exported_delivery).hexdigest(),
+            )
+
+    def test_received_ecommerce_delivery_is_visible_in_native_review_forms(self):
+        tree = self._received_test_xml()
+        tree.find("cbc:ProfileExecutionID", NS).text = "00000010"
+        tree.find("cbc:UUID", NS).text = "eeeeeeed-1111-4111-8111-111111111111"
+        location = tree.find("cac:Delivery/cac:DeliveryLocation", NS)
+        self.assertIsNotNone(location)
+        location.remove(location.find("cac:Address", NS))
+        address = etree.SubElement(location, etree.QName(NS["cac"], "Address"))
+        for name, value in (
+            ("StreetName", "Synthetic native delivery street"),
+            ("CityName", "Dubai"),
+            ("CountrySubentity", "DXB"),
+        ):
+            etree.SubElement(address, etree.QName(NS["cbc"], name)).text = value
+        country = etree.SubElement(address, etree.QName(NS["cac"], "Country"))
+        etree.SubElement(
+            country, etree.QName(NS["cbc"], "IdentificationCode")
+        ).text = "AE"
+        content = etree.tostring(tree, encoding="UTF-8", xml_declaration=True)
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {"name": "Received native e-commerce review"}
+        )
+        inbox = (
+            self.env["l10n_ae.edi.inbox"]
+            .with_user(self.simple_accountman)
+            .receive_controlled_document(binding.id, "ecommerce-native-review", content)
+        )
+        self.assertTrue(inbox.action_process(), inbox.diagnostic)
+        report = json.loads(inbox.processing_history_ids.validation_report)
+        self.assertTrue(report["valid"], report)
+        review = Form(inbox)
+        self.assertIn("Synthetic native delivery street", review.delivery_summary)
+        bill = Form(inbox.move_id)
+        self.assertEqual(
+            bill.l10n_ae_received_delivery_summary, review.delivery_summary
+        )
+        self.assertEqual(inbox.move_id.state, "draft")
+        self.assertEqual(inbox.original_xml.content, content)
+
     def _received_test_xml(self, source=None):
         if source is None:
             source = self.init_invoice(

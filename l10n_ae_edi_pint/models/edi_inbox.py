@@ -5,6 +5,8 @@ import os
 import re
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 
+from lxml import etree
+
 from odoo import api, fields, models
 from odoo.exceptions import AccessError, UserError
 from odoo.tools.binary import BinaryBytes
@@ -79,6 +81,27 @@ class UaeEdiInbox(models.Model):
         string="Received Invoice References",
         compute="_compute_credit_reference_summary",
     )
+    delivery_snapshot = fields.Json(readonly=True)
+    delivery_summary = fields.Text(
+        string="Received Delivery", compute="_compute_delivery_summary"
+    )
+
+    @api.depends("delivery_snapshot")
+    def _compute_delivery_summary(self):
+        for inbox in self:
+            address = (inbox.delivery_snapshot or {}).get("address", {})
+            values = [
+                address.get("street_name"),
+                address.get("additional_street_name"),
+                *address.get("address_lines", []),
+                address.get("city_name"),
+                address.get("postal_zone"),
+                address.get("country_subentity"),
+                address.get("country_subentity_code"),
+                address.get("country_code"),
+                address.get("country_name"),
+            ]
+            inbox.delivery_summary = "\n".join(filter(None, values)) or False
 
     @api.depends("credit_reference_snapshot")
     def _compute_credit_reference_summary(self):
@@ -389,9 +412,16 @@ class UaeEdiInbox(models.Model):
             and type_code in (("381", "81") if is_credit else ("380", "480"))
         )
         transaction_flags = tree.findtext("./{*}ProfileExecutionID")
+        ecommerce_invoice = (
+            transaction_flags == "00000010"
+            and not selfbilling
+            and not is_credit
+            and type_code == "380"
+        )
         if (
             not supported
             or transaction_flags not in ("00000000", "10000000", "00000100", "10000100")
+            and not ecommerce_invoice
             or not is_credit
             and float(tree.findtext("./{*}LegalMonetaryTotal/{*}PrepaidAmount") or 0)
             != 0
@@ -399,6 +429,7 @@ class UaeEdiInbox(models.Model):
             raise UserError(
                 self.env._("This received UAE scenario requires review before import.")
             )
+        delivery_snapshot = self._received_delivery_snapshot(tree)
         currency_code = tree.findtext("./{*}DocumentCurrencyCode")
         currency = self.env["res.currency"].search(
             [("name", "=", currency_code), ("active", "=", True)], limit=1
@@ -442,8 +473,12 @@ class UaeEdiInbox(models.Model):
                 limit=1,
             )
             if len(prior) == 1 and same_bytes:
+                references = same_bytes.credit_reference_snapshot
                 super(UaeEdiInbox, self.sudo()).write(
-                    {"credit_reference_snapshot": same_bytes.credit_reference_snapshot}
+                    {
+                        "credit_reference_snapshot": references,
+                        "delivery_snapshot": same_bytes.delivery_snapshot,
+                    }
                 )
                 return prior
             raise UserError(
@@ -500,6 +535,7 @@ class UaeEdiInbox(models.Model):
             "l10n_ae_fiscal_uuid": tree.findtext("./{*}UUID"),
             "l10n_ae_free_zone": transaction_flags[0] == "1",
             "l10n_ae_disclosed_agent": transaction_flags[5] == "1",
+            "l10n_ae_ecommerce": transaction_flags[6] == "1",
             "l10n_ae_principal_id": principal_id,
             "l10n_ae_beneficiary_id": beneficiary_id,
             "l10n_ae_received_currency_id": currency.id,
@@ -552,7 +588,10 @@ class UaeEdiInbox(models.Model):
                     )
                 )
         super(UaeEdiInbox, self.sudo()).write(
-            {"credit_reference_snapshot": reference_snapshot}
+            {
+                "credit_reference_snapshot": reference_snapshot,
+                "delivery_snapshot": delivery_snapshot,
+            }
         )
         self.env["ir.attachment"].create(
             {
@@ -564,6 +603,75 @@ class UaeEdiInbox(models.Model):
             }
         )
         return move
+
+    def _received_delivery_snapshot(self, tree):
+        flags = tree.findtext("./{*}ProfileExecutionID") or ""
+        if len(flags) != 8 or flags[6] != "1":
+            return False
+        deliveries = tree.findall("./{*}Delivery")
+        if len(deliveries) != 1:
+            raise UserError(
+                self.env._(
+                    "Review the received e-commerce delivery: select one delivery."
+                )
+            )
+        delivery = deliveries[0]
+        locations = delivery.findall("./{*}DeliveryLocation")
+        if len(locations) != 1:
+            raise UserError(
+                self.env._("Review the received e-commerce delivery location.")
+            )
+        addresses = locations[0].findall("./{*}Address")
+        if len(addresses) != 1:
+            raise UserError(
+                self.env._("Review the received e-commerce delivery address.")
+            )
+        address = addresses[0]
+        if not all(
+            (address.findtext("./{*}" + name) or "").strip()
+            for name in ("StreetName", "CityName", "CountrySubentity")
+        ):
+            raise UserError(
+                self.env._(
+                    "Received e-commerce delivery requires street, city "
+                    "and subdivision."
+                )
+            )
+        values = {
+            key: address.findtext(path) or False
+            for key, path in (
+                ("street_name", "./{*}StreetName"),
+                ("additional_street_name", "./{*}AdditionalStreetName"),
+                ("city_name", "./{*}CityName"),
+                ("postal_zone", "./{*}PostalZone"),
+                ("country_subentity", "./{*}CountrySubentity"),
+                ("country_subentity_code", "./{*}CountrySubentityCode"),
+                ("country_code", "./{*}Country/{*}IdentificationCode"),
+                ("country_name", "./{*}Country/{*}Name"),
+            )
+        }
+        values["address_lines"] = [
+            node.text or "" for node in address.findall("./{*}AddressLine/{*}Line")
+        ]
+        return {
+            "original_xml_sha256": self.xml_hash,
+            "address": values,
+            "actual_delivery_date": delivery.findtext("./{*}ActualDeliveryDate")
+            or False,
+            "location_identifiers": [
+                {"value": node.text or False, "attributes": dict(node.attrib)}
+                for node in locations[0].findall("./{*}ID")
+            ],
+            "party_identifiers": [
+                {"value": node.text or False, "attributes": dict(node.attrib)}
+                for node in delivery.findall(
+                    "./{*}DeliveryParty/{*}PartyIdentification/{*}ID"
+                )
+            ],
+            "delivery_xml": etree.tostring(
+                delivery, encoding="unicode", with_tail=False
+            ),
+        }
 
     def _received_beneficiary_id(self, tree):
         nodes = tree.findall("./{*}BuyerCustomerParty")

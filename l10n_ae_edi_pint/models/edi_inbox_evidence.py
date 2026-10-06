@@ -9,6 +9,7 @@ from odoo import api, fields, models
 from odoo.exceptions import AccessError, UserError
 from odoo.tools.binary import BinaryBytes
 
+from ..tools.validation import parse_invoice_xml
 from .edi_inbox import UaeEdiInbox
 from .edi_inbox_event_decision import UaeInboxEventDecision
 from .edi_inbox_identity import UaeInboxIdentityDecision
@@ -66,6 +67,7 @@ class UaeEdiInboxEvidence(models.Model):
         "ingestion_event_ids",
         "move_id",
         "credit_reference_snapshot",
+        "delivery_snapshot",
         "processing_history_ids",
         "processing_history_ids.validation_report_hash",
         "retention_ids",
@@ -78,6 +80,20 @@ class UaeEdiInboxEvidence(models.Model):
             inbox.evidence_archive = BinaryBytes(
                 inbox._build_received_evidence_archive()
             )
+
+    def _received_delivery_archive_value(self):
+        self.ensure_one()
+        if self.move_id:
+            expected = self._received_delivery_snapshot(
+                parse_invoice_xml(self.original_xml.content)
+            )
+            if self.delivery_snapshot != expected:
+                raise UserError(
+                    self.env._(
+                        "Received delivery evidence does not match the original XML."
+                    )
+                )
+        return self.delivery_snapshot or {}
 
     def _build_received_evidence_archive(
         self, include_identity=True, include_ingestion=True
@@ -167,6 +183,7 @@ class UaeEdiInboxEvidence(models.Model):
                 )
         preserve_json("processing-history.json", metadata)
         preserve_json("credit-references.json", inbox.credit_reference_snapshot or [])
+        preserve_json("delivery.json", inbox._received_delivery_archive_value())
         retention = inbox.env["l10n_ae.edi.retention"]._evidence_appendix(
             inbox, "inbox_id"
         )
