@@ -77,21 +77,14 @@ class ControlledInboxWorker:
         ).lookup_inbound(tin, remote_id, event_id=event_id)
         if receipt is None:
             with self.registry.cursor() as cursor:
-                self._binding(cursor, binding_id, process=process)
+                binding = self._binding(cursor, binding_id, process=process)
+                self._check_received_identity(binding, tin, provider)
             return {"state": "not_found", "inbox_id": None}
         for attempt in range(3):
             try:
                 with self.registry.cursor() as cursor:
                     binding = self._binding(cursor, binding_id, process=process)
-                    if (
-                        binding.provider != provider
-                        or binding.company_id.l10n_ae_tin != tin
-                    ):
-                        raise UserError(
-                            binding.env._(
-                                "The UAE receiving route changed during retrieval."
-                            )
-                        )
+                    self._check_received_identity(binding, tin, provider)
                     inbox = binding.env[
                         "l10n_ae.edi.inbox"
                     ].receive_controlled_document(
@@ -120,6 +113,18 @@ class ControlledInboxWorker:
             except SerializationFailure:
                 if attempt == 2:
                     raise
+
+    def _check_received_identity(self, binding, tin, provider):
+        if not binding.company_id.l10n_ae_tin_confirmed:
+            raise UserError(
+                binding.env._(
+                    "Confirm the UAE recipient TIN before retrieving documents."
+                )
+            )
+        if binding.provider != provider or binding.company_id.l10n_ae_tin != tin:
+            raise UserError(
+                binding.env._("The UAE receiving route changed during retrieval.")
+            )
 
     def _receiving_route(self, binding):
         tin = binding.company_id.l10n_ae_tin
