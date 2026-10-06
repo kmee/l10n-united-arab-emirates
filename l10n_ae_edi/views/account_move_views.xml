@@ -100,6 +100,10 @@
                             readonly="l10n_ae_transmission_id or l10n_ae_received_document"
                         />
                         <field
+                            name="l10n_ae_ecommerce"
+                            readonly="l10n_ae_transmission_id or l10n_ae_received_document"
+                        />
+                        <field
                             name="l10n_ae_beneficiary_id"
                             invisible="not l10n_ae_free_zone"
                             required="l10n_ae_free_zone"
