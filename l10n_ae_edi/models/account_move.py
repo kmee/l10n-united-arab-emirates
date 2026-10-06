@@ -883,7 +883,12 @@ class AccountMove(models.Model):
                     not self.l10n_ae_fiscal_uuid
                     and binding.fiscal_uuid_policy == "controlled_local"
                 ):
-                    self.l10n_ae_fiscal_uuid = str(uuid.uuid4())
+                    # Fiscal identity assignment is metadata: native invoice
+                    # synchronization would recompute stored debit/credit fields
+                    # and touch accounting-line timestamps without a ledger edit.
+                    self.with_context(
+                        skip_invoice_sync=True, skip_is_manually_modified=True
+                    ).l10n_ae_fiscal_uuid = str(uuid.uuid4())
                     uuid_source = "controlled_local"
                 snapshot = self._l10n_ae_snapshot()
                 snapshot["fiscal_uuid_assignment"] = {
@@ -938,7 +943,12 @@ class AccountMove(models.Model):
                         }
                     )
                 )
-                super().write({"l10n_ae_transmission_id": transmission.id})
+                super(
+                    AccountMove,
+                    self.with_context(
+                        skip_invoice_sync=True, skip_is_manually_modified=True
+                    ),
+                ).write({"l10n_ae_transmission_id": transmission.id})
                 if correction:
                     correction.sudo()._complete(transmission)
         return {
