@@ -3,6 +3,7 @@
 import hashlib
 import io
 import json
+import logging
 import os
 import tempfile
 import uuid
@@ -18,6 +19,10 @@ from odoo.tests.common import new_test_user
 
 from odoo.addons.account.tests.common import AccountTestInvoicingCommon
 
+from ..tools.validation import OfflinePintValidator
+
+_logger = logging.getLogger(__name__)
+
 NS = {
     "cbc": "urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2",
     "cac": "urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2",
@@ -26,6 +31,181 @@ NS = {
 
 @tagged("post_install", "-at_install")
 class TestUaeInvoiceXml(AccountTestInvoicingCommon):
+    def test_emitted_commercial_invoice_preserves_package_across_official_cycle(self):
+        # Independent worksheet: one AED100 supply, category O/0%, VAT0,
+        # exclusive/inclusive/payable100. No allowance, advance or refund.
+        self.env.company.partner_id.vat = False
+        tax = self.tax_sale_a.copy(
+            {
+                "name": "Synthetic corpus O",
+                "amount": 0,
+                "ubl_cii_tax_category_code": "O",
+            }
+        )
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {"name": "Synthetic emitted corpus sandbox"}
+        )
+        invoice = self.init_invoice("out_invoice", amounts=[100], taxes=tax)
+        invoice.write(
+            {
+                "l10n_ae_document_category": "commercial",
+                "l10n_ae_binding_id": binding.id,
+                "l10n_ae_fiscal_uuid": "abababac-1111-4111-8111-111111111111",
+            }
+        )
+        invoice = invoice.with_user(self.simple_accountman).with_context(
+            allowed_company_ids=[self.env.company.id]
+        )
+        self.assertFalse(invoice.env.su)
+        packages = [
+            ("kmee-pint-ae-1.0.3-ubl-2.1", "/opt/uae-addons/.runtime/normative-1.0.3"),
+            ("kmee-pint-ae-1.0.4-ubl-2.1", "/opt/uae-addons/.runtime/normative"),
+        ]
+        with patch.dict(
+            os.environ,
+            {
+                "KMEE_UAE_NORMATIVE_RULESET": packages[0][0],
+                "KMEE_UAE_NORMATIVE_DIR": packages[0][1],
+            },
+        ):
+            invoice.action_post()
+            invoice.action_l10n_ae_prepare()
+            issue = invoice.l10n_ae_transmission_id
+            public_a = invoice.validate_l10n_ae_pint()
+            self.assertTrue(public_a["valid"], public_a)
+            self.assertEqual(public_a["profile"], "billing")
+            self.assertEqual(public_a["ruleset"], packages[0][0])
+            original = (
+                issue.id,
+                issue.payload,
+                issue.xml_content,
+                issue.idempotency_key,
+            )
+            ledger = invoice.line_ids.read(
+                [
+                    "account_id",
+                    "partner_id",
+                    "currency_id",
+                    "debit",
+                    "credit",
+                    "balance",
+                    "amount_currency",
+                    "tax_ids",
+                ]
+            )
+            self.assertEqual(
+                json.loads(issue.payload)["normative"],
+                {
+                    "ruleset": packages[0][0],
+                    "manifest_sha256": public_a["resources"]["manifest_sha256"],
+                },
+            )
+            emitted = issue.xml_content.encode("utf-8")
+            emitted_sha = hashlib.sha256(emitted).hexdigest()
+            self.assertEqual(issue.xml_hash, emitted_sha)
+            self.assertEqual(invoice.preview_l10n_ae_pint().encode(), emitted)
+            xml = etree.fromstring(emitted)
+            self.assertEqual(xml.findtext("cbc:InvoiceTypeCode", namespaces=NS), "480")
+            self.assertEqual(
+                xml.findtext("cbc:CustomizationID", namespaces=NS),
+                "urn:peppol:pint:billing-1@ae-1",
+            )
+            self.assertEqual(
+                xml.findtext("cbc:ProfileID", namespaces=NS), "urn:peppol:bis:billing"
+            )
+            for term in ["TaxExclusiveAmount", "TaxInclusiveAmount", "PayableAmount"]:
+                self.assertEqual(
+                    Decimal(
+                        xml.findtext(
+                            f"cac:LegalMonetaryTotal/cbc:{term}", namespaces=NS
+                        )
+                    ),
+                    Decimal(100),
+                )
+            self.assertEqual(
+                Decimal(xml.findtext("cac:TaxTotal/cbc:TaxAmount", namespaces=NS)), 0
+            )
+            subtotals = xml.findall("cac:TaxTotal/cac:TaxSubtotal", namespaces=NS)
+            self.assertEqual(len(subtotals), 1)
+            self.assertEqual(
+                subtotals[0].findtext("cac:TaxCategory/cbc:ID", namespaces=NS), "O"
+            )
+            self.assertEqual(
+                Decimal(subtotals[0].findtext("cbc:TaxableAmount", namespaces=NS)),
+                Decimal(100),
+            )
+            self.assertEqual(
+                Decimal(subtotals[0].findtext("cbc:TaxAmount", namespaces=NS)), 0
+            )
+            self.assertEqual(
+                xml.findtext(
+                    "cac:InvoiceLine/cac:Item/cac:ClassifiedTaxCategory/cbc:ID",
+                    namespaces=NS,
+                ),
+                "O",
+            )
+            self.assertEqual(
+                (invoice.amount_untaxed, invoice.amount_tax, invoice.amount_total),
+                (100, 0, 100),
+            )
+            reports = []
+            for ruleset, directory in [packages[0], packages[1], packages[0]]:
+                # Cross-check the exact frozen Odoo-emitted bytes at the public
+                # validator boundary; never modify XML or official resources.
+                report = OfflinePintValidator(directory, ruleset=ruleset).validate(
+                    emitted
+                )
+                self.assertTrue(report["valid"], report)
+                self.assertEqual(report["ruleset"], ruleset)
+                self.assertEqual(report["profile"], "billing")
+                self.assertEqual(report["xsd_errors"], [])
+                reports.append(report)
+            self.assertEqual(reports[0], reports[2])
+            self.assertNotEqual(
+                reports[0]["resources"]["manifest_sha256"],
+                reports[1]["resources"]["manifest_sha256"],
+            )
+            with patch.dict(
+                os.environ,
+                {
+                    "KMEE_UAE_NORMATIVE_RULESET": packages[1][0],
+                    "KMEE_UAE_NORMATIVE_DIR": packages[1][1],
+                },
+            ):
+                self.assertEqual(invoice.preview_l10n_ae_pint().encode(), emitted)
+                self.assertEqual(invoice.l10n_ae_normative_ruleset, packages[0][0])
+                with self.assertRaisesRegex(UserError, "(?i)pinned.*package"):
+                    invoice.validate_l10n_ae_pint()
+                self.assertEqual(invoice.line_ids.read(list(ledger[0].keys())), ledger)
+            self.assertEqual(invoice.validate_l10n_ae_pint(), public_a)
+            invoice.action_l10n_ae_prepare()
+            self.assertEqual(invoice.l10n_ae_transmission_id, issue)
+            self.assertEqual(
+                (issue.id, issue.payload, issue.xml_content, issue.idempotency_key),
+                original,
+            )
+            self.assertEqual(invoice.line_ids.read(list(ledger[0].keys())), ledger)
+            self.assertFalse(issue.attempt_ids)
+            self.assertFalse(issue.validation_receipt)
+            _logger.info(
+                "UAE_EMITTED_COMMERCIAL_VERSION=%s",
+                json.dumps(
+                    {
+                        "code": "480",
+                        "category": "O",
+                        "amounts": [100, 0, 100],
+                        "xml_sha256": emitted_sha,
+                        "operator_sudo": invoice.env.su,
+                        "reports": reports,
+                        "public_a": public_a,
+                        "public_drift_refused": True,
+                        "ledger_preserved": True,
+                        "scope": "One emitted vector; no full corpus/browser/ASP",
+                    },
+                    sort_keys=True,
+                ),
+            )
+
     def test_received_commercial_credit_pins_package_while_original_bill_is_missing(
         self,
     ):
