@@ -64,6 +64,9 @@ class UaeEdiInbox(models.Model):
         "inbox_id",
         readonly=True,
     )
+    internal_review_task_ids = fields.One2many(
+        "l10n_ae.edi.inbox.task", "inbox_id", readonly=True
+    )
     credit_reference_snapshot = fields.Json(readonly=True)
     credit_reference_summary = fields.Text(
         string="Received Invoice References",
@@ -275,6 +278,30 @@ class UaeEdiInbox(models.Model):
             "type": "ir.actions.act_window",
             "res_model": "account.move",
             "res_id": self.move_id.id,
+            "view_mode": "form",
+            "target": "current",
+        }
+
+    def action_request_review(self):
+        self.ensure_one()
+        current = self.with_user(self.env.uid).sudo(False)
+        current._check_operator()
+        current.check_access("read")
+        current._check_receiving_company(current.company_id)
+        current.env.cr.execute(
+            "SELECT id FROM l10n_ae_edi_binding WHERE id = %s FOR UPDATE",
+            [current.binding_id.id],
+        )
+        current.env.cr.execute(
+            "SELECT id FROM l10n_ae_edi_inbox WHERE id = %s FOR UPDATE", [current.id]
+        )
+        current.invalidate_recordset()
+        task = current.env["l10n_ae.edi.inbox.task"]._for_original(current)
+        task._notify_reviewer()
+        return {
+            "type": "ir.actions.act_window",
+            "res_model": "l10n_ae.edi.inbox.task",
+            "res_id": task.id,
             "view_mode": "form",
             "target": "current",
         }

@@ -1,4 +1,7 @@
 id,name,model_id,group_id/id,operation,domain
+access_uae_inbox_task_manager,UAE incoming review manager,l10n_ae.edi.inbox.task,account.group_account_manager,crud,
+access_uae_inbox_task_auditor,UAE incoming review audit,l10n_ae.edi.inbox.task,l10n_ae_edi.group_fiscal_auditor,r,
+access_uae_inbox_task_accountant,UAE incoming review reader,l10n_ae.edi.inbox.task,account.group_account_readonly,r,
 access_uae_inbox_auditor,UAE audit received document reader,l10n_ae.edi.inbox,l10n_ae_edi.group_fiscal_auditor,r,
 access_uae_inbox_accountant,UAE inbox accountant,l10n_ae.edi.inbox,account.group_account_readonly,r,
 access_uae_inbox_invoice,UAE inbox invoice user,l10n_ae.edi.inbox,account.group_account_invoice,r,

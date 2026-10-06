@@ -1,5 +1,13 @@
 <?xml version="1.0" encoding="UTF-8" ?>
 <odoo>
+    <record id="edi_inbox_task_company_rule" model="ir.access">
+        <field name="name">UAE received review company and original isolation</field>
+        <field name="model_id" ref="model_l10n_ae_edi_inbox_task" />
+        <field name="operation">crud</field>
+        <field
+            name="domain"
+        >[('company_id', 'in', company_ids), ('inbox_id', 'access', 'read')]</field>
+    </record>
     <record id="edi_inbox_company_rule" model="ir.access">
         <field name="name">UAE received document company isolation</field>
         <field name="model_id" ref="model_l10n_ae_edi_inbox" />

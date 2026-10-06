@@ -7,7 +7,9 @@ from . import edi_transmission
 from . import account_edi_inbound
 from . import edi_inbox
 from . import edi_inbox_review
+from . import edi_inbox_task
 from . import edi_inbox_evidence
 from . import edi_binding
 from . import res_partner
+from . import res_company
 from . import edi_retention

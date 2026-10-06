@@ -12,6 +12,13 @@
             >
                 <header>
                     <button
+                        name="action_request_review"
+                        type="object"
+                        string="Request Internal Review"
+                        groups="account.group_account_manager"
+                        invisible="state == 'processed'"
+                    />
+                    <button
                         name="action_process"
                         type="object"
                         string="Process Received Document"
@@ -61,6 +68,17 @@
                             readonly="1"
                             nolabel="1"
                         />
+                    </group>
+                    <group string="Internal Review Request" col="1">
+                        <field name="internal_review_task_ids" readonly="1" nolabel="1">
+                            <list create="false" edit="false" delete="false">
+                                <field name="state" />
+                                <field name="requested_at" />
+                                <field name="assigned_to_id" />
+                                <field name="assigned_at" />
+                                <field name="last_check_state" />
+                            </list>
+                        </field>
                     </group>
                     <group string="Processing History" col="1">
                         <field name="processing_history_ids" readonly="1" nolabel="1">

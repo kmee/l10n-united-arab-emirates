@@ -7,7 +7,7 @@ from decimal import Decimal
 
 from lxml import etree
 
-from odoo.exceptions import AccessError, UserError
+from odoo.exceptions import AccessError, UserError, ValidationError
 from odoo.tests import tagged
 from odoo.tests.common import new_test_user
 
@@ -21,6 +21,243 @@ NS = {
 
 @tagged("post_install", "-at_install")
 class TestUaeInvoiceXml(AccountTestInvoicingCommon):
+    def test_internal_review_preserves_authority_and_hidden_original_access(self):
+        reader = new_test_user(
+            self.env,
+            login="synthetic-internal-review-reader",
+            groups="account.group_account_readonly",
+            company_id=self.env.company.id,
+            company_ids=[(6, 0, self.env.company.ids)],
+        )
+        content = etree.tostring(self._received_test_xml())
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {"name": "Review source access"}
+        )
+        inbox = (
+            self.env["l10n_ae.edi.inbox"]
+            .with_user(self.simple_accountman)
+            .receive_controlled_document(binding.id, "review-access-original", content)
+        )
+        self.env.company.l10n_ae_inbox_reviewer_id = self.simple_accountman
+        action = inbox.with_context(
+            default_state="resolved",
+            default_requested_by_id=reader.id,
+            default_assigned_to_id=reader.id,
+            default_resolved_by_id=reader.id,
+            default_resolved_at="2000-01-01 00:00:00",
+        ).action_request_review()
+        task = self.env[action["res_model"]].browse(action["res_id"])
+        self.assertEqual(task.requested_by_id, self.simple_accountman)
+        self.assertEqual(task.assigned_to_id, self.simple_accountman)
+        self.assertEqual(task.state, "open")
+        self.assertFalse(task.resolved_by_id)
+        self.assertFalse(task.resolved_at)
+        self.assertEqual(
+            task.with_user(reader).read(["xml_hash"])[0]["xml_hash"], inbox.xml_hash
+        )
+        for elevated in (False, True):
+            current = task.with_user(reader).sudo(elevated)
+            with (
+                self.subTest(elevated=elevated),
+                self.assertRaises(AccessError),
+                self.cr.savepoint(),
+            ):
+                current.action_resolve_review()
+            with (
+                self.subTest(elevated=elevated),
+                self.assertRaises(AccessError),
+                self.cr.savepoint(),
+            ):
+                inbox.with_user(reader).sudo(elevated).action_request_review()
+        for values in (
+            {"state": "resolved"},
+            {"requested_by_id": reader.id},
+            {"next_check_at": "2000-01-01 00:00:00"},
+        ):
+            with self.assertRaises(UserError), self.cr.savepoint():
+                task.write(values)
+        with self.assertRaises(UserError), self.cr.savepoint():
+            task.copy()
+        with self.assertRaises(UserError), self.cr.savepoint():
+            task.unlink()
+        restriction = self.env["ir.access"].create(
+            {
+                "name": "Synthetic hidden original for internal review",
+                "model_id": self.env["ir.model"]._get("l10n_ae.edi.inbox").id,
+                "operation": "r",
+                "domain": f"[('id', '!=', {inbox.id})]",
+            }
+        )
+        try:
+            self.env.invalidate_all()
+            with self.assertRaises(AccessError):
+                task.with_user(self.simple_accountman).read(["xml_hash"])
+            self.assertFalse(
+                task.with_user(self.simple_accountman).search([("id", "=", task.id)])
+            )
+            with self.assertRaises(AccessError), self.cr.savepoint():
+                task.with_user(self.simple_accountman).sudo().action_resolve_review()
+        finally:
+            restriction.unlink()
+            self.env.invalidate_all()
+        self.assertEqual(inbox.original_xml.content, content)
+
+    def test_revoked_assigned_reviewer_requires_attention_without_reassignment(self):
+        reviewer = new_test_user(
+            self.env,
+            login="synthetic-revoked-incoming-reviewer",
+            groups="account.group_account_manager",
+            company_id=self.env.company.id,
+            company_ids=[(6, 0, self.env.company.ids)],
+        )
+        content = etree.tostring(self._received_test_xml())
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {"name": "Revoked review owner"}
+        )
+        inbox = (
+            self.env["l10n_ae.edi.inbox"]
+            .with_user(self.simple_accountman)
+            .receive_controlled_document(binding.id, "revoked-review-owner", content)
+        )
+        self.env.company.l10n_ae_inbox_reviewer_id = reviewer
+        action = inbox.action_request_review()
+        task = self.env[action["res_model"]].browse(action["res_id"])
+        assignment = (task.assigned_to_id.id, task.assigned_by_id.id, task.assigned_at)
+        activity_ids = task.activity_ids.ids
+        reviewer.active = False
+        self.env.company.l10n_ae_inbox_reviewer_id = self.simple_accountman
+        with self.assertRaises(ValidationError), self.cr.savepoint():
+            inbox.action_request_review()
+        self.assertEqual(
+            (task.assigned_to_id.id, task.assigned_by_id.id, task.assigned_at),
+            assignment,
+        )
+        self.assertEqual(task.activity_ids.ids, activity_ids)
+        self.assertEqual(task.state, "open")
+        self.assertEqual(inbox.original_xml.content, content)
+        self.assertFalse(inbox.move_id)
+
+    def test_processed_original_without_a_request_cannot_open_a_new_review(self):
+        content = etree.tostring(self._received_test_xml())
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {"name": "Already processed original"}
+        )
+        inbox = (
+            self.env["l10n_ae.edi.inbox"]
+            .with_user(self.simple_accountman)
+            .receive_controlled_document(
+                binding.id, "already-processed-original", content
+            )
+        )
+        self.assertTrue(inbox.action_process(), inbox.diagnostic)
+        self.env.company.l10n_ae_inbox_reviewer_id = self.simple_accountman
+        with self.assertRaises(UserError), self.cr.savepoint():
+            inbox.action_request_review()
+        self.assertFalse(inbox.internal_review_task_ids)
+        self.assertEqual(inbox.original_xml.content, content)
+
+    def test_supplier_recovery_resolves_internal_review_without_erasing_history(self):
+        content = etree.tostring(self._received_test_xml())
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {"name": "Synthetic incoming review resolution"}
+        )
+        self.partner_a.active = False
+        inbox = (
+            self.env["l10n_ae.edi.inbox"]
+            .with_user(self.simple_accountman)
+            .receive_controlled_document(
+                binding.id, "supplier-review-resolution", content
+            )
+        )
+        self.assertFalse(inbox.action_process())
+        self.env.company.l10n_ae_inbox_reviewer_id = self.simple_accountman
+        action = inbox.action_request_review()
+        task = (
+            self.env[action["res_model"]]
+            .with_user(self.simple_accountman)
+            .browse(action["res_id"])
+        )
+        with self.assertRaises(UserError), self.cr.savepoint():
+            task.action_resolve_review()
+        requested = (task.requested_by_id.id, task.requested_at)
+        assigned = (task.assigned_to_id.id, task.assigned_by_id.id, task.assigned_at)
+        unrelated = task.activity_schedule(
+            "mail.mail_activity_data_todo",
+            user_id=self.simple_accountman.id,
+            summary="Separate follow-up requiring a human decision",
+        )
+        self.partner_a.active = True
+        self.assertTrue(inbox.action_process(), inbox.diagnostic)
+        self.assertTrue(task.action_resolve_review())
+        self.assertEqual(task.state, "resolved")
+        self.assertEqual(task.resolved_by_id, self.simple_accountman)
+        self.assertTrue(task.resolved_at)
+        resolved = task.resolved_at
+        self.assertEqual(task.activity_ids, unrelated)
+        self.assertTrue(task.action_resolve_review())
+        self.assertEqual(task.resolved_at, resolved)
+        self.assertEqual((task.requested_by_id.id, task.requested_at), requested)
+        self.assertEqual(
+            (task.assigned_to_id.id, task.assigned_by_id.id, task.assigned_at), assigned
+        )
+        self.assertEqual(inbox.move_id.move_type, "in_invoice")
+        self.assertEqual(inbox.move_id.state, "draft")
+        self.assertEqual(inbox.move_id.amount_total, 105)
+        self.assertEqual(inbox.original_xml.content, content)
+        self.assertEqual(
+            inbox.processing_history_ids.mapped("outcome"), ["review", "processed"]
+        )
+
+    def test_archived_supplier_review_requests_one_internal_activity(self):
+        content = etree.tostring(self._received_test_xml())
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {"name": "Synthetic incoming review request"}
+        )
+        inbox_model = self.env["l10n_ae.edi.inbox"].with_user(self.simple_accountman)
+        self.partner_a.active = False
+        inbox = inbox_model.receive_controlled_document(
+            binding.id, "synthetic-review-notification", content
+        )
+        self.assertFalse(inbox.action_process())
+        self.assertEqual(inbox.state, "review")
+        self.assertFalse(inbox.move_id)
+        self.env.company.write({"l10n_ae_inbox_reviewer_id": self.simple_accountman.id})
+        first = inbox.action_request_review()
+        repeated = inbox.action_request_review()
+        self.assertEqual(first["res_id"], repeated["res_id"])
+        self.assertEqual(first["res_model"], "l10n_ae.edi.inbox.task")
+        task = self.env[first["res_model"]].browse(first["res_id"])
+        self.assertEqual(task.inbox_id, inbox)
+        self.assertEqual(task.company_id, self.env.company)
+        self.assertEqual(task.requested_by_id, self.simple_accountman)
+        self.assertTrue(task.requested_at)
+        self.assertEqual(task.xml_hash, inbox.xml_hash)
+        self.assertEqual(task.assigned_to_id, self.simple_accountman)
+        self.assertEqual(task.assigned_by_id, self.simple_accountman)
+        self.assertTrue(task.assigned_at)
+        self.assertEqual(len(task.activity_ids), 1)
+        self.assertEqual(task.activity_ids.user_id, self.simple_accountman)
+        self.assertEqual(task.activity_ids.summary, "Review received UAE document")
+        replayed = inbox_model.receive_controlled_document(
+            binding.id, "synthetic-review-notification", content
+        )
+        self.assertEqual(replayed, inbox)
+        self.assertEqual(replayed.action_request_review()["res_id"], task.id)
+        self.assertEqual(len(task.activity_ids), 1)
+        self.assertEqual(inbox.original_xml.content, content)
+        self.assertEqual(inbox.state, "review")
+        self.assertFalse(inbox.move_id)
+
+        assigned_at = task.assigned_at
+        task.activity_ids.with_user(self.simple_accountman).action_done()
+        self.assertFalse(task.activity_ids)
+        self.assertEqual(replayed.action_request_review()["res_id"], task.id)
+        self.assertFalse(task.activity_ids)
+        self.assertEqual(task.assigned_at, assigned_at)
+        self.assertEqual(task.state, "open")
+        self.assertEqual(inbox.state, "review")
+        self.assertFalse(inbox.move_id)
+
     def _foreign_received_fixture(self):
         usd = self.env.ref("base.USD")
         usd.active = True

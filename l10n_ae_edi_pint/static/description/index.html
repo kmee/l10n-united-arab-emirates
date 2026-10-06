@@ -506,6 +506,24 @@ originals keep the whole credit in review. A reviewed legacy bill can be
 entered through normal supplier accounting before retrying the same
 original XML. Never fabricate an original or rewrite receipt evidence to
 bypass review.</p>
+<p>For internal incoming attention, configure <strong>UAE Incoming Document
+Reviewer</strong> in the company’s <strong>UAE E-Invoicing</strong> tab using native company
+editing permission. Choose an active internal Accounting Manager with
+access to that company and original. In the received original, <strong>Request
+Internal Review</strong> reuses one protected task and native activity,
+including after the activity is completed. Receipt remains independent
+of reviewer availability. The hourly <strong>UAE: Received Document Internal
+Review</strong> cron checks at most 100 eligible originals and records a
+configuration-review outcome when access or reviewer configuration
+requires attention, while other rows continue.</p>
+<p>After reviewed master-data recovery and successful processing of the
+same original, use <strong>Resolve Internal Review</strong> in <strong>UAE Incoming
+Reviews</strong>. It preserves request, assignment and processing history and
+completes only its own outstanding activity. Completing an activity
+alone does not process XML, resolve conflicts or acknowledge a fiscal
+document. Changing future company routing does not rewrite earlier
+assignments. See scenario29 in the PT/EN manuals for the selected native
+journey and proof limits.</p>
 </div>
 <div class="section" id="known-issues-roadmap">
 <h1><a class="toc-backref" href="#toc-entry-2">Known issues / Roadmap</a></h1>

@@ -166,6 +166,26 @@ entered through normal supplier accounting before retrying the same
 original XML. Never fabricate an original or rewrite receipt evidence to
 bypass review.
 
+For internal incoming attention, configure **UAE Incoming Document
+Reviewer** in the company's **UAE E-Invoicing** tab using native company
+editing permission. Choose an active internal Accounting Manager with
+access to that company and original. In the received original, **Request
+Internal Review** reuses one protected task and native activity,
+including after the activity is completed. Receipt remains independent
+of reviewer availability. The hourly **UAE: Received Document Internal
+Review** cron checks at most 100 eligible originals and records a
+configuration-review outcome when access or reviewer configuration
+requires attention, while other rows continue.
+
+After reviewed master-data recovery and successful processing of the
+same original, use **Resolve Internal Review** in **UAE Incoming
+Reviews**. It preserves request, assignment and processing history and
+completes only its own outstanding activity. Completing an activity
+alone does not process XML, resolve conflicts or acknowledge a fiscal
+document. Changing future company routing does not rewrite earlier
+assignments. See scenario29 in the PT/EN manuals for the selected native
+journey and proof limits.
+
 Known issues / Roadmap
 ======================
 
