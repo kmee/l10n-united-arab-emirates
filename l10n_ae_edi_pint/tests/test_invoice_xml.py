@@ -4359,6 +4359,90 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
             (1.84, 38.56),
         )
 
+    def test_received_fractional_discount_keeps_exact_original_and_aed_declarations(
+        self,
+    ):
+        tree, _rate, _source = self._foreign_received_fixture()
+        # Independent sender worksheet: 400.1234 * .125 less10% gives raw
+        # net45.0138825/VAT2.250694125/gross47.264576625 USD. The sender's
+        # declared AED line VAT/gross are8.2656741740625/173.5791576553125.
+        # Build a synthetic supplier fixture; do not alter an issued original.
+        values = {
+            "cbc:UUID": "dadadada-2222-4222-8222-222222222222",
+            "cac:InvoiceLine/cbc:InvoicedQuantity": "0.125",
+            "cac:InvoiceLine/cbc:LineExtensionAmount": "45.01",
+            "cac:InvoiceLine/cac:Price/cbc:PriceAmount": "400.1234",
+            "cac:InvoiceLine/cac:Price/cac:AllowanceCharge/cbc:BaseAmount": "400.1234",
+            "cac:InvoiceLine/cac:ItemPriceExtension/cbc:Amount": "173.5791576553125",
+            "cac:InvoiceLine/cac:ItemPriceExtension/cac:TaxTotal/cbc:TaxAmount": (
+                "8.2656741740625"
+            ),
+            "cac:TaxTotal/cbc:TaxAmount[@currencyID='USD']": "2.25",
+            "cac:TaxTotal/cbc:TaxAmount[@currencyID='AED']": "8.26",
+            "cac:TaxTotal/cac:TaxSubtotal/cbc:TaxableAmount": "45.01",
+            "cac:TaxTotal/cac:TaxSubtotal/cbc:TaxAmount": "2.25",
+            "cac:LegalMonetaryTotal/cbc:LineExtensionAmount": "45.01",
+            "cac:LegalMonetaryTotal/cbc:TaxExclusiveAmount": "45.01",
+            "cac:LegalMonetaryTotal/cbc:TaxInclusiveAmount": "47.26",
+            "cac:LegalMonetaryTotal/cbc:PayableAmount": "47.26",
+            (
+                "cac:AdditionalDocumentReference"
+                "[cbc:DocumentTypeCode='aedtotal-incl-vat']/cbc:DocumentDescription"
+            ): "173.56",
+        }
+        for xpath, value in values.items():
+            tree.find(xpath, NS).text = value
+        line = tree.find("cac:InvoiceLine", NS)
+        allowance = etree.Element("{" + NS["cac"] + "}AllowanceCharge")
+        for name, text, currency in [
+            ("ChargeIndicator", "false", None),
+            ("AllowanceChargeReasonCode", "95", None),
+            ("AllowanceChargeReason", "Discount", None),
+            ("MultiplierFactorNumeric", "10", None),
+            ("Amount", "5.0015425", "USD"),
+            ("BaseAmount", "50.015425", "USD"),
+        ]:
+            node = etree.SubElement(allowance, "{" + NS["cbc"] + "}" + name)
+            node.text = text
+            if currency:
+                node.set("currencyID", currency)
+        line.find("cbc:LineExtensionAmount", NS).addnext(allowance)
+        content = etree.tostring(tree)
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {"name": "Synthetic received fractional discount"}
+        )
+        receiver = self.env["l10n_ae.edi.inbox"].with_user(self.simple_accountman)
+        self.assertFalse(receiver.env.su)
+        inbox = receiver.receive_controlled_document(
+            binding.id, "fractional-discount-original", content
+        )
+        self.assertTrue(inbox.action_process(), inbox.diagnostic)
+        bill = inbox.move_id
+        self.assertEqual((bill.move_type, bill.state), ("in_invoice", "draft"))
+        self.assertEqual(bill.invoice_line_ids.quantity, 0.125)
+        self.assertEqual(
+            (bill.amount_untaxed, bill.amount_tax, bill.amount_total),
+            (45.01, 2.25, 47.26),
+        )
+        self.assertEqual(
+            (
+                bill.l10n_ae_received_tax_amount,
+                bill.l10n_ae_received_tax_inclusive_amount,
+            ),
+            (8.26, 173.56),
+        )
+        self.assertEqual(inbox.original_xml.content, content)
+        self.assertFalse(bill.l10n_ae_transmission_id)
+        self.assertEqual(
+            receiver.receive_controlled_document(
+                binding.id, "fractional-discount-original", content
+            ),
+            inbox,
+        )
+        self.assertTrue(inbox.action_process(), inbox.diagnostic)
+        self.assertEqual(inbox.move_id, bill)
+        self.assertEqual(inbox.original_xml.content, content)
+
     def test_received_partial_credit_links_the_supplier_bill_and_preserves_reason(self):
         original = self.init_invoice(
             "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True

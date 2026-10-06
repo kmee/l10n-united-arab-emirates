@@ -5,6 +5,7 @@ from decimal import ROUND_HALF_UP, Decimal
 from odoo import fields, models
 from odoo.exceptions import UserError
 
+from odoo.addons.account_edi_ubl_cii.models.account_edi_common import FloatFmt
 from odoo.addons.account_edi_ubl_cii.tools.ubl_21_common import CustomerParty, TaxTotal
 
 
@@ -245,8 +246,52 @@ class AccountEdiUblUae(models.AbstractModel):
 
     def _ubl_add_line_allowance_charge_nodes(self, vals):
         result = super()._ubl_add_line_allowance_charge_nodes(vals)
+        nodes = vals["line_node"]["cac:AllowanceCharge"]
+        before = len(nodes)
         self._ubl_add_line_allowance_charge_nodes_for_discount(vals)
+        vals["l10n_ae_discount_node"] = nodes[-1] if len(nodes) > before else None
         return result
+
+    def _l10n_ae_preserve_line_discount(self, vals):
+        raw_base = self._l10n_ae_raw_fiscal_base_line(vals)
+        if not raw_base["discount"]:
+            return
+        currency = raw_base["currency_id"]
+        # Reuse native tax-inclusive and 100%-discount handling for the basis.
+        # IBR-131-AE permits an exact percentage allowance; cent rounding here
+        # can violate IBR-147-AE against the preserved high-precision price.
+        basis = Decimal(
+            str(
+                self.env["account.tax"]._get_gross_total_without_tax(
+                    raw_base, vals["company"]
+                )
+            )
+        )
+        amount = basis * Decimal(str(raw_base["discount"])) / Decimal(100)
+        node = self._ubl_get_line_allowance_charge_discount_node(
+            vals,
+            {
+                "currency": currency,
+                "percent": raw_base["discount"],
+                "is_charge": amount < 0,
+                "amount": float(amount),
+                "base_amount": float(basis),
+            },
+        )
+        # The public builder's constraints require numeric FloatFmt values.
+        # Give each native value its supplied precision instead of currency cents.
+        for key, value in [("cbc:Amount", amount), ("cbc:BaseAmount", basis)]:
+            node[key]["_text"] = FloatFmt(
+                abs(value), max_dp=max(2, -value.as_tuple().exponent)
+            )
+        # Core has already computed the line extension from its rounded amounts.
+        # Preserve that accounting total, then replace only its percentage discount.
+        original = vals["l10n_ae_discount_node"]
+        if original is not None:
+            original.clear()
+            original.update(node)
+        else:
+            vals["line_node"]["cac:AllowanceCharge"].append(node)
 
     def _l10n_ae_raw_fiscal_base_line(self, vals):
         # Recompute on an export-only copy with native unrounded tax arithmetic.
@@ -282,11 +327,13 @@ class AccountEdiUblUae(models.AbstractModel):
 
     def _ubl_add_invoice_line_node(self, vals):
         result = super()._ubl_add_invoice_line_node(vals)
+        self._l10n_ae_preserve_line_discount(vals)
         self._l10n_ae_add_line_aed_amounts(vals)
         return result
 
     def _ubl_add_credit_note_line_node(self, vals):
         result = super()._ubl_add_credit_note_line_node(vals)
+        self._l10n_ae_preserve_line_discount(vals)
         self._l10n_ae_add_line_aed_amounts(vals)
         return result
 

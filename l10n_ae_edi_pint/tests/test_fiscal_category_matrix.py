@@ -195,6 +195,177 @@ class TestUaeFiscalCategoryMatrix(AccountTestInvoicingCommon):
             or issue.validation_receipt
         )
 
+    def test_fractional_usd_discount_preserves_exact_allowance_and_original_ledger(
+        self,
+    ):
+        # Independently worked: USD400.1234 * 0.125 = 50.015425;
+        # 10% allowance = 5.0015425, raw net = 45.0138825,
+        # VAT = 2.250694125 and gross = 47.264576625.
+        # AED/USD3.672500 gives raw VAT8.2656741740625/gross173.5791576553125.
+        # Native rounded headers USD45.01/2.25/47.26 convert to AED8.26/173.56.
+        # IBR-131-AE permits the exact allowance/base, and IBR-147-AE must
+        # reconcile that allowance with the actual high-precision unit price.
+        # Configure the native quantity precision before entry: at the default
+        # two places Odoo stores 0.125 as 0.13, changing the business quantity.
+        self.env["decimal.precision"].search([("name", "=", "Product Unit")]).digits = 3
+        usd = self.env.ref("base.USD")
+        usd.active = True
+        self.env["res.currency.rate"].create(
+            {
+                "currency_id": usd.id,
+                "company_id": self.env.company.id,
+                "name": "2019-01-01",
+                "rate": 1 / 3.6725,
+            }
+        )
+        tax = self.tax_sale_a.copy(
+            {
+                "name": "Synthetic fractional S",
+                "amount": 5,
+                "ubl_cii_tax_category_code": "S",
+            }
+        )
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {"name": "Synthetic fractional discount USD"}
+        )
+        invoice = (
+            self.env["account.move"]
+            .with_user(self.simple_accountman)
+            .with_context(allowed_company_ids=[self.env.company.id])
+            .create(
+                {
+                    "move_type": "out_invoice",
+                    "partner_id": self.partner_a.id,
+                    "journal_id": self.company_data["default_journal_sale"].id,
+                    "currency_id": usd.id,
+                    "invoice_date": "2019-01-01",
+                    "l10n_ae_binding_id": binding.id,
+                    "l10n_ae_fiscal_uuid": "dadadada-1111-4111-8111-111111111111",
+                    "l10n_ae_tax_exchange_rate": "3.672500",
+                    "l10n_ae_tax_exchange_date": "2019-01-01",
+                    "l10n_ae_tax_exchange_source": "SYNTH-USD-FRACTIONAL-DISCOUNT",
+                    "invoice_line_ids": [
+                        Command.create(
+                            {
+                                "name": "Synthetic fractional high precision service",
+                                "quantity": 0.125,
+                                "price_unit": 400.1234,
+                                "discount": 10,
+                                "account_id": self.company_data[
+                                    "default_account_revenue"
+                                ].id,
+                                "tax_ids": [Command.set(tax.ids)],
+                            }
+                        )
+                    ],
+                }
+            )
+        )
+        self.assertFalse(invoice.env.su)
+        self.assertEqual(invoice.invoice_line_ids.quantity, 0.125)
+        self.assertEqual(invoice.invoice_line_ids.price_unit, 400.1234)
+        invoice.action_post()
+        self.assertEqual(
+            (invoice.amount_untaxed, invoice.amount_tax, invoice.amount_total),
+            (45.01, 2.25, 47.26),
+        )
+        self.assertEqual(
+            (invoice.amount_tax_signed, invoice.amount_total_signed), (8.26, 173.56)
+        )
+        ledger_fields = [
+            "account_id",
+            "debit",
+            "credit",
+            "amount_currency",
+            "currency_id",
+            "create_date",
+            "write_date",
+        ]
+        ledger = invoice.line_ids.read(ledger_fields)
+        invoice.action_l10n_ae_prepare()
+        issue = invoice.l10n_ae_transmission_id
+        report = invoice.validate_l10n_ae_pint()
+        self.assertTrue(report["valid"], report)
+        self.assertTrue(report["xsd_valid"], report)
+        self.assertEqual(report["ruleset"], "kmee-pint-ae-1.0.4-ubl-2.1")
+        xml = etree.fromstring(issue.xml_content.encode())
+        line = xml.find("cac:InvoiceLine", NS)
+        for path, expected in [
+            ("cbc:InvoicedQuantity", "0.125"),
+            ("cac:Price/cbc:PriceAmount", "400.1234"),
+            ("cbc:LineExtensionAmount", "45.01"),
+        ]:
+            self.assertEqual(
+                Decimal(line.findtext(path, namespaces=NS)), Decimal(expected)
+            )
+        allowance = line.find("cac:AllowanceCharge", NS)
+        self.assertEqual(
+            allowance.findtext("cbc:ChargeIndicator", namespaces=NS), "false"
+        )
+        for path, expected in [
+            ("cbc:BaseAmount", "50.015425"),
+            ("cbc:Amount", "5.0015425"),
+            ("cbc:MultiplierFactorNumeric", "10"),
+        ]:
+            self.assertLess(
+                abs(
+                    Decimal(allowance.findtext(path, namespaces=NS)) - Decimal(expected)
+                ),
+                Decimal("0.00000001"),
+            )
+        self.assertEqual(allowance.find("cbc:Amount", NS).get("currencyID"), "USD")
+        for path, expected in [
+            ("cac:ItemPriceExtension/cbc:Amount", "173.5791576553125"),
+            ("cac:ItemPriceExtension/cac:TaxTotal/cbc:TaxAmount", "8.2656741740625"),
+        ]:
+            amount = line.find(path, NS)
+            self.assertEqual(amount.get("currencyID"), "AED")
+            # The native price/quantity are floats: tolerate serialization noise,
+            # never a currency-cent rounding or substitution of the header base.
+            self.assertLess(
+                abs(Decimal(amount.text) - Decimal(expected)), Decimal("0.000001")
+            )
+        self.assertEqual(
+            xml.findtext(
+                "cac:TaxTotal/cbc:TaxAmount[@currencyID='AED']", namespaces=NS
+            ),
+            "8.26",
+        )
+        self.assertEqual(
+            xml.findtext(
+                "cac:AdditionalDocumentReference[cbc:DocumentTypeCode='aedtotal-incl-vat']/cbc:DocumentDescription",
+                namespaces=NS,
+            ),
+            "173.56",
+        )
+        self.assertIsNone(
+            xml.find("cac:LegalMonetaryTotal/cbc:PayableRoundingAmount", NS)
+        )
+        original = issue.read(
+            ["payload", "xml_content", "idempotency_key", "create_date", "write_date"]
+        )
+        invoice.action_l10n_ae_prepare()
+        self.assertEqual(invoice.preview_l10n_ae_pint(), issue.xml_content)
+        self.assertEqual(
+            issue.read(
+                [
+                    "payload",
+                    "xml_content",
+                    "idempotency_key",
+                    "create_date",
+                    "write_date",
+                ]
+            ),
+            original,
+        )
+        self.assertEqual(invoice.line_ids.read(ledger_fields), ledger)
+        self.assertFalse(
+            issue.attempt_ids
+            or issue.event_ids
+            or issue.remote_id
+            or issue.validation_receipt
+        )
+
     def test_many_small_usd_lines_show_both_fiscal_accounting_differences(self):
         # Independent worked per-line policy: 100 * USD1.23, each tax USD0.06.
         # Native AED base 100 * 4.52 = 452; native VAT 100 * 0.22 = 22;
