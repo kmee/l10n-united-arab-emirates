@@ -26,6 +26,251 @@ NS = {
 
 @tagged("post_install", "-at_install")
 class TestUaeInvoiceXml(AccountTestInvoicingCommon):
+    def test_received_commercial_credit_pins_package_while_original_bill_is_missing(
+        self,
+    ):
+        commercial_source, purchase_tax, _source_tree = (
+            self._commercial_received_fixture()
+        )
+        credit = self.init_invoice(
+            "out_refund",
+            amounts=[40],
+            taxes=commercial_source.invoice_line_ids.tax_ids,
+        )
+        credit.write(
+            {
+                "reversed_entry_id": commercial_source.id,
+                "l10n_ae_document_category": "commercial",
+                "l10n_ae_credit_reason": "DL8.61.1.C",
+                "l10n_ae_fiscal_uuid": "ccccccca-3333-4333-8333-333333333333",
+            }
+        )
+        credit.action_post()
+        credit_tree = self._received_test_xml(credit)
+        # Historical IBR-191-AE uses equality: type81 requires no PaymentMeans.
+        # The current exporter may include it; use independently constructed old XML.
+        for payment in credit_tree.findall("cac:PaymentMeans", NS):
+            credit_tree.remove(payment)
+        self.assertFalse(credit_tree.findall("cac:PaymentMeans", NS))
+        content = etree.tostring(credit_tree)
+        self.assertEqual(
+            credit_tree.findtext("cbc:CreditNoteTypeCode", namespaces=NS), "81"
+        )
+        self.assertEqual(
+            Decimal(
+                credit_tree.findtext(
+                    "cac:LegalMonetaryTotal/cbc:TaxExclusiveAmount", namespaces=NS
+                )
+            ),
+            Decimal(40),
+        )
+        self.assertEqual(
+            Decimal(
+                credit_tree.findtext(
+                    "cac:LegalMonetaryTotal/cbc:TaxInclusiveAmount", namespaces=NS
+                )
+            ),
+            Decimal(40),
+        )
+        self.assertEqual(
+            Decimal(credit_tree.findtext("cac:TaxTotal/cbc:TaxAmount", namespaces=NS)),
+            Decimal(0),
+        )
+
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {"name": "Incoming commercial credit package retention"}
+        )
+        inbox_model = self.env["l10n_ae.edi.inbox"].with_user(self.simple_accountman)
+        inbox = inbox_model.receive_controlled_document(
+            binding.id, "commercial-credit-missing-original", content
+        )
+        original_xml_hash = inbox.xml_hash
+
+        with patch.dict(
+            os.environ,
+            {
+                "KMEE_UAE_NORMATIVE_RULESET": "kmee-pint-ae-1.0.3-ubl-2.1",
+                "KMEE_UAE_NORMATIVE_DIR": "/opt/uae-addons/.runtime/normative-1.0.3",
+            },
+        ):
+            self.assertFalse(inbox.action_process())
+
+        self.assertEqual(inbox.state, "review")
+        self.assertIn("original supplier bill", inbox.diagnostic.lower())
+        self.assertFalse(inbox.move_id)
+        history = inbox.processing_history_ids.sorted("id")
+        self.assertEqual(len(history), 1)
+        first_report_text = history[0].validation_report
+        first_report_hash = history[0].validation_report_hash
+        first_report = json.loads(first_report_text)
+        self.assertTrue(first_report["valid"], first_report)
+        self.assertEqual(first_report["ruleset"], "kmee-pint-ae-1.0.3-ubl-2.1")
+        self.assertEqual(
+            first_report["resources"]["manifest_sha256"],
+            "14929fa98465947811ac3a0b30fc62b2a0eba8dadb7712bd6c2bfa11f1363bd0",
+        )
+        self.assertEqual(
+            first_report_hash,
+            hashlib.sha256(first_report_text.encode("utf-8")).hexdigest(),
+        )
+        self.assertEqual(inbox.original_xml.content, content)
+        self.assertEqual(inbox.xml_hash, original_xml_hash)
+
+        # Repair the missing reference by normal, non-sudo accounting CRUD.
+        original_bill = (
+            self.env["account.move"]
+            .with_user(self.simple_accountman)
+            .create(
+                {
+                    "move_type": "in_invoice",
+                    "partner_id": self.partner_a.id,
+                    "company_id": self.env.company.id,
+                    "currency_id": self.env.company.currency_id.id,
+                    "ref": commercial_source.name,
+                    "invoice_date": commercial_source.invoice_date,
+                    "l10n_ae_document_category": "commercial",
+                    "invoice_line_ids": [
+                        (
+                            0,
+                            0,
+                            {
+                                "name": "Reviewed synthetic commercial original",
+                                "product_id": self.product_a.id,
+                                "quantity": 1,
+                                "price_unit": 100,
+                                "tax_ids": [(6, 0, purchase_tax.ids)],
+                            },
+                        )
+                    ],
+                }
+            )
+        )
+        self.assertEqual(original_bill.state, "draft")
+        self.assertFalse(original_bill.l10n_ae_received_document)
+        self.assertEqual(original_bill.company_id, self.env.company)
+        self.assertEqual(original_bill.ref, commercial_source.name)
+        self.assertEqual(original_bill.invoice_date, commercial_source.invoice_date)
+        self.assertEqual(original_bill.l10n_ae_document_category, "commercial")
+        self.assertEqual(original_bill.partner_id, self.partner_a)
+        self.assertEqual(original_bill.currency_id, self.env.company.currency_id)
+        self.assertEqual(
+            (
+                original_bill.amount_untaxed,
+                original_bill.amount_tax,
+                original_bill.amount_total,
+            ),
+            (100, 0, 100),
+        )
+
+        # A retry with another installed package must refuse before reconsidering the
+        # repaired accounting reference. It adds a diagnostic row, not a report.
+        with patch.dict(
+            os.environ,
+            {
+                "KMEE_UAE_NORMATIVE_RULESET": "kmee-pint-ae-1.0.4-ubl-2.1",
+                "KMEE_UAE_NORMATIVE_DIR": "/opt/uae-addons/.runtime/normative",
+            },
+        ):
+            self.assertFalse(inbox.action_process())
+        self.assertEqual(inbox.state, "review")
+        self.assertFalse(inbox.move_id)
+        history = inbox.processing_history_ids.sorted("id")
+        self.assertEqual(len(history), 2)
+        self.assertEqual(history[0].validation_report, first_report_text)
+        self.assertEqual(history[0].validation_report_hash, first_report_hash)
+        self.assertFalse(history[1].validation_report)
+        self.assertFalse(history[1].validation_report_hash)
+        self.assertIn("pinned pint package", history[1].diagnostic.lower())
+        self.assertEqual(inbox.original_xml.content, content)
+        self.assertEqual(inbox.xml_hash, original_xml_hash)
+
+        with patch.dict(
+            os.environ,
+            {
+                "KMEE_UAE_NORMATIVE_RULESET": "kmee-pint-ae-1.0.3-ubl-2.1",
+                "KMEE_UAE_NORMATIVE_DIR": "/opt/uae-addons/.runtime/normative-1.0.3",
+            },
+        ):
+            self.assertTrue(inbox.action_process(), inbox.diagnostic)
+
+        history = inbox.processing_history_ids.sorted("id")
+        self.assertEqual(history.mapped("outcome"), ["review", "review", "processed"])
+        self.assertEqual(history[0].validation_report, first_report_text)
+        self.assertEqual(history[0].validation_report_hash, first_report_hash)
+        self.assertFalse(history[1].validation_report)
+        final_report = json.loads(history[2].validation_report)
+        self.assertTrue(final_report["valid"], final_report)
+        self.assertEqual(final_report["ruleset"], "kmee-pint-ae-1.0.3-ubl-2.1")
+        self.assertEqual(
+            final_report["resources"]["manifest_sha256"],
+            "14929fa98465947811ac3a0b30fc62b2a0eba8dadb7712bd6c2bfa11f1363bd0",
+        )
+        self.assertEqual(
+            history[2].validation_report_hash,
+            hashlib.sha256(history[2].validation_report.encode("utf-8")).hexdigest(),
+        )
+        refund = inbox.move_id
+        self.assertEqual((refund.move_type, refund.state), ("in_refund", "draft"))
+        self.assertEqual(refund.partner_id, self.partner_a)
+        self.assertEqual(refund.l10n_ae_document_category, "commercial")
+        self.assertEqual(refund.reversed_entry_id, original_bill)
+        self.assertEqual(refund.l10n_ae_credit_reason, "DL8.61.1.C")
+        self.assertEqual(refund.invoice_line_ids.tax_ids, purchase_tax)
+        self.assertEqual(
+            (refund.amount_untaxed, refund.amount_tax, refund.amount_total), (40, 0, 40)
+        )
+        self.assertEqual(original_bill.amount_total, 100)
+        self.assertEqual(original_bill.state, "draft")
+        self.assertEqual(inbox.original_xml.content, content)
+        self.assertEqual(inbox.xml_hash, original_xml_hash)
+        self.assertFalse(refund.l10n_ae_transmission_id)
+        self.assertEqual(
+            self.env["account.move"].search_count(
+                [
+                    ("company_id", "=", self.env.company.id),
+                    ("l10n_ae_received_document", "=", True),
+                    ("l10n_ae_fiscal_uuid", "=", credit.l10n_ae_fiscal_uuid),
+                    ("move_type", "=", "in_refund"),
+                ]
+            ),
+            1,
+        )
+
+        history_fields = [
+            "validation_report",
+            "validation_report_hash",
+            "diagnostic",
+            "outcome",
+            "move_id",
+            "xml_hash",
+            "occurred_at",
+            "operator_id",
+        ]
+        history_before_replay = history.read(history_fields)
+        with (
+            tempfile.TemporaryDirectory(
+                prefix="uae-commercial-processed-replay-"
+            ) as empty,
+            patch.dict(
+                os.environ,
+                {
+                    "KMEE_UAE_NORMATIVE_RULESET": "kmee-pint-ae-1.0.4-ubl-2.1",
+                    "KMEE_UAE_NORMATIVE_DIR": empty,
+                },
+            ),
+        ):
+            self.assertTrue(inbox.action_process(), inbox.diagnostic)
+        self.assertEqual(inbox.move_id, refund)
+        self.assertEqual(len(inbox.processing_history_ids), 3)
+        self.assertEqual(
+            inbox.processing_history_ids.read(history_fields), history_before_replay
+        )
+        self.assertEqual(
+            inbox.processing_history_ids[0].validation_report, first_report_text
+        )
+        self.assertEqual(inbox.original_xml.content, content)
+        self.assertEqual(inbox.xml_hash, original_xml_hash)
+
     def test_received_review_pins_first_formal_normative_package_across_retry(self):
         source = self.init_invoice(
             "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
