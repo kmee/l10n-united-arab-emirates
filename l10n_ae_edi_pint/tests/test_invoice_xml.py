@@ -1899,6 +1899,25 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         self.assertIsNotNone(delivery)
         location = delivery.find("cac:DeliveryLocation", NS)
         self.assertIsNotNone(location)
+        date = delivery.find("cbc:ActualDeliveryDate", NS)
+        if date is None:
+            date = etree.Element(etree.QName(NS["cbc"], "ActualDeliveryDate"))
+            delivery.insert(0, date)
+        date.text = "2019-01-01"
+        location_id = location.find("cbc:ID", NS)
+        if location_id is None:
+            location_id = etree.Element(etree.QName(NS["cbc"], "ID"))
+            location.insert(0, location_id)
+        location_id.text = "5790000435963"
+        location_id.set("schemeID", "0088")
+        party = delivery.find("cac:DeliveryParty", NS)
+        if party is None:
+            party = etree.SubElement(delivery, etree.QName(NS["cac"], "DeliveryParty"))
+        identifier = etree.Element(etree.QName(NS["cac"], "PartyIdentification"))
+        party.insert(0, identifier)
+        etree.SubElement(
+            identifier, etree.QName(NS["cbc"], "ID"), schemeID="0235"
+        ).text = "1000000004"
         old_address = location.find("cac:Address", NS)
         self.assertIsNotNone(old_address)
         location.remove(old_address)
@@ -1957,6 +1976,20 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
             "country_name": False,
         }
         self.assertEqual(inbox.delivery_snapshot["address"], expected_address)
+        self.assertEqual(inbox.delivery_snapshot["actual_delivery_date"], "2019-01-01")
+        self.assertEqual(
+            inbox.delivery_snapshot["location_identifiers"],
+            [{"value": "5790000435963", "attributes": {"schemeID": "0088"}}],
+        )
+        self.assertEqual(
+            inbox.delivery_snapshot["party_identifiers"],
+            [{"value": "1000000004", "attributes": {"schemeID": "0235"}}],
+        )
+        preserved_delivery = etree.fromstring(inbox.delivery_snapshot["delivery_xml"])
+        self.assertEqual(
+            etree.tostring(preserved_delivery, method="c14n"),
+            etree.tostring(delivery, method="c14n"),
+        )
         self.assertIn("Synthetic delivery-only street", inbox.delivery_summary)
         self.assertEqual(bill.l10n_ae_received_delivery_summary, inbox.delivery_summary)
         for party in (bill.partner_id, self.env.company.partner_id):
@@ -2020,6 +2053,102 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
                 manifest["artifacts"]["delivery.json"]["sha256"],
                 hashlib.sha256(exported_delivery).hexdigest(),
             )
+
+    def test_received_ecommerce_missing_required_delivery_stays_in_review(self):
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {"name": "Incomplete received e-commerce delivery"}
+        )
+        receiver = self.env["l10n_ae.edi.inbox"].with_user(self.simple_accountman)
+        for index, missing in enumerate(("StreetName", "CityName", "CountrySubentity")):
+            with self.subTest(missing=missing):
+                tree = self._received_test_xml()
+                tree.find("cbc:ProfileExecutionID", NS).text = "00000010"
+                fiscal_uuid = f"eeeeeeee-000{index}-4000-8000-111111111111"
+                tree.find("cbc:UUID", NS).text = fiscal_uuid
+                address = tree.find("cac:Delivery/cac:DeliveryLocation/cac:Address", NS)
+                self.assertIsNotNone(address)
+                for name, value in (
+                    ("StreetName", "Synthetic incomplete delivery street"),
+                    ("CityName", "Dubai"),
+                    ("CountrySubentity", "DXB"),
+                ):
+                    node = address.find(f"cbc:{name}", NS)
+                    self.assertIsNotNone(node)
+                    node.text = value
+                address.remove(address.find(f"cbc:{missing}", NS))
+                content = etree.tostring(tree, encoding="UTF-8", xml_declaration=True)
+                inbox = receiver.receive_controlled_document(
+                    binding.id, f"ecommerce-missing-{index}", content
+                )
+                self.assertFalse(inbox.action_process())
+                self.assertEqual(inbox.state, "review")
+                self.assertFalse(inbox.move_id)
+                self.assertFalse(inbox.delivery_snapshot)
+                self.assertEqual(inbox.original_xml.content, content)
+                self.assertEqual(inbox.xml_hash, hashlib.sha256(content).hexdigest())
+                history = inbox.processing_history_ids
+                self.assertEqual(len(history), 1)
+                report = json.loads(history.validation_report)
+                self.assertTrue(report["xsd_valid"], report)
+                self.assertFalse(report["valid"], report)
+                self.assertIn("ibr-142-ae", inbox.diagnostic.lower())
+                self.assertEqual(
+                    self.env["account.move"].search_count(
+                        [
+                            ("company_id", "=", self.env.company.id),
+                            ("l10n_ae_received_document", "=", True),
+                            ("l10n_ae_fiscal_uuid", "=", fiscal_uuid),
+                        ]
+                    ),
+                    0,
+                )
+                self.assertEqual(
+                    receiver.receive_controlled_document(
+                        binding.id, f"ecommerce-missing-{index}", content
+                    ),
+                    inbox,
+                )
+                self.assertEqual(len(inbox.processing_history_ids), 1)
+
+    def test_received_ecommerce_multiple_deliveries_require_review_without_a_draft(
+        self,
+    ):
+        tree = self._received_test_xml()
+        tree.find("cbc:ProfileExecutionID", NS).text = "00000010"
+        fiscal_uuid = "eeeeeeef-1111-4111-8111-111111111111"
+        tree.find("cbc:UUID", NS).text = fiscal_uuid
+        delivery = tree.find("cac:Delivery", NS)
+        self.assertIsNotNone(delivery)
+        delivery.addnext(etree.fromstring(etree.tostring(delivery)))
+        content = etree.tostring(tree, encoding="UTF-8", xml_declaration=True)
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {"name": "Ambiguous received e-commerce delivery"}
+        )
+        receiver = self.env["l10n_ae.edi.inbox"].with_user(self.simple_accountman)
+        inbox = receiver.receive_controlled_document(
+            binding.id, "ecommerce-ambiguous-delivery", content
+        )
+        self.assertFalse(inbox.action_process())
+        self.assertEqual(inbox.state, "review")
+        self.assertFalse(inbox.move_id)
+        self.assertFalse(inbox.delivery_snapshot)
+        self.assertEqual(inbox.original_xml.content, content)
+        self.assertEqual(inbox.xml_hash, hashlib.sha256(content).hexdigest())
+        self.assertEqual(len(inbox.processing_history_ids), 1)
+        report = json.loads(inbox.processing_history_ids.validation_report)
+        self.assertTrue(report["xsd_valid"], report)
+        self.assertFalse(report["valid"], report)
+        self.assertIn("ibr-107", inbox.diagnostic.lower())
+        self.assertEqual(
+            self.env["account.move"].search_count(
+                [
+                    ("company_id", "=", self.env.company.id),
+                    ("l10n_ae_received_document", "=", True),
+                    ("l10n_ae_fiscal_uuid", "=", fiscal_uuid),
+                ]
+            ),
+            0,
+        )
 
     def test_received_ecommerce_delivery_is_visible_in_native_review_forms(self):
         tree = self._received_test_xml()
