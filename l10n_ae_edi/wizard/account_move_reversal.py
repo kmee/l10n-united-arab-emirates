@@ -2,6 +2,8 @@
 # License AGPL-3.0 or later (https://www.gnu.org/licenses/agpl).
 from odoo import api, fields, models
 
+from ..models.account_move import UAE_TRANSACTION_FLAG_FIELDS
+
 
 class AccountMoveReversal(models.TransientModel):
     _inherit = "account.move.reversal"
@@ -44,4 +46,10 @@ class AccountMoveReversal(models.TransientModel):
         values = super()._prepare_default_reversal(move)
         if self._l10n_ae_credit_reason_applies(move):
             values["l10n_ae_credit_reason"] = self.l10n_ae_credit_reason
+            for name in (
+                *UAE_TRANSACTION_FLAG_FIELDS,
+                "l10n_ae_beneficiary_id",
+                "l10n_ae_principal_id",
+            ):
+                values[name] = move[name]
         return values

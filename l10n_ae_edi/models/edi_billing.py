@@ -32,6 +32,7 @@ BILLING_HEADER_FIELDS = {
     "l10n_ae_binding_id",
     "l10n_ae_document_category",
     "l10n_ae_beneficiary_id",
+    "l10n_ae_principal_id",
     "l10n_ae_credit_reason",
     "l10n_ae_selfbilling_agreement_id",
     "l10n_ae_tax_exchange_rate",

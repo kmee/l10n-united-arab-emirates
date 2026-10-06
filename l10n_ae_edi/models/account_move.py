@@ -141,6 +141,12 @@ class AccountMove(models.Model):
     l10n_ae_disclosed_agent = fields.Boolean(
         string="Disclosed Agent Billing", copy=False
     )
+    l10n_ae_principal_id = fields.Char(
+        string="Principal ID",
+        copy=False,
+        help="The principal's TRN for disclosed-agent billing; separate from "
+        "the supplier VAT and beneficiary.",
+    )
     l10n_ae_ecommerce = fields.Boolean(string="Supply Through E-Commerce", copy=False)
     l10n_ae_exports = fields.Boolean(string="Exports", copy=False)
     l10n_ae_buyer_not_implemented = fields.Boolean(
@@ -315,6 +321,7 @@ class AccountMove(models.Model):
             "l10n_ae_tax_exchange_date",
             "l10n_ae_tax_exchange_source",
             "l10n_ae_beneficiary_id",
+            "l10n_ae_principal_id",
             "l10n_ae_document_category",
             "l10n_ae_credit_reason",
             "l10n_ae_credit_reference_ids",
@@ -501,6 +508,7 @@ class AccountMove(models.Model):
             "document_category": self.l10n_ae_document_category,
             "transaction_flags": self._l10n_ae_transaction_flags(),
             "beneficiary_id": self.l10n_ae_beneficiary_id or None,
+            "principal_id": self.l10n_ae_principal_id or None,
             "fiscal_uuid": self.l10n_ae_fiscal_uuid or None,
             "credit_reason": self.l10n_ae_credit_reason or None,
             "preceding_invoice": {
@@ -904,6 +912,43 @@ class AccountMove(models.Model):
                 )
             )
 
+    def _check_l10n_ae_principal_id(self):
+        self.ensure_one()
+
+        if self.l10n_ae_principal_id and not self.l10n_ae_disclosed_agent:
+            raise UserError(
+                self.env._(
+                    "Review Principal ID and the disclosed-agent classification "
+                    "before preparing the document."
+                )
+            )
+        if self.l10n_ae_disclosed_agent:
+            principal = self.l10n_ae_principal_id or ""
+            if not principal.strip():
+                raise UserError(
+                    self.env._(
+                        "IBR-137-AE: disclosed-agent billing requires the principal's "
+                        "TRN as Principal ID."
+                    )
+                )
+            supplier = (
+                self.partner_id.commercial_partner_id
+                if self.is_self_billing
+                else self.company_id.partner_id
+            )
+            if principal == supplier.vat:
+                raise UserError(
+                    self.env._(
+                        "IBR-176-AE: Principal ID must differ from supplier VAT/TRN."
+                    )
+                )
+            if not re.fullmatch(r"[0-9]{15}", principal):
+                raise UserError(
+                    self.env._(
+                        "Principal ID requires 15 ASCII digits for the principal TRN."
+                    )
+                )
+
     def action_l10n_ae_validate(self):
         for move in self:
             if move.l10n_ae_received_document:
@@ -956,6 +1001,7 @@ class AccountMove(models.Model):
                         "identifier."
                     )
                 )
+            move._check_l10n_ae_principal_id()
             move._l10n_ae_destination_override()
             move._check_l10n_ae_credit_references()
             if move.currency_id.name != "AED" and not (
