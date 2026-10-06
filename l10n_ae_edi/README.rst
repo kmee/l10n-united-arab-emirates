@@ -16,9 +16,9 @@ UAE Electronic Invoicing
 .. |badge2| image:: https://img.shields.io/badge/license-AGPL--3-blue.png
     :target: http://www.gnu.org/licenses/agpl-3.0-standalone.html
     :alt: License: AGPL-3
-.. |badge3| image:: https://img.shields.io/badge/github-kmee%2Fl10n--eua-lightgray.png?logo=github
-    :target: https://github.com/kmee/l10n-eua/tree/20.0/l10n_ae_edi
-    :alt: kmee/l10n-eua
+.. |badge3| image:: https://img.shields.io/badge/github-kmee%2Fl10n--uae-lightgray.png?logo=github
+    :target: https://github.com/kmee/l10n-uae/tree/20.0/l10n_ae_edi
+    :alt: kmee/l10n-uae
 
 |badge1| |badge2| |badge3|
 
@@ -73,7 +73,7 @@ PINT XML and paginated event facts without accounting or sending
 privileges. Preparing an existing posted sandbox invoice is a separate
 operation requiring native Invoice/write permissions. See `the billing
 API
-contract <https://github.com/kmee/l10n-eua/blob/20.0-add-uae-edi/docs/controlled-executor.md#billing-api>`__
+contract <https://github.com/kmee/l10n-uae/blob/20.0-add-uae-edi/docs/controlled-executor.md#billing-api>`__
 and the PT/EN scenario manuals. Native API keys belong to Odoo; the
 addon adds no key store or credential fields. Full client
 creation/callback integration remains pending.
@@ -91,7 +91,7 @@ export, select the issue and use native **Actions → Export**. Company
 and role revocation apply to subsequent reads, exports and downloads.
 Full archive/retention and customer security acceptance remain required.
 See scenario21 in the PT/EN manuals and `the audit UI
-evidence <https://github.com/kmee/l10n-eua/blob/20.0-add-uae-edi/docs/evidence/fiscal-audit-ui-2026-10-05.md>`__.
+evidence <https://github.com/kmee/l10n-uae/blob/20.0-add-uae-edi/docs/evidence/fiscal-audit-ui-2026-10-05.md>`__.
 
 For an outbound self-billed purchase, use a native self-billing purchase
 journal and select a UAE Self-Billing Agreement in the invoice's UAE
@@ -164,9 +164,9 @@ required work.
 
 For prerequisites, UI steps, expected results and error handling, read
 the repository scenario based user manual in
-`English <https://github.com/kmee/l10n-eua/blob/20.0-add-uae-edi/docs/user/scenarios-en.md>`__
+`English <https://github.com/kmee/l10n-uae/blob/20.0-add-uae-edi/docs/user/scenarios-en.md>`__
 or
-`Português <https://github.com/kmee/l10n-eua/blob/20.0-add-uae-edi/docs/user/scenarios-pt_BR.md>`__.
+`Português <https://github.com/kmee/l10n-uae/blob/20.0-add-uae-edi/docs/user/scenarios-pt_BR.md>`__.
 
 For scheduled controlled sending, accounting managers open **UAE
 Provider Bindings**, select the reviewed **Sandbox** binding and enable
@@ -216,10 +216,10 @@ Enterprise coexistence, accredited ASP contracts and release readiness.
 Bug Tracker
 ===========
 
-Bugs are tracked on `GitHub Issues <https://github.com/kmee/l10n-eua/issues>`_.
+Bugs are tracked on `GitHub Issues <https://github.com/kmee/l10n-uae/issues>`_.
 In case of trouble, please check there if your issue has already been reported.
 If you spotted it first, help us to smash it by providing a detailed and welcomed
-`feedback <https://github.com/kmee/l10n-eua/issues/new?body=module:%20l10n_ae_edi%0Aversion:%2020.0%0A%0A**Steps%20to%20reproduce**%0A-%20...%0A%0A**Current%20behavior**%0A%0A**Expected%20behavior**>`_.
+`feedback <https://github.com/kmee/l10n-uae/issues/new?body=module:%20l10n_ae_edi%0Aversion:%2020.0%0A%0A**Steps%20to%20reproduce**%0A-%20...%0A%0A**Current%20behavior**%0A%0A**Expected%20behavior**>`_.
 
 Do not contact contributors directly about support or help with technical issues.
 
@@ -239,6 +239,6 @@ Contributors
 Maintainers
 -----------
 
-This module is part of the `kmee/l10n-eua <https://github.com/kmee/l10n-eua/tree/20.0/l10n_ae_edi>`_ project on GitHub.
+This module is part of the `kmee/l10n-uae <https://github.com/kmee/l10n-uae/tree/20.0/l10n_ae_edi>`_ project on GitHub.
 
 You are welcome to contribute.
