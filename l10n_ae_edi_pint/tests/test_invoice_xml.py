@@ -26,6 +26,130 @@ NS = {
 
 @tagged("post_install", "-at_install")
 class TestUaeInvoiceXml(AccountTestInvoicingCommon):
+    def test_received_review_pins_first_formal_normative_package_across_retry(self):
+        source = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
+        )
+        source.l10n_ae_fiscal_uuid = "18181818-1818-4818-8818-181818181818"
+        content = etree.tostring(self._received_test_xml(source))
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {"name": "Pending incoming normative package review"}
+        )
+        inbox = (
+            self.env["l10n_ae.edi.inbox"]
+            .with_user(self.simple_accountman)
+            .receive_controlled_document(binding.id, "pending-package-380", content)
+        )
+        original_xml_hash = inbox.xml_hash
+
+        with patch.dict(
+            os.environ,
+            {
+                "KMEE_UAE_NORMATIVE_RULESET": "kmee-pint-ae-1.0.3-ubl-2.1",
+                "KMEE_UAE_NORMATIVE_DIR": "/opt/uae-addons/.runtime/normative-1.0.3",
+            },
+        ):
+            self.partner_a.active = False
+            self.assertFalse(inbox.action_process())
+
+        self.assertEqual(inbox.state, "review")
+        self.assertIn("supplier", inbox.diagnostic.lower())
+        self.assertFalse(inbox.move_id)
+        first_history = inbox.processing_history_ids.sorted("id")
+        self.assertEqual(len(first_history), 1)
+        first_report_text = first_history.validation_report
+        first_report_hash = first_history.validation_report_hash
+        first_report = json.loads(first_report_text)
+        self.assertTrue(first_report["valid"], first_report)
+        self.assertEqual(first_report["ruleset"], "kmee-pint-ae-1.0.3-ubl-2.1")
+        self.assertEqual(
+            first_report["resources"]["manifest_sha256"],
+            "14929fa98465947811ac3a0b30fc62b2a0eba8dadb7712bd6c2bfa11f1363bd0",
+        )
+        self.assertEqual(
+            first_report_hash,
+            hashlib.sha256(first_report_text.encode("utf-8")).hexdigest(),
+        )
+        self.partner_a.active = True
+
+        with patch.dict(
+            os.environ,
+            {
+                "KMEE_UAE_NORMATIVE_RULESET": "kmee-pint-ae-1.0.4-ubl-2.1",
+                "KMEE_UAE_NORMATIVE_DIR": "/opt/uae-addons/.runtime/normative",
+            },
+        ):
+            self.assertFalse(inbox.action_process())
+
+        self.assertEqual(inbox.state, "review")
+        self.assertIn("pinned pint package", inbox.diagnostic.lower())
+        self.assertFalse(inbox.move_id)
+        histories = inbox.processing_history_ids.sorted("id")
+        self.assertEqual(len(histories), 2)
+        self.assertEqual(histories[0].validation_report, first_report_text)
+        self.assertEqual(histories[0].validation_report_hash, first_report_hash)
+        self.assertFalse(histories[1].validation_report)
+        self.assertFalse(histories[1].validation_report_hash)
+        self.assertEqual(inbox.original_xml.content, content)
+        self.assertEqual(inbox.xml_hash, original_xml_hash)
+        self.assertEqual(
+            self.env["account.move"].search_count(
+                [
+                    ("company_id", "=", self.env.company.id),
+                    ("l10n_ae_received_document", "=", True),
+                    ("l10n_ae_fiscal_uuid", "=", source.l10n_ae_fiscal_uuid),
+                ]
+            ),
+            0,
+        )
+
+        with patch.dict(
+            os.environ,
+            {
+                "KMEE_UAE_NORMATIVE_RULESET": "kmee-pint-ae-1.0.3-ubl-2.1",
+                "KMEE_UAE_NORMATIVE_DIR": "/opt/uae-addons/.runtime/normative-1.0.3",
+            },
+        ):
+            self.assertTrue(inbox.action_process(), inbox.diagnostic)
+
+        histories = inbox.processing_history_ids.sorted("id")
+        self.assertEqual(histories.mapped("outcome"), ["review", "review", "processed"])
+        self.assertEqual(histories[0].validation_report, first_report_text)
+        self.assertEqual(histories[0].validation_report_hash, first_report_hash)
+        self.assertFalse(histories[1].validation_report)
+        self.assertIn("pinned pint package", histories[1].diagnostic.lower())
+        final_report = json.loads(histories[2].validation_report)
+        self.assertTrue(final_report["valid"], final_report)
+        self.assertEqual(final_report["ruleset"], "kmee-pint-ae-1.0.3-ubl-2.1")
+        self.assertEqual(
+            final_report["resources"]["manifest_sha256"],
+            "14929fa98465947811ac3a0b30fc62b2a0eba8dadb7712bd6c2bfa11f1363bd0",
+        )
+        self.assertEqual(inbox.move_id.move_type, "in_invoice")
+        self.assertEqual(inbox.move_id.state, "draft")
+        self.assertEqual(inbox.move_id.partner_id, self.partner_a)
+        self.assertEqual(
+            (
+                inbox.move_id.amount_untaxed,
+                inbox.move_id.amount_tax,
+                inbox.move_id.amount_total,
+            ),
+            (100, 5, 105),
+        )
+        self.assertEqual(inbox.original_xml.content, content)
+        self.assertEqual(inbox.xml_hash, original_xml_hash)
+        self.assertFalse(inbox.move_id.l10n_ae_transmission_id)
+        self.assertEqual(
+            self.env["account.move"].search_count(
+                [
+                    ("company_id", "=", self.env.company.id),
+                    ("l10n_ae_received_document", "=", True),
+                    ("l10n_ae_fiscal_uuid", "=", source.l10n_ae_fiscal_uuid),
+                ]
+            ),
+            1,
+        )
+
     def test_received_processing_retains_the_administrative_package_report(self):
         source = self.init_invoice(
             "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True

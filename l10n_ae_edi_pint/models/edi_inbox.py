@@ -1,6 +1,7 @@
 # Copyright 2026 KMEE
 # License AGPL-3.0 or later (https://www.gnu.org/licenses/agpl).
 import hashlib
+import json
 import os
 import re
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
@@ -18,6 +19,7 @@ from ..tools.validation import (
     OfflinePintValidator,
     UnsafeInvoiceXml,
     ValidationUnavailable,
+    describe_ruleset,
     parse_invoice_xml,
 )
 
@@ -315,6 +317,21 @@ class UaeEdiInbox(models.Model):
                         )
                     )
                 ruleset = os.environ.get("KMEE_UAE_NORMATIVE_RULESET", DEFAULT_RULESET)
+                prior = current.processing_history_ids.filtered("validation_report")[:1]
+                if prior:
+                    retained = json.loads(prior.validation_report)
+                    pinned = {
+                        "ruleset": retained["ruleset"],
+                        "manifest_sha256": retained["resources"]["manifest_sha256"],
+                    }
+                    if pinned != describe_ruleset(ruleset):
+                        raise UserError(
+                            current.env._(
+                                "This received document's pinned PINT package differs "
+                                "from the configured package. Ask support to restore "
+                                "the original configuration before retrying."
+                            )
+                        )
                 report = OfflinePintValidator(directory, ruleset=ruleset).validate(
                     content
                 )
