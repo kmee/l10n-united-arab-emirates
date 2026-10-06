@@ -3,7 +3,7 @@
 {
     "name": "UAE PINT Electronic Invoicing",
     "summary": "Extend the public Odoo PINT builder for UAE invoices",
-    "version": "20.0.1.13.1",
+    "version": "20.0.1.14.0",
     "development_status": "Alpha",
     "category": "Accounting/Localizations",
     "author": "KMEE",
@@ -19,6 +19,7 @@
         "views/account_move_views.xml",
         "views/account_move_send_wizard_views.xml",
         "views/edi_inbox_views.xml",
+        "views/edi_inbox_selection_views.xml",
         "views/edi_inbox_task_views.xml",
         "views/res_company_views.xml",
         "views/edi_audit_inbox_views.xml",

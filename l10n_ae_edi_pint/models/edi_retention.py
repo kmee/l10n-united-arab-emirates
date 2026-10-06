@@ -27,7 +27,32 @@ class UaeEdiRetention(models.Model):
             )
             for values in vals_list
         ]
-        return super().create(prepared)
+        records = super().create(prepared)
+        records._invalidate_received_identity_packages()
+        return records
+
+    def _invalidate_received_identity_packages(self):
+        for inbox in self.mapped("inbox_id"):
+            inbox._identity_family().invalidate_recordset(["evidence_archive"])
+
+    def write(self, vals):
+        before = self.mapped("inbox_id")
+        result = super().write(vals)
+        for inbox in before | self.mapped("inbox_id"):
+            inbox._identity_family().invalidate_recordset(["evidence_archive"])
+        return result
+
+    def action_approve(self):
+        result = super().action_approve()
+        self._invalidate_received_identity_packages()
+        return result
+
+    def unlink(self):
+        originals = self.mapped("inbox_id")
+        result = super().unlink()
+        for inbox in originals:
+            inbox._identity_family().invalidate_recordset(["evidence_archive"])
+        return result
 
     @api.model
     def _document_from_values(self, vals):
@@ -52,11 +77,16 @@ class UaeEdiRetention(models.Model):
         return super()._target_values() | {"inbox_id": self.inbox_id.id}
 
 
-class UaeEdiInbox(models.Model):
-    _inherit = "l10n_ae.edi.inbox"
+class UaeEdiRetentionHold(models.Model):
+    _inherit = "l10n_ae.edi.retention.hold"
 
-    retention_ids = fields.One2many("l10n_ae.edi.retention", "inbox_id", readonly=True)
+    @api.model_create_multi
+    def create(self, vals_list):
+        holds = super().create(vals_list)
+        holds.mapped("retention_id")._invalidate_received_identity_packages()
+        return holds
 
-    def get_retention_status(self, as_of=None):
-        self.ensure_one()
-        return self.env["l10n_ae.edi.retention"]._assess(self, as_of, "inbox_id")
+    def action_release(self, reason):
+        result = super().action_release(reason)
+        self.mapped("retention_id")._invalidate_received_identity_packages()
+        return result

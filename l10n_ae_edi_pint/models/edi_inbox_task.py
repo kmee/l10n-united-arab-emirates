@@ -282,7 +282,7 @@ class UaeEdiInboxTask(models.Model):
         source.invalidate_recordset()
         if (
             source.state != "processed"
-            or source.identity_conflict
+            or source.identity_review_pending
             or not source.move_id
         ):
             raise UserError(

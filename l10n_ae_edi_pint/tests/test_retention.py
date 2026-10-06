@@ -36,6 +36,88 @@ class TestUaeReceivedRetention(AccountTestInvoicingCommon):
             }
         )
 
+    def test_family_package_refreshes_received_retention_and_hold_changes(self):
+        receiver = self.env["l10n_ae.edi.inbox"]
+        first = receiver.receive_controlled_document(
+            self.binding.id, "retention-family-cache", b"<first/>"
+        )
+        selected = receiver.receive_controlled_document(
+            self.binding.id, "retention-family-cache", b"<second/>"
+        )
+        selected.action_select_identity_variant(
+            "Compared both synthetic originals.", "SYNTHETIC-RETENTION-FAMILY-001"
+        )
+
+        def sibling_retention():
+            with (
+                zipfile.ZipFile(io.BytesIO(first.evidence_archive.content)) as archive,
+                zipfile.ZipFile(
+                    io.BytesIO(archive.read(f"identity-originals/{selected.id}.zip"))
+                ) as nested,
+            ):
+                return json.loads(nested.read("retention.json"))
+
+        self.assertEqual(sibling_retention()["obligations"], [])
+        policy = self.env["l10n_ae.edi.retention"].create(
+            {
+                "name": "Synthetic sibling retention",
+                "inbox_id": selected.id,
+                "record_class": "evidence",
+                "tax_purpose": "vat",
+                "anchor_kind": "tax_period_end",
+                "period_start": "2026-01-01",
+                "anchor_date": "2026-12-31",
+                "retention_years": 5,
+                "source_reference": "Synthetic reviewed source, not ratified",
+                "policy_version": "synthetic-family-1",
+                "review_note": "Illustrative interval",
+            }
+        )
+        self.assertEqual(sibling_retention()["obligations"][0]["state"], "draft")
+        policy.write({"review_note": "Updated synthetic review note"})
+        self.assertEqual(
+            sibling_retention()["obligations"][0]["review_note"],
+            "Updated synthetic review note",
+        )
+        policy.action_approve()
+        retained = sibling_retention()["obligations"][0]
+        self.assertEqual(retained["state"], "approved")
+        self.assertEqual(retained["retain_until"], "2031-12-31")
+        hold = self.env["l10n_ae.edi.retention.hold"].create(
+            {
+                "retention_id": policy.id,
+                "reason": "Synthetic family audit",
+                "source_reference": "Synthetic family audit reference",
+            }
+        )
+        self.assertEqual(sibling_retention()["holds"][0]["state"], "active")
+        hold.action_release("Synthetic family resolution")
+        self.assertEqual(sibling_retention()["holds"][0]["state"], "released")
+        self.assertEqual(
+            sibling_retention()["holds"][0]["release_reason"],
+            "Synthetic family resolution",
+        )
+        draft = self.env["l10n_ae.edi.retention"].create(
+            {
+                "name": "Synthetic removable draft",
+                "inbox_id": selected.id,
+                "record_class": "evidence",
+                "tax_purpose": "vat",
+                "anchor_kind": "tax_period_end",
+                "period_start": "2026-01-01",
+                "anchor_date": "2026-12-31",
+                "retention_years": 5,
+                "source_reference": "Synthetic source",
+                "policy_version": "synthetic-family-1",
+                "review_note": "Illustrative draft",
+            }
+        )
+        self.assertEqual(len(sibling_retention()["obligations"]), 2)
+        draft.unlink()
+        self.assertEqual(len(sibling_retention()["obligations"]), 1)
+        self.assertEqual(sibling_retention()["obligations"][0]["id"], policy.id)
+        self.assertFalse((first | selected).move_id)
+
     def test_received_package_preserves_reviewed_retention_and_hold_history(self):
         content = b'<!DOCTYPE Invoice SYSTEM "file:///etc/passwd"><Invoice/>'
         inbox = self.env["l10n_ae.edi.inbox"].receive_controlled_document(

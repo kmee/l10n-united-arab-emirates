@@ -12,6 +12,13 @@
             >
                 <header>
                     <button
+                        name="action_review_identity_variant"
+                        type="object"
+                        string="Review Identity Variant"
+                        groups="account.group_account_manager"
+                        invisible="not identity_conflict"
+                    />
+                    <button
                         name="action_request_review"
                         type="object"
                         string="Request Internal Review"
@@ -23,7 +30,7 @@
                         type="object"
                         string="Process Received Document"
                         groups="account.group_account_manager"
-                        invisible="move_id or identity_conflict"
+                        invisible="state == 'processed' or identity_review_pending"
                     />
                     <button
                         name="action_open_move"
@@ -51,9 +58,10 @@
                             readonly="1"
                             groups="base.group_allow_export"
                         />
-                        <field name="xml_hash" />
+                        <field name="xml_hash" class="text-wrap text-break" />
                         <field name="move_id" />
                         <field name="identity_conflict" />
+                        <field name="identity_review_pending" />
                     </group>
                     <group string="Review Diagnostic" invisible="not diagnostic">
                         <field name="diagnostic" nolabel="1" />
@@ -80,6 +88,47 @@
                             </list>
                         </field>
                     </group>
+                    <group
+                        string="Internal Identity Selections"
+                        col="1"
+                        invisible="not identity_conflict"
+                    >
+                        <field name="identity_decision_ids" readonly="1" nolabel="1">
+                            <list create="false" edit="false" delete="false">
+                                <field name="occurred_at" />
+                                <field name="operator_id" options="{'no_open': True}" />
+                                <field name="selected_inbox_id" />
+                                <field name="review_reference" />
+                            </list>
+                            <form
+                                create="false"
+                                edit="false"
+                                delete="false"
+                                duplicate="false"
+                            >
+                                <group>
+                                    <field name="occurred_at" />
+                                    <field
+                                        name="operator_id"
+                                        options="{'no_open': True}"
+                                    />
+                                    <field name="selected_inbox_id" />
+                                    <field name="selected_xml_hash" />
+                                    <field name="justification" />
+                                    <field name="review_reference" />
+                                </group>
+                                <field name="member_ids" readonly="1">
+                                    <list create="false" edit="false" delete="false">
+                                        <field name="id" string="Original ID" />
+                                        <field
+                                            name="xml_hash"
+                                            class="text-wrap text-break"
+                                        />
+                                    </list>
+                                </field>
+                            </form>
+                        </field>
+                    </group>
                     <group string="Processing History" col="1">
                         <field name="processing_history_ids" readonly="1" nolabel="1">
                             <list create="false" edit="false" delete="false">
@@ -102,7 +151,10 @@
                                         options="{'no_open': True}"
                                     />
                                     <field name="outcome" />
-                                    <field name="xml_hash" />
+                                    <field
+                                        name="xml_hash"
+                                        class="text-wrap text-break"
+                                    />
                                     <field name="diagnostic" />
                                     <field name="validation_report_hash" />
                                     <field name="validation_report" />

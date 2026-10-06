@@ -1,14 +1,16 @@
 # Copyright 2026 KMEE
 # License AGPL-3.0 or later (https://www.gnu.org/licenses/agpl).
 import hashlib
+import io
 import json
 import uuid
+import zipfile
 from decimal import Decimal
 
 from lxml import etree
 
 from odoo.exceptions import AccessError, UserError, ValidationError
-from odoo.tests import tagged
+from odoo.tests import Form, tagged
 from odoo.tests.common import new_test_user
 
 from odoo.addons.account.tests.common import AccountTestInvoicingCommon
@@ -21,6 +23,708 @@ NS = {
 
 @tagged("post_install", "-at_install")
 class TestUaeInvoiceXml(AccountTestInvoicingCommon):
+    def test_identity_package_refuses_hidden_original_decision_retention_or_hold(self):
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {"name": "Complete identity evidence access"}
+        )
+        receiver = self.env["l10n_ae.edi.inbox"]
+        first = receiver.receive_controlled_document(
+            binding.id, "identity-archive-access", b"<first/>"
+        )
+        selected = receiver.receive_controlled_document(
+            binding.id, "identity-archive-access", b"<second/>"
+        )
+        decision = selected.action_select_identity_variant(
+            "Reviewed both synthetic originals.", "SYNTH-ARCHIVE-ACCESS-001"
+        )
+        policy = self.env["l10n_ae.edi.retention"].create(
+            {
+                "name": "Synthetic identity archive basis",
+                "inbox_id": first.id,
+                "record_class": "evidence",
+                "tax_purpose": "vat",
+                "anchor_kind": "tax_period_end",
+                "period_start": "2026-01-01",
+                "anchor_date": "2026-12-31",
+                "retention_years": 5,
+                "source_reference": "Synthetic source, not ratified",
+                "policy_version": "synthetic-access-1",
+                "review_note": "Illustrative review",
+            }
+        )
+        policy.action_approve()
+        hold = self.env["l10n_ae.edi.retention.hold"].create(
+            {
+                "retention_id": policy.id,
+                "reason": "Synthetic retained audit",
+                "source_reference": "Synthetic audit evidence",
+            }
+        )
+        auditor = new_test_user(
+            self.env,
+            login="synthetic-complete-identity-auditor",
+            groups="l10n_ae_edi.group_fiscal_auditor,base.group_allow_export",
+            company_id=self.env.company.id,
+            company_ids=self.env.company.ids,
+        )
+        audit = selected.with_user(auditor)
+        before = audit.evidence_archive.content
+        for hidden in (first, decision, policy, hold):
+            restriction = self.env["ir.access"].create(
+                {
+                    "name": "Synthetic required identity evidence access",
+                    "model_id": self.env["ir.model"]._get(hidden._name).id,
+                    "operation": "r",
+                    "domain": f"[('id', '!=', {hidden.id})]",
+                }
+            )
+            try:
+                self.env.invalidate_all()
+                for original in (audit, audit.sudo()):
+                    with self.assertRaises(AccessError):
+                        original.read(["evidence_archive"])
+            finally:
+                restriction.unlink()
+                self.env.invalidate_all()
+            self.assertEqual(audit.evidence_archive.content, before)
+        self.assertFalse((first | selected).move_id)
+
+    def test_identity_package_refuses_a_corrupt_retained_family_hash(self):
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {"name": "Identity archive integrity"}
+        )
+        receiver = self.env["l10n_ae.edi.inbox"]
+        first = receiver.receive_controlled_document(
+            binding.id, "identity-archive-integrity", b"<first/>"
+        )
+        selected = receiver.receive_controlled_document(
+            binding.id, "identity-archive-integrity", b"<second/>"
+        )
+        selected.action_select_identity_variant(
+            "Compared both synthetic originals.", "SYNTH-ARCHIVE-INTEGRITY-001"
+        )
+        self.assertTrue(selected.evidence_archive.content)
+        # Explicit disposable-storage fault; ordinary evidence CRUD remains refused.
+        self.env.cr.execute(
+            "UPDATE l10n_ae_edi_inbox SET xml_hash=%s WHERE id=%s", ["0" * 64, first.id]
+        )
+        self.env.invalidate_all()
+        with self.assertRaises(UserError):
+            selected.read(["evidence_archive"])
+        self.assertFalse((first | selected).move_id)
+
+    def test_identity_review_projection_does_not_share_a_managers_decision_cache(self):
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {"name": "Identity review actor cache"}
+        )
+        receiver = self.env["l10n_ae.edi.inbox"].with_user(self.simple_accountman)
+        receiver.receive_controlled_document(
+            binding.id, "identity-actor-cache", b"<first/>"
+        )
+        selected = receiver.receive_controlled_document(
+            binding.id, "identity-actor-cache", b"<second/>"
+        )
+        decision = selected.action_select_identity_variant(
+            "Reviewed both originals.", "SYNTH-ACTOR-CACHE-001"
+        )
+        auditor = new_test_user(
+            self.env,
+            login="synthetic-identity-restricted-auditor",
+            groups="l10n_ae_edi.group_fiscal_auditor,base.group_allow_export",
+            company_id=self.env.company.id,
+            company_ids=self.env.company.ids,
+        )
+        restriction = self.env["ir.access"].create(
+            {
+                "name": "Synthetic decision visibility by actual user",
+                "model_id": self.env["ir.model"]._get("l10n_ae.edi.inbox.decision").id,
+                "operation": "r",
+                "domain": (
+                    f"[('id', '!=', {decision.id})] if user.id == {auditor.id} else []"
+                ),
+            }
+        )
+        try:
+            self.env.invalidate_all()
+            values = selected.read(
+                ["identity_review_pending", "identity_decision_ids"]
+            )[0]
+            self.assertFalse(values["identity_review_pending"])
+            self.assertEqual(values["identity_decision_ids"], decision.ids)
+            restricted = selected.with_user(auditor).read(
+                ["identity_review_pending", "identity_decision_ids"]
+            )[0]
+            self.assertTrue(restricted["identity_review_pending"])
+            self.assertEqual(restricted["identity_decision_ids"], [])
+            current = selected.read(
+                ["identity_review_pending", "identity_decision_ids"]
+            )[0]
+            self.assertFalse(current["identity_review_pending"])
+            self.assertEqual(current["identity_decision_ids"], decision.ids)
+        finally:
+            restriction.unlink()
+            self.env.invalidate_all()
+
+    def test_identity_selection_requires_reading_every_linked_accounting_document(self):
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {"name": "Hidden linked accounting"}
+        )
+        receiver = self.env["l10n_ae.edi.inbox"].with_user(self.simple_accountman)
+        tree = self._received_test_xml()
+        first = receiver.receive_controlled_document(
+            binding.id, "hidden-linked-accounting", etree.tostring(tree)
+        )
+        self.assertTrue(first.action_process())
+        tree.insert(0, etree.Comment("Synthetic hidden linked variant"))
+        other = receiver.receive_controlled_document(
+            binding.id, "hidden-linked-accounting", etree.tostring(tree)
+        )
+        first.action_select_identity_variant(
+            "Retained existing accounting link.", "SYNTH-LINKED-AUTHORITY-001"
+        )
+        restriction = self.env["ir.access"].create(
+            {
+                "name": "Synthetic hidden linked accounting document",
+                "model_id": self.env["ir.model"]._get("account.move").id,
+                "operation": "r",
+                "domain": f"[('id', '!=', {first.move_id.id})]",
+            }
+        )
+        try:
+            self.env.invalidate_all()
+            self.assertTrue(first.identity_review_pending)
+            for original in (first, other):
+                with self.assertRaises(AccessError), self.cr.savepoint():
+                    original.sudo().action_select_identity_variant(
+                        "Review cannot read linked accounting.",
+                        "SYNTH-LINKED-AUTHORITY-002",
+                    )
+        finally:
+            restriction.unlink()
+            self.env.invalidate_all()
+        self.assertFalse(first.identity_review_pending)
+        self.assertEqual(len(first.identity_decision_ids), 1)
+        self.assertFalse(other.move_id)
+
+    def test_cached_identity_package_refreshes_after_another_original_is_processed(
+        self,
+    ):
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {"name": "Identity package freshness"}
+        )
+        receiver = self.env["l10n_ae.edi.inbox"].with_user(self.simple_accountman)
+        tree = self._received_test_xml()
+        first = receiver.receive_controlled_document(
+            binding.id, "identity-package-freshness", etree.tostring(tree)
+        )
+        tree.insert(0, etree.Comment("Synthetic freshness variant"))
+        selected = receiver.receive_controlled_document(
+            binding.id, "identity-package-freshness", etree.tostring(tree)
+        )
+        selected.action_select_identity_variant(
+            "Reviewed complete current set.", "SYNTH-FRESHNESS-001"
+        )
+        auditor = new_test_user(
+            self.env,
+            login="synthetic-identity-cache-auditor",
+            groups="l10n_ae_edi.group_fiscal_auditor,base.group_allow_export",
+            company_id=self.env.company.id,
+            company_ids=self.env.company.ids,
+        )
+        audit = first.with_user(auditor)
+        before = audit.evidence_archive.content
+        self.assertTrue(selected.action_process())
+        after = audit.evidence_archive.content
+        self.assertNotEqual(before, after)
+        with (
+            zipfile.ZipFile(io.BytesIO(after)) as archive,
+            zipfile.ZipFile(
+                io.BytesIO(archive.read(f"identity-originals/{selected.id}.zip"))
+            ) as nested,
+        ):
+            receipt = json.loads(nested.read("receipt.json"))
+            history = json.loads(nested.read("processing-history.json"))
+            self.assertEqual(receipt["move_id"], selected.move_id.id)
+            self.assertEqual(receipt["state"], "processed")
+            self.assertEqual(len(history), 1)
+            self.assertEqual(history[0]["outcome"], "processed")
+            self.assertTrue(history[0]["validation_available"])
+        self.assertFalse(first.move_id)
+        self.assertEqual(selected.move_id.amount_total, 105)
+
+    def test_received_package_preserves_every_identity_selection_and_original(self):
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {"name": "Portable identity review"}
+        )
+        receiver = self.env["l10n_ae.edi.inbox"].with_user(self.simple_accountman)
+        tree = self._received_test_xml()
+        first_bytes = etree.tostring(tree)
+        first = receiver.receive_controlled_document(
+            binding.id, "portable-identity", first_bytes
+        )
+        tree.insert(0, etree.Comment("Synthetic portable identity variant"))
+        second_bytes = etree.tostring(tree)
+        selected = receiver.receive_controlled_document(
+            binding.id, "portable-identity", second_bytes
+        )
+        first_decision = first.action_select_identity_variant(
+            "Reviewed first original.", "SYNTH-PORTABLE-001"
+        )
+        last_decision = selected.action_select_identity_variant(
+            "Reviewed second original.", "SYNTH-PORTABLE-002"
+        )
+        auditor = new_test_user(
+            self.env,
+            login="synthetic-identity-package-auditor",
+            groups="l10n_ae_edi.group_fiscal_auditor,base.group_allow_export",
+            company_id=self.env.company.id,
+            company_ids=self.env.company.ids,
+        )
+        audit = first.with_user(auditor)
+        with zipfile.ZipFile(io.BytesIO(audit.evidence_archive.content)) as archive:
+            self.assertIn("identity-review.json", archive.namelist())
+            review = json.loads(archive.read("identity-review.json"))
+            self.assertEqual(review["format"], "kmee-uae-identity-review-1")
+            self.assertEqual(
+                review["originals"],
+                [
+                    {
+                        "inbox_id": first.id,
+                        "xml_hash": hashlib.sha256(first_bytes).hexdigest(),
+                    },
+                    {
+                        "inbox_id": selected.id,
+                        "xml_hash": hashlib.sha256(second_bytes).hexdigest(),
+                    },
+                ],
+            )
+            self.assertEqual(review["selected_inbox_id"], selected.id)
+            self.assertTrue(review["review_pending"])
+            self.assertEqual(
+                [row["id"] for row in review["decisions"]],
+                [first_decision.id, last_decision.id],
+            )
+            self.assertEqual(
+                [row["review_reference"] for row in review["decisions"]],
+                ["SYNTH-PORTABLE-001", "SYNTH-PORTABLE-002"],
+            )
+            for decision in review["decisions"]:
+                self.assertEqual(decision["operator_id"], self.simple_accountman.id)
+                self.assertTrue(decision["occurred_at"])
+                self.assertEqual(decision["member_snapshot"], review["originals"])
+                self.assertEqual(decision["member_ids"], [first.id, selected.id])
+            self.assertEqual(archive.read("document.xml"), first_bytes)
+            nested_bytes = archive.read(f"identity-originals/{selected.id}.zip")
+            with zipfile.ZipFile(io.BytesIO(nested_bytes)) as nested:
+                self.assertEqual(nested.read("document.xml"), second_bytes)
+                self.assertNotIn("identity-review.json", nested.namelist())
+                self.assertEqual(json.loads(nested.read("processing-history.json")), [])
+                self.assertIn("retention.json", nested.namelist())
+            manifest = json.loads(archive.read("manifest.json"))
+            self.assertEqual(
+                manifest["relationships"]["identity_decisions"],
+                [first_decision.id, last_decision.id],
+            )
+            self.assertEqual(
+                manifest["relationships"]["identity_originals"], [first.id, selected.id]
+            )
+            for name, metadata in manifest["artifacts"].items():
+                content = archive.read(name)
+                self.assertEqual(
+                    metadata,
+                    {
+                        "sha256": hashlib.sha256(content).hexdigest(),
+                        "size": len(content),
+                    },
+                )
+        self.assertFalse((first | selected).move_id)
+        self.assertFalse((first | selected).processing_history_ids)
+
+    def test_retained_review_form_cannot_omit_or_expose_a_hidden_original(self):
+        receiver = self.env["l10n_ae.edi.inbox"].with_user(self.simple_accountman)
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {"name": "Review form authority"}
+        )
+        first = receiver.receive_controlled_document(
+            binding.id, "review-form-authority", b"<first/>"
+        )
+        selected = receiver.receive_controlled_document(
+            binding.id, "review-form-authority", b"<second/>"
+        )
+        action = selected.with_context(
+            default_original_ids=[],
+            default_review_snapshot=[],
+            default_justification="Forged reason",
+        ).action_review_identity_variant()
+        wizard = (
+            self.env[action["res_model"]]
+            .with_user(self.simple_accountman)
+            .browse(action["res_id"])
+        )
+        self.assertEqual(wizard.original_ids, first | selected)
+        self.assertEqual(len(wizard.review_snapshot), 2)
+        self.assertFalse(wizard.justification)
+        for values in (
+            {"inbox_id": first.id},
+            {"original_ids": [(5, 0, 0)]},
+            {"review_snapshot": []},
+        ):
+            with self.assertRaises(UserError), self.cr.savepoint():
+                wizard.write(values)
+        wizard.write(
+            {
+                "justification": "Reviewed both originals.",
+                "review_reference": "SYNTHETIC-FORM-AUTHORITY-001",
+            }
+        )
+        restriction = self.env["ir.access"].create(
+            {
+                "name": "Synthetic hidden original in retained assistant",
+                "model_id": self.env["ir.model"]._get("l10n_ae.edi.inbox").id,
+                "operation": "r",
+                "domain": f"[('id', '!=', {first.id})]",
+            }
+        )
+        try:
+            self.env.invalidate_all()
+            self.assertFalse(wizard.search([("id", "=", wizard.id)]))
+            with self.assertRaises(AccessError):
+                wizard.read(["review_snapshot"])
+            with self.assertRaises(AccessError), self.cr.savepoint():
+                wizard.sudo().action_confirm()
+        finally:
+            restriction.unlink()
+            self.env.invalidate_all()
+        self.assertFalse(selected.identity_decision_ids)
+        wizard.action_confirm()
+        self.assertEqual(len(selected.identity_decision_ids), 1)
+        self.assertFalse(selected.move_id)
+
+    def test_open_review_form_refuses_a_later_original(self):
+        receiver = self.env["l10n_ae.edi.inbox"].with_user(self.simple_accountman)
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {"name": "Open review changes"}
+        )
+        first = receiver.receive_controlled_document(
+            binding.id, "open-review-changes", b"<first/>"
+        )
+        selected = receiver.receive_controlled_document(
+            binding.id, "open-review-changes", b"<second/>"
+        )
+        action = selected.action_review_identity_variant()
+        with Form(
+            self.env[action["res_model"]]
+            .with_user(self.simple_accountman)
+            .browse(action["res_id"])
+            .with_context(**action["context"]),
+            view="l10n_ae_edi_pint.edi_inbox_selection_form",
+        ) as form:
+            form.justification = "Reviewed the two displayed originals."
+            form.review_reference = "SYNTHETIC-OPEN-REVIEW-001"
+        wizard = form.record
+        self.assertEqual(wizard.original_ids, first | selected)
+        third = receiver.receive_controlled_document(
+            binding.id, "open-review-changes", b"<third/>"
+        )
+        with self.assertRaises(UserError), self.cr.savepoint():
+            wizard.action_confirm()
+        self.assertFalse(selected.identity_decision_ids)
+        self.assertFalse((first | selected | third).move_id)
+        action = selected.action_review_identity_variant()
+        fresh = (
+            self.env[action["res_model"]]
+            .with_user(self.simple_accountman)
+            .browse(action["res_id"])
+        )
+        self.assertEqual(fresh.original_ids, first | selected | third)
+        fresh.write(
+            {
+                "justification": "Reviewed the three current originals.",
+                "review_reference": "SYNTHETIC-OPEN-REVIEW-002",
+            }
+        )
+        fresh.action_confirm()
+        self.assertEqual(len(selected.identity_decision_ids), 1)
+
+    def test_manager_selects_original_through_native_review_form(self):
+        tree = self._received_test_xml()
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {"name": "Native selection form"}
+        )
+        receiver = self.env["l10n_ae.edi.inbox"].with_user(self.simple_accountman)
+        first = receiver.receive_controlled_document(
+            binding.id, "native-selection", etree.tostring(tree)
+        )
+        tree.insert(0, etree.Comment("Synthetic native form variant"))
+        selected = receiver.receive_controlled_document(
+            binding.id, "native-selection", etree.tostring(tree)
+        )
+        action = selected.with_context(
+            default_inbox_id=first.id, default_justification="Forged caller reason"
+        ).action_review_identity_variant()
+        with Form(
+            self.env[action["res_model"]]
+            .with_user(self.simple_accountman)
+            .browse(action["res_id"])
+            .with_context(**action["context"]),
+            view="l10n_ae_edi_pint.edi_inbox_selection_form",
+        ) as form:
+            self.assertEqual(form.inbox_id, selected)
+            self.assertFalse(form.justification)
+            form.justification = "Compared both synthetic XML originals."
+            form.review_reference = "SYNTHETIC-NATIVE-FORM-001"
+        wizard = form.record
+        self.assertEqual(wizard.original_ids, first | selected)
+        self.assertEqual(wizard.xml_hash, selected.xml_hash)
+        result = wizard.action_confirm()
+        self.assertEqual(result["res_model"], "l10n_ae.edi.inbox")
+        self.assertEqual(result["res_id"], selected.id)
+        self.assertEqual(len(selected.identity_decision_ids), 1)
+        self.assertFalse(selected.identity_review_pending)
+        self.assertFalse(selected.move_id)
+        self.assertTrue(selected.action_process(), selected.diagnostic)
+        self.assertEqual(selected.move_id.amount_total, 105)
+        self.assertFalse(first.move_id)
+
+    def test_elevated_manager_cannot_process_a_hidden_original(self):
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {"name": "Actual processing authority"}
+        )
+        inbox = (
+            self.env["l10n_ae.edi.inbox"]
+            .with_user(self.simple_accountman)
+            .receive_controlled_document(
+                binding.id,
+                "hidden-processing-authority",
+                etree.tostring(self._received_test_xml()),
+            )
+        )
+        restriction = self.env["ir.access"].create(
+            {
+                "name": "Synthetic hidden original for elevated processing",
+                "model_id": self.env["ir.model"]._get("l10n_ae.edi.inbox").id,
+                "operation": "r",
+                "domain": f"[('id', '!=', {inbox.id})]",
+            }
+        )
+        try:
+            self.env.invalidate_all()
+            with self.assertRaises(AccessError), self.cr.savepoint():
+                inbox.sudo().action_process()
+        finally:
+            restriction.unlink()
+            self.env.invalidate_all()
+        self.assertFalse(inbox.move_id)
+        self.assertEqual(inbox.state, "received")
+        self.assertFalse(inbox.processing_history_ids)
+
+    def test_selection_history_requires_every_original_and_current_internal_manager(
+        self,
+    ):
+        receiver = self.env["l10n_ae.edi.inbox"].with_user(self.simple_accountman)
+        binding = self.env["l10n_ae.edi.binding"].create({"name": "Selection access"})
+        first = receiver.receive_controlled_document(
+            binding.id, "selection-access", b"<first/>"
+        )
+        second = receiver.receive_controlled_document(
+            binding.id, "selection-access", b"<second/>"
+        )
+        reader = new_test_user(
+            self.env,
+            login="synthetic-selection-reader",
+            groups="account.group_account_readonly",
+            company_id=self.env.company.id,
+            company_ids=[(6, 0, self.env.company.ids)],
+        )
+        for elevated in (False, True):
+            with (
+                self.subTest(elevated=elevated),
+                self.assertRaises(AccessError),
+                self.cr.savepoint(),
+            ):
+                second.with_user(reader).sudo(elevated).action_select_identity_variant(
+                    "Reviewed.", "SYNTHETIC-ACL-001"
+                )
+        for reason, reference in ((" ", "ref"), ("reason", " "), (False, "ref")):
+            with self.assertRaises(UserError), self.cr.savepoint():
+                second.action_select_identity_variant(reason, reference)
+        decision = second.with_context(
+            default_operator_id=reader.id,
+            default_occurred_at="2000-01-01 00:00:00",
+            default_member_snapshot=[],
+            default_company_id=False,
+        ).action_select_identity_variant(
+            "Reviewed both originals.", "SYNTHETIC-ACL-002"
+        )
+        self.assertEqual(decision.operator_id, self.simple_accountman)
+        self.assertEqual(decision.company_id, self.env.company)
+        self.assertEqual(len(decision.member_snapshot), 2)
+        self.assertEqual(
+            decision.with_user(reader).read(["selected_xml_hash"])[0][
+                "selected_xml_hash"
+            ],
+            second.xml_hash,
+        )
+        for operation in (
+            lambda: decision.write({"justification": "changed"}),
+            decision.copy,
+            decision.unlink,
+        ):
+            with self.assertRaises(UserError), self.cr.savepoint():
+                operation()
+        restriction = self.env["ir.access"].create(
+            {
+                "name": "Synthetic hidden selection member",
+                "model_id": self.env["ir.model"]._get("l10n_ae.edi.inbox").id,
+                "operation": "r",
+                "domain": f"[('id', '!=', {first.id})]",
+            }
+        )
+        try:
+            self.env.invalidate_all()
+            for actor in (reader, self.simple_accountman):
+                history = self.env["l10n_ae.edi.inbox.decision"].with_user(actor)
+                self.assertFalse(history.search([("id", "=", decision.id)]))
+                with self.assertRaises(AccessError):
+                    history.browse(decision.id).read(["member_snapshot"])
+            self.assertTrue(second.identity_review_pending)
+            self.assertFalse(second.identity_decision_ids)
+            for elevated in (False, True):
+                with self.assertRaises(AccessError), self.cr.savepoint():
+                    second.sudo(elevated).action_select_identity_variant(
+                        "Reviewed.", "SYNTHETIC-ACL-003"
+                    )
+            self.assertFalse(second.action_process())
+        finally:
+            restriction.unlink()
+            self.env.invalidate_all()
+        self.assertFalse(second.identity_review_pending)
+        self.assertEqual(second.identity_decision_ids, decision)
+        self.assertEqual(first.original_xml.content, b"<first/>")
+
+    def test_new_original_invalidates_selection_without_rewriting_its_history(self):
+        receiver = self.env["l10n_ae.edi.inbox"].with_user(self.simple_accountman)
+        binding = self.env["l10n_ae.edi.binding"].create({"name": "Selection revision"})
+        first = receiver.receive_controlled_document(
+            binding.id, "selection-revision", b"<first/>"
+        )
+        second = receiver.receive_controlled_document(
+            binding.id, "selection-revision", b"<second/>"
+        )
+        decision = second.action_select_identity_variant(
+            "Reviewed two originals.", "SYNTHETIC-REVISION-001"
+        )
+        snapshot = decision.member_snapshot
+        self.assertFalse(second.identity_review_pending)
+        self.assertEqual(
+            receiver.receive_controlled_document(
+                binding.id, "selection-revision", b"<second/>"
+            ),
+            second,
+        )
+        self.assertFalse(second.identity_review_pending)
+        third = receiver.receive_controlled_document(
+            binding.id, "selection-revision", b"<third/>"
+        )
+        self.assertTrue(second.identity_review_pending)
+        self.assertTrue(third.identity_review_pending)
+        self.assertFalse(second.action_process())
+        revised = second.action_select_identity_variant(
+            "Reviewed all three originals.", "SYNTHETIC-REVISION-002"
+        )
+        self.assertNotEqual(revised, decision)
+        self.assertEqual(revised.member_ids, first | second | third)
+        self.assertEqual(decision.member_snapshot, snapshot)
+        self.assertEqual(decision.member_ids, first | second)
+        self.assertFalse(second.identity_review_pending)
+        self.assertEqual(len(second.identity_decision_ids), 2)
+        self.assertFalse((first | second | third).move_id)
+
+    def test_selection_keeps_the_linked_original_and_restores_internal_resolution(self):
+        tree = self._received_test_xml()
+        content = etree.tostring(tree)
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {"name": "Pinned identity review"}
+        )
+        receiver = self.env["l10n_ae.edi.inbox"].with_user(self.simple_accountman)
+        first = receiver.receive_controlled_document(
+            binding.id, "pinned-identity", content
+        )
+        self.assertTrue(first.action_process(), first.diagnostic)
+        bill = first.move_id
+        tree.insert(0, etree.Comment("Synthetic later original"))
+        second = receiver.receive_controlled_document(
+            binding.id, "pinned-identity", etree.tostring(tree)
+        )
+        self.env.company.l10n_ae_inbox_reviewer_id = self.simple_accountman
+        action = first.action_request_review()
+        task = (
+            self.env[action["res_model"]]
+            .with_user(self.simple_accountman)
+            .browse(action["res_id"])
+        )
+        with self.assertRaises(UserError), self.cr.savepoint():
+            second.action_select_identity_variant(
+                "Reviewed both originals.", "SYNTHETIC-PIN-001"
+            )
+        first.action_select_identity_variant(
+            "Reviewed existing bill and both originals.", "SYNTHETIC-PIN-002"
+        )
+        self.assertTrue(first.action_process())
+        self.assertEqual(first.state, "processed")
+        self.assertTrue(task.action_resolve_review())
+        self.assertEqual(task.state, "resolved")
+        self.assertEqual(first.move_id, bill)
+        self.assertFalse(second.move_id)
+        self.assertEqual(len(first.processing_history_ids), 1)
+        self.assertTrue(first.identity_conflict)
+
+    def test_reviewed_identity_variant_creates_only_its_one_draft(self):
+        tree = self._received_test_xml()
+        first_content = etree.tostring(tree)
+        tree.insert(0, etree.Comment("Synthetic variant for explicit human review"))
+        selected_content = etree.tostring(tree)
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {"name": "Human identity review"}
+        )
+        receiver = self.env["l10n_ae.edi.inbox"].with_user(self.simple_accountman)
+        first = receiver.receive_controlled_document(
+            binding.id, "human-reviewed-variants", first_content
+        )
+        selected = receiver.receive_controlled_document(
+            binding.id, "human-reviewed-variants", selected_content
+        )
+        self.assertFalse(first.action_process())
+        self.assertFalse(selected.action_process())
+        decision = selected.action_select_identity_variant(
+            "Compared both retained originals with the controlled source.",
+            "SYNTHETIC-IDENTITY-REVIEW-001",
+        )
+        self.assertEqual(decision.selected_inbox_id, selected)
+        self.assertEqual(decision.operator_id, self.simple_accountman)
+        self.assertEqual(decision.member_ids, first | selected)
+        self.assertTrue(selected.identity_conflict)
+        self.assertFalse(selected.identity_review_pending)
+        self.assertTrue(first.identity_review_pending)
+        self.assertFalse(first.action_process())
+        self.assertTrue(selected.action_process(), selected.diagnostic)
+        bill = selected.move_id
+        self.assertEqual(bill.move_type, "in_invoice")
+        self.assertEqual(bill.state, "draft")
+        self.assertEqual(bill.amount_untaxed, 100)
+        self.assertEqual(bill.amount_tax, 5)
+        self.assertEqual(bill.amount_total, 105)
+        repeated = selected.action_select_identity_variant(
+            decision.justification, decision.review_reference
+        )
+        self.assertEqual(repeated, decision)
+        self.assertTrue(selected.action_process())
+        self.assertEqual(selected.move_id, bill)
+        self.assertEqual(len(selected.processing_history_ids), 1)
+        self.assertFalse(first.move_id)
+        self.assertEqual(first.original_xml.content, first_content)
+        self.assertEqual(selected.original_xml.content, selected_content)
+
     def test_received_identity_conflict_includes_an_unreadable_original(self):
         binding = self.env["l10n_ae.edi.binding"].create(
             {"name": "Restricted original identity"}

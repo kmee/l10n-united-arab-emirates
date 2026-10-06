@@ -186,6 +186,28 @@ document. Changing future company routing does not rewrite earlier
 assignments. See scenario29 in the PT/EN manuals for the selected native
 journey and proof limits.
 
+When **Remote ID Conflict** is present, an Accounting Manager who can
+read every retained original may use **Review Identity Variant**.
+Compare the exact original/hash with all displayed members and business
+evidence, then enter **Justification** and **Review Reference**.
+**Select This Original** records internal eligibility without processing
+or posting. A new distinct XML received while the assistant is open
+requires cancelling and reopening it. Historical conflict remains;
+**Identity Review Pending** clears only for the current eligible
+original. Existing accounting links remain pinned to their original.
+Multiple linked originals require escalation.
+
+Process the selected original separately with **Process Received
+Document**. Internal identity selections are append-only and separate
+from processing history. **Received Evidence Package** includes the
+complete selection history and other retained originals with their own
+processing/retention evidence. Missing access to any required original,
+decision or artifact refuses the package; incomplete history is not
+silently omitted. Packages refresh after processing or reviewed
+retention/hold changes. Selection/export does not establish supplier
+authenticity or ASP/FTA acceptance. Full provider protocols, adverse
+recovery, notification policy and acceptance matrices remain required.
+
 Known issues / Roadmap
 ======================
 

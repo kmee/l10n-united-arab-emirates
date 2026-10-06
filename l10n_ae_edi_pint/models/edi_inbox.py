@@ -212,54 +212,68 @@ class UaeEdiInbox(models.Model):
 
     def action_process(self):
         self.ensure_one()
-        self._check_operator()
-        self.check_access("read")
-        self._check_receiving_company(self.company_id)
-        self.env.cr.execute(
+        current = self.with_user(self.env.uid).sudo(False)
+        current._check_operator()
+        current.check_access("read")
+        current._check_receiving_company(current.company_id)
+        current.env.cr.execute(
             "SELECT id FROM l10n_ae_edi_binding WHERE id = %s FOR UPDATE",
-            [self.binding_id.id],
+            [current.binding_id.id],
         )
-        self.env.cr.execute(
-            "SELECT id FROM l10n_ae_edi_inbox WHERE id = %s FOR UPDATE", [self.id]
+        current.env.cr.execute(
+            "SELECT id FROM l10n_ae_edi_inbox WHERE id = %s FOR UPDATE", [current.id]
         )
-        self.invalidate_recordset()
-        if self.identity_conflict:
+        current.invalidate_recordset()
+        if current.identity_review_pending:
             return False
-        if self.move_id:
+        if current.move_id:
+            current.move_id.with_user(current.env.uid).sudo(False).check_access("read")
+            if current.state != "processed":
+                if (
+                    hashlib.sha256(current.original_xml.content).hexdigest()
+                    != current.xml_hash
+                ):
+                    raise UserError(
+                        current.env._("Received XML failed its integrity check.")
+                    )
+                super(UaeEdiInbox, current.sudo()).write(
+                    {"state": "processed", "diagnostic": False}
+                )
+                current._identity_family().invalidate_recordset(["evidence_archive"])
             return True
         report = False
         try:
-            with self.env.cr.savepoint():
-                content = self.original_xml.content
-                if hashlib.sha256(content).hexdigest() != self.xml_hash:
+            with current.env.cr.savepoint():
+                content = current.original_xml.content
+                if hashlib.sha256(content).hexdigest() != current.xml_hash:
                     raise UserError(
-                        self.env._("Received XML failed its integrity check.")
+                        current.env._("Received XML failed its integrity check.")
                     )
                 tree = parse_invoice_xml(content)
                 directory = os.environ.get("KMEE_UAE_NORMATIVE_DIR")
                 if not directory:
                     raise UserError(
-                        self.env._(
+                        current.env._(
                             "Configure the offline UAE normative resource directory."
                         )
                     )
                 report = OfflinePintValidator(directory).validate(content)
                 # Preserve the specific cardinality diagnostic alongside the report.
-                self._received_beneficiary_id(tree)
-                self.env["account.move"]._l10n_ae_check_pint_report(report)
-                move = self.with_company(self.company_id)._process_received_xml()
+                current._received_beneficiary_id(tree)
+                current.env["account.move"]._l10n_ae_check_pint_report(report)
+                move = current.with_company(current.company_id)._process_received_xml()
         except (UserError, UnsafeInvoiceXml, ValidationUnavailable) as error:
-            super(UaeEdiInbox, self.sudo()).write(
+            super(UaeEdiInbox, current.sudo()).write(
                 {"state": "review", "diagnostic": str(error)}
             )
-            self._record_processing_history(
+            current._record_processing_history(
                 "review", diagnostic=str(error), validation_report=report
             )
             return False
-        super(UaeEdiInbox, self.sudo()).write(
+        super(UaeEdiInbox, current.sudo()).write(
             {"state": "processed", "diagnostic": False, "move_id": move.id}
         )
-        self._record_processing_history(
+        current._record_processing_history(
             "processed", move=move, validation_report=report
         )
         return True
@@ -268,13 +282,15 @@ class UaeEdiInbox(models.Model):
         self, outcome, diagnostic=False, move=False, validation_report=False
     ):
         self.ensure_one()
-        return self.env["l10n_ae.edi.inbox.review"]._record(
+        history = self.env["l10n_ae.edi.inbox.review"]._record(
             self,
             outcome,
             diagnostic=diagnostic,
             move=move,
             validation_report=validation_report,
         )
+        self._identity_family().invalidate_recordset(["evidence_archive"])
+        return history
 
     def action_open_move(self):
         self.ensure_one()
