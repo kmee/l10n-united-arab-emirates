@@ -10,6 +10,7 @@ from odoo.exceptions import AccessError, UserError
 from odoo.tools.binary import BinaryBytes
 
 from .edi_inbox import UaeEdiInbox
+from .edi_inbox_event_decision import UaeInboxEventDecision
 from .edi_inbox_identity import UaeInboxIdentityDecision
 
 
@@ -264,8 +265,8 @@ class UaeEdiInboxEvidence(models.Model):
                 }
                 for name, content in sorted(artifacts.items())
             }
-        event_sources, ingestion, event_packages = inbox._received_ingestion_evidence(
-            include_ingestion
+        event_sources, ingestion, event_packages, event_decisions = (
+            inbox._received_ingestion_evidence(include_ingestion)
         )
         preserve_json(
             "ingestion-events.json",
@@ -289,6 +290,7 @@ class UaeEdiInboxEvidence(models.Model):
         )
         manifest["relationships"]["ingestion_events"] = ingestion.ids
         manifest["relationships"]["ingestion_originals"] = event_sources.ids
+        manifest["relationships"]["event_decisions"] = event_decisions.ids
         for name, content in event_packages.items():
             preserve(name, content)
         manifest["artifacts"] = {
@@ -354,7 +356,13 @@ class UaeEdiInboxEvidence(models.Model):
                 packages[name] = original._build_received_evidence_archive(
                     include_identity=False, include_ingestion=False
                 )
-        return event_sources, ingestion, packages
+        event_decisions = inbox.env["l10n_ae.edi.inbox.event.decision"]
+        if include_family and inbox.ingestion_conflict:
+            review, event_decisions = inbox._received_event_review_evidence()
+            packages["event-review.json"] = json.dumps(
+                review, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+            ).encode("utf-8")
+        return event_sources, ingestion, packages, event_decisions
 
     def _ingestion_family(self):
         """Discover connected event originals within the authorized source binding."""
@@ -563,6 +571,349 @@ class UaeEdiInboxEvidence(models.Model):
             "type": "ir.actions.act_window",
             "name": current.env._("Review Identity Variant"),
             "res_model": "l10n_ae.edi.inbox.selection",
+            "res_id": wizard.id,
+            "view_mode": "form",
+            "target": "new",
+            "context": {"allowed_company_ids": current.company_id.ids},
+        }
+
+    event_review_pending = fields.Boolean(compute="_compute_event_review")
+    event_decision_ids = fields.Many2many(
+        "l10n_ae.edi.inbox.event.decision",
+        string="Internal Delivery Event Reviews",
+        compute="_compute_event_review",
+    )
+
+    def _check_event_review_operator(self):
+        self.ensure_one()
+        self._check_operator()
+        if self.env.user.share:
+            raise AccessError(self.env._("An internal Accounting Manager is required."))
+        self.check_access("read")
+        self._check_receiving_company(self.company_id)
+        self.binding_id.check_access("read")
+        self.binding_id._check_transport_allowed()
+
+    def _event_decision_domain(self):
+        self.ensure_one()
+        return [
+            ("company_id", "=", self.company_id.id),
+            ("binding_id", "=", self.binding_id.id),
+            ("member_ids", "in", self._ingestion_family().ids),
+        ]
+
+    def _received_event_review_evidence(self):
+        self.ensure_one()
+        current = self.sudo(False)
+        snapshot = current._event_review_snapshot()
+        decisions = (
+            current.env["l10n_ae.edi.inbox.event.decision"]
+            .sudo()
+            .search(current._event_decision_domain(), order="id")
+            .with_env(current.env)
+        )
+        decisions.check_access("read")
+        current_originals = {row["id"]: row for row in snapshot["originals"]}
+        current_events = {row["id"]: row for row in snapshot["events"]}
+        for decision in decisions:
+            baseline = decision.member_snapshot
+            if (
+                not baseline
+                or set(decision.member_ids.ids)
+                != {row["id"] for row in baseline.get("originals", [])}
+                or not decision.approved_inbox_ids
+                or decision.approved_inbox_ids - decision.member_ids
+            ):
+                raise UserError(
+                    current.env._("Received delivery event review is inconsistent.")
+                )
+            for row in baseline["originals"]:
+                actual = current_originals.get(row["id"])
+                if (
+                    not actual
+                    or {k: v for k, v in row.items() if k != "move_id"}
+                    != {k: v for k, v in actual.items() if k != "move_id"}
+                    or row["move_id"]
+                    and row["move_id"] != actual["move_id"]
+                ):
+                    raise UserError(
+                        current.env._("Received delivery event review is inconsistent.")
+                    )
+            if any(
+                row != current_events.get(row["id"])
+                for row in baseline.get("events", [])
+            ):
+                raise UserError(
+                    current.env._("Received delivery event review is inconsistent.")
+                )
+        return {
+            "format": "kmee-uae-event-review-1",
+            "originals": snapshot["originals"],
+            "events": snapshot["events"],
+            "review_pending": not current._event_selection_is_current(),
+            "decisions": _received_metadata(
+                decisions,
+                [
+                    "company_id",
+                    "binding_id",
+                    "member_ids",
+                    "approved_inbox_ids",
+                    "member_snapshot",
+                    "operator_id",
+                    "occurred_at",
+                    "justification",
+                    "review_reference",
+                ],
+            ),
+        }, decisions
+
+    def _event_review_snapshot(self):
+        """Capture the complete connected evidence, including baseline links."""
+        self.ensure_one()
+        current = self.sudo(False)
+        current.check_access("read")
+        # Discover the whole graph without generating nested evidence packages.
+        family = current._ingestion_family().with_env(current.env)
+        family.check_access("read")
+        ledger = (
+            current.env["l10n_ae.edi.inbox.ingestion"]
+            .sudo()
+            .search(
+                [
+                    ("company_id", "=", current.company_id.id),
+                    ("binding_id", "=", current.binding_id.id),
+                    ("inbox_id", "in", family.ids),
+                ],
+                order="id",
+            )
+            .with_env(current.env)
+        )
+        ledger.check_access("read")
+        if family.move_id:
+            family.move_id.check_access("read")
+        for original in family:
+            if (
+                not original.original_xml
+                or hashlib.sha256(original.original_xml.content).hexdigest()
+                != original.xml_hash
+            ):
+                raise UserError(self.env._("Received XML failed its integrity check."))
+        for event in ledger:
+            if (
+                event.binding_id != event.inbox_id.binding_id
+                or event.company_id != event.inbox_id.company_id
+                or event.remote_id != event.inbox_id.remote_id
+                or event.xml_hash != event.inbox_id.xml_hash
+            ):
+                raise UserError(
+                    self.env._("Received delivery event evidence is inconsistent.")
+                )
+        return {
+            "originals": _received_metadata(
+                family, ["company_id", "binding_id", "remote_id", "xml_hash", "move_id"]
+            ),
+            "events": _received_metadata(
+                ledger,
+                [
+                    "inbox_id",
+                    "binding_id",
+                    "company_id",
+                    "event_id",
+                    "remote_id",
+                    "xml_hash",
+                    "operator_id",
+                    "occurred_at",
+                    "provider",
+                    "environment",
+                    "recipient_tin",
+                    "disposition",
+                ],
+            ),
+        }
+
+    def _event_decision_is_current(self, decision, snapshot):
+        """Native processing may add links while the reviewed graph stays unchanged."""
+        baseline = decision.member_snapshot
+        if (
+            not baseline
+            or baseline.get("events") != snapshot["events"]
+            or len(baseline.get("originals", [])) != len(snapshot["originals"])
+        ):
+            return False
+        approved = set(decision.approved_inbox_ids.ids)
+        if not approved or approved - set(decision.member_ids.ids):
+            return False
+        for before, after in zip(
+            baseline["originals"], snapshot["originals"], strict=True
+        ):
+            if {k: v for k, v in before.items() if k != "move_id"} != {
+                k: v for k, v in after.items() if k != "move_id"
+            }:
+                return False
+            if before["move_id"] == after["move_id"]:
+                continue
+            if before["move_id"] or after["id"] not in approved or not after["move_id"]:
+                return False
+            history = (
+                self.env["l10n_ae.edi.inbox.review"]
+                .sudo()
+                .search([("inbox_id", "=", after["id"])])
+                .with_env(self.env)
+            )
+            history.check_access("read")
+            if not any(
+                (
+                    row.outcome == "processed"
+                    and row.company_id.id == after["company_id"]
+                    and row.xml_hash == after["xml_hash"]
+                    and row.move_id.id == after["move_id"]
+                    and row.occurred_at >= decision.occurred_at
+                )
+                for row in history
+            ):
+                return False
+        return True
+
+    def _event_selection_is_current(self):
+        self.ensure_one()
+        if not self.ingestion_conflict:
+            return True
+        current = self.with_user(self.env.uid).sudo(False)
+        try:
+            snapshot = current._event_review_snapshot()
+            latest = (
+                current.env["l10n_ae.edi.inbox.event.decision"]
+                .sudo()
+                .search(current._event_decision_domain(), limit=1)
+                .with_env(current.env)
+            )
+            latest.check_access("read")
+            return bool(
+                latest
+                and current in latest.approved_inbox_ids
+                and current._event_decision_is_current(latest, snapshot)
+            )
+        except (AccessError, UserError):
+            return False
+
+    @api.depends_context("uid", "allowed_company_ids")
+    @api.depends("ingestion_conflict", "ingestion_event_ids", "move_id")
+    def _compute_event_review(self):
+        decisions = self.env["l10n_ae.edi.inbox.event.decision"]
+        for original in self:
+            original.event_review_pending = not original._event_selection_is_current()
+            original.event_decision_ids = (
+                decisions.search(original._event_decision_domain())
+                if original.ingestion_conflict
+                else decisions
+            )
+
+    def action_approve_event_originals(
+        self,
+        approved_inbox_ids,
+        justification,
+        review_reference,
+        expected_snapshot=None,
+    ):
+        """Record internal eligibility; no accounting or fiscal confirmation occurs."""
+        self.ensure_one()
+        current = self.with_user(self.env.uid).sudo(False)
+        current._check_event_review_operator()
+        if (
+            not isinstance(approved_inbox_ids, (list, tuple))
+            or not approved_inbox_ids
+            or any(type(value) is not int for value in approved_inbox_ids)
+            or not isinstance(justification, str)
+            or not justification.strip()
+            or len(justification) > 4096
+            or not isinstance(review_reference, str)
+            or not review_reference.strip()
+            or len(review_reference) > 512
+        ):
+            raise UserError(
+                current.env._(
+                    "Select reviewed originals, a justification "
+                    "and an evidence reference."
+                )
+            )
+        current.env.cr.execute(
+            "UPDATE l10n_ae_edi_binding SET write_date=write_date WHERE id=%s",
+            [current.binding_id.id],
+        )
+        family = current._ingestion_family().with_env(current.env)
+        current.env.cr.execute(
+            "SELECT id FROM l10n_ae_edi_inbox "
+            "WHERE id = ANY(%s) ORDER BY id FOR UPDATE",
+            [family.ids],
+        )
+        family.invalidate_recordset()
+        snapshot = current._event_review_snapshot()
+        if not current.ingestion_conflict or len(family) < 2:
+            raise UserError(
+                current.env._("At least two conflicting originals are required.")
+            )
+        approved = current.browse(approved_inbox_ids)
+        if approved - family:
+            raise UserError(
+                current.env._("Approve only originals in this delivery event review.")
+            )
+        if expected_snapshot is not None and expected_snapshot != snapshot:
+            raise UserError(
+                current.env._(
+                    "Received evidence changed. Reopen the delivery event review."
+                )
+            )
+        decisions = current.env["l10n_ae.edi.inbox.event.decision"]
+        latest = decisions.sudo().search(current._event_decision_domain(), limit=1)
+        if latest:
+            latest = latest.with_env(current.env)
+            latest.check_access("read")
+            if (
+                set(latest.approved_inbox_ids.ids) == set(approved.ids)
+                and latest.justification == justification.strip()
+                and latest.review_reference == review_reference.strip()
+                and current._event_decision_is_current(latest, snapshot)
+            ):
+                return latest
+        # Drop all caller defaults before recording actual actor and immutable facts.
+        # pylint: disable=context-overridden
+        recorder = decisions.with_context(
+            {"allowed_company_ids": current.company_id.ids}
+        )
+        decision = super(UaeInboxEventDecision, recorder).create(
+            {
+                "company_id": current.company_id.id,
+                "binding_id": current.binding_id.id,
+                "member_ids": [fields.Command.set(family.ids)],
+                "approved_inbox_ids": [fields.Command.set(approved.ids)],
+                "member_snapshot": snapshot,
+                "operator_id": current.env.uid,
+                "occurred_at": fields.Datetime.now(),
+                "justification": justification.strip(),
+                "review_reference": review_reference.strip(),
+            }
+        )
+        super(UaeEdiInbox, family.sudo()).write({"ingestion_conflict": True})
+        family.flush_recordset(["ingestion_conflict", "write_date"])
+        family.invalidate_recordset(
+            ["event_review_pending", "event_decision_ids", "evidence_archive"]
+        )
+        return decision
+
+    def action_review_event_conflict(self):
+        self.ensure_one()
+        current = self.with_user(self.env.uid).sudo(False)
+        current._check_event_review_operator()
+        # pylint: disable=context-overridden
+        wizard = (
+            current.env["l10n_ae.edi.inbox.event.review"]
+            .with_context({"allowed_company_ids": current.company_id.ids})
+            .create({"inbox_id": current.id})
+        )
+        return {
+            "type": "ir.actions.act_window",
+            "name": current.env._("Review Delivery Event Conflict"),
+            "res_model": "l10n_ae.edi.inbox.event.review",
             "res_id": wizard.id,
             "view_mode": "form",
             "target": "new",

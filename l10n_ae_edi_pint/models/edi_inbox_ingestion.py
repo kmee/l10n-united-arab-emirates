@@ -133,7 +133,9 @@ class UaeEdiInboxIngestion(models.Model):
             )
             for original in originals:
                 original._identity_family().invalidate_recordset(["evidence_archive"])
-        for original in inbox._ingestion_family():
+        family = inbox._ingestion_family()
+        family.invalidate_recordset(["event_review_pending", "event_decision_ids"])
+        for original in family:
             original._identity_family().invalidate_recordset(["evidence_archive"])
         inbox.invalidate_recordset(["ingestion_event_ids", "evidence_archive"])
         return row.with_env(self.env)

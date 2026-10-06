@@ -19,6 +19,13 @@
                         invisible="not identity_conflict"
                     />
                     <button
+                        name="action_review_event_conflict"
+                        type="object"
+                        string="Review Delivery Event Conflict"
+                        groups="account.group_account_manager"
+                        invisible="not ingestion_conflict"
+                    />
+                    <button
                         name="action_request_review"
                         type="object"
                         string="Request Internal Review"
@@ -30,7 +37,7 @@
                         type="object"
                         string="Process Received Document"
                         groups="account.group_account_manager"
-                        invisible="state == 'processed' or identity_review_pending or ingestion_conflict"
+                        invisible="state == 'processed' or identity_review_pending or event_review_pending"
                     />
                     <button
                         name="action_open_move"
@@ -63,6 +70,7 @@
                         <field name="identity_conflict" />
                         <field name="ingestion_conflict" />
                         <field name="identity_review_pending" />
+                        <field name="event_review_pending" />
                     </group>
                     <group string="Review Diagnostic" invisible="not diagnostic">
                         <field name="diagnostic" nolabel="1" />
@@ -127,6 +135,44 @@
                                         />
                                     </list>
                                 </field>
+                            </form>
+                        </field>
+                    </group>
+                    <group
+                        string="Internal Delivery Event Reviews"
+                        col="1"
+                        invisible="not ingestion_conflict"
+                    >
+                        <field name="event_decision_ids" readonly="1" nolabel="1">
+                            <list create="false" edit="false" delete="false">
+                                <field name="occurred_at" />
+                                <field name="operator_id" options="{'no_open': True}" />
+                                <field
+                                    name="approved_inbox_ids"
+                                    widget="many2many_tags"
+                                />
+                                <field name="review_reference" />
+                            </list>
+                            <form
+                                create="false"
+                                edit="false"
+                                delete="false"
+                                duplicate="false"
+                            >
+                                <group>
+                                    <field name="occurred_at" />
+                                    <field
+                                        name="operator_id"
+                                        options="{'no_open': True}"
+                                    />
+                                    <field name="member_ids" widget="many2many_tags" />
+                                    <field
+                                        name="approved_inbox_ids"
+                                        widget="many2many_tags"
+                                    />
+                                    <field name="justification" />
+                                    <field name="review_reference" />
+                                </group>
                             </form>
                         </field>
                     </group>

@@ -257,7 +257,7 @@ class UaeEdiInbox(models.Model):
             "SELECT id FROM l10n_ae_edi_inbox WHERE id = %s FOR UPDATE", [current.id]
         )
         current.invalidate_recordset()
-        if current.ingestion_conflict or current.identity_review_pending:
+        if current.event_review_pending or current.identity_review_pending:
             return False
         if current.move_id:
             current.move_id.with_user(current.env.uid).sudo(False).check_access("read")
@@ -324,6 +324,9 @@ class UaeEdiInbox(models.Model):
             validation_report=validation_report,
         )
         self._identity_family().invalidate_recordset(["evidence_archive"])
+        self._ingestion_family().invalidate_recordset(
+            ["event_review_pending", "evidence_archive"]
+        )
         return history
 
     def action_open_move(self):
