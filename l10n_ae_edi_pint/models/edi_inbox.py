@@ -392,7 +392,6 @@ class UaeEdiInbox(models.Model):
         if (
             not supported
             or transaction_flags not in ("00000000", "10000000", "00000100", "10000100")
-            or tree.findall("./{*}AllowanceCharge")
             or not is_credit
             and float(tree.findtext("./{*}LegalMonetaryTotal/{*}PrepaidAmount") or 0)
             != 0

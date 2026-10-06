@@ -1,6 +1,6 @@
 # Copyright 2026 KMEE
 # License AGPL-3.0 or later (https://www.gnu.org/licenses/agpl).
-from odoo import models
+from odoo import Command, models
 from odoo.exceptions import UserError
 from odoo.tools import formatLang
 
@@ -98,6 +98,26 @@ class AccountEdiUblUaeInbound(models.AbstractModel):
         # UAE E/O categories can omit Percent. Keep category evidence rather than
         # treating a missing percentage as an absent tax classification.
         return tree.findall("./{*}Item/{*}ClassifiedTaxCategory")
+
+    def _import_document_allowance_charges(self, tree, record, tax_type, qty_factor=1):
+        # Reuse public UBL amount/sign parsing and adjustment line construction.
+        # Its percentage-only tax lookup must not choose a different UAE category.
+        values, logs = super()._import_document_allowance_charges(
+            tree, record, tax_type, qty_factor
+        )
+        adjustments = tree.findall(self._get_document_allowance_charge_xpaths()["root"])
+        for adjustment, line in zip(adjustments, values, strict=True):
+            categories = adjustment.findall("./{*}TaxCategory")
+            if len(categories) != 1:
+                raise UserError(
+                    self.env._("The received adjustment tax category requires review.")
+                )
+            tax_ids, tax_logs = self._retrieve_taxes(
+                record, {"tax_nodes": categories}, tax_type
+            )
+            line["tax_ids"] = [Command.set(tax_ids)]
+            logs += tax_logs
+        return values, logs
 
     def _retrieve_taxes(self, record, line_values, tax_type, tax_exigibility=None):
         # pylint: disable=method-required-super

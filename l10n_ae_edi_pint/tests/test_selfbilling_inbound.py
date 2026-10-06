@@ -1,5 +1,7 @@
 # Copyright 2026 KMEE
 # License AGPL-3.0 or later (https://www.gnu.org/licenses/agpl).
+import json
+
 from lxml import etree
 
 from odoo.exceptions import UserError
@@ -98,6 +100,141 @@ class TestUaeSelfBillingInbound(AccountTestInvoicingCommon):
             }
         )
         return source, recipient_agreement, binding
+
+    def test_received_single_s_header_allowance_creates_one_adjustment_line(self):
+        source, agreement, binding = self._selfbilling_fixture()
+        tree = etree.fromstring(source.preview_l10n_ae_pint().encode())
+
+        # The checked-in source is a 100 AED taxable line at 5%. Introduce one
+        # document-level 10 AED allowance, with explicit S/5% classification.
+        # Independent arithmetic: (100 - 10) * 5% = 4.50 VAT; payable 94.50.
+        ns = "urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2"
+        cbc = "urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2"
+
+        def q(uri, name):
+            return f"{{{uri}}}{name}"
+
+        tax_total = tree.find("./{*}TaxTotal")
+        assert tax_total is not None
+        self.assertEqual(len(tree.findall("./{*}TaxTotal")), 1)
+        self.assertIsNone(tree.find("./{*}TaxCurrencyCode"))
+        self.assertIsNone(tree.find("./{*}TaxExchangeRate"))
+        self.assertEqual(tax_total.find("./{*}TaxAmount").get("currencyID"), "AED")
+
+        allowance = etree.Element(q(ns, "AllowanceCharge"))
+        etree.SubElement(allowance, q(cbc, "ChargeIndicator")).text = "false"
+        etree.SubElement(allowance, q(cbc, "AllowanceChargeReasonCode")).text = "100"
+        etree.SubElement(
+            allowance, q(cbc, "AllowanceChargeReason")
+        ).text = "Special Rebate"
+        etree.SubElement(allowance, q(cbc, "MultiplierFactorNumeric")).text = "10"
+        etree.SubElement(allowance, q(cbc, "Amount"), currencyID="AED").text = "10.00"
+        etree.SubElement(
+            allowance, q(cbc, "BaseAmount"), currencyID="AED"
+        ).text = "100.00"
+        tax_category = etree.SubElement(allowance, q(ns, "TaxCategory"))
+        etree.SubElement(tax_category, q(cbc, "ID")).text = "S"
+        etree.SubElement(tax_category, q(cbc, "Percent")).text = "5"
+        scheme = etree.SubElement(tax_category, q(ns, "TaxScheme"))
+        etree.SubElement(scheme, q(cbc, "ID")).text = "VAT"
+        # UBL sequence places header allowances after payment terms and before
+        # TaxTotal. This insertion anchors to the first TaxTotal in the fixture.
+        tree.insert(tree.index(tax_total), allowance)
+
+        def set_text(xpath, value):
+            node = tree.find(xpath)
+            assert node is not None, f"fixture XPath missing: {xpath}"
+            node.text = value
+
+        set_text("./{*}LegalMonetaryTotal/{*}TaxExclusiveAmount", "90.00")
+        set_text("./{*}LegalMonetaryTotal/{*}TaxInclusiveAmount", "94.50")
+        set_text("./{*}LegalMonetaryTotal/{*}PayableAmount", "94.50")
+        legal_total = tree.find("./{*}LegalMonetaryTotal")
+        assert legal_total is not None
+        self.assertEqual(float(legal_total.findtext("./{*}LineExtensionAmount")), 100)
+        allowance_total = legal_total.find(q(cbc, "AllowanceTotalAmount"))
+        if allowance_total is None:
+            allowance_total = etree.Element(
+                q(cbc, "AllowanceTotalAmount"), currencyID="AED"
+            )
+            legal_total.insert(
+                legal_total.index(legal_total.find(q(cbc, "TaxInclusiveAmount"))) + 1,
+                allowance_total,
+            )
+        allowance_total.text = "10.00"
+        tax_total.find("./{*}TaxAmount").text = "4.50"
+        subtotal = tax_total.find("./{*}TaxSubtotal")
+        assert subtotal is not None
+        subtotal.find("./{*}TaxableAmount").text = "90.00"
+        subtotal.find("./{*}TaxAmount").text = "4.50"
+
+        content = etree.tostring(tree, encoding="UTF-8", xml_declaration=True)
+        inbox = (
+            self.env["l10n_ae.edi.inbox"]
+            .with_user(self.simple_accountman)
+            .receive_controlled_document(binding.id, "header-allowance-100-10", content)
+        )
+
+        # action_process runs the public pinned UBL/PINT validator before the
+        # importer and retains its report even when the current review gate fires.
+        processed = inbox.action_process()
+        history = inbox.processing_history_ids
+        self.assertEqual(len(history), 1)
+        report = json.loads(history.validation_report)
+        self.assertTrue(report["valid"], report)
+        self.assertTrue(report["xsd_valid"], report)
+        # This is the behavior under development. Current code stops at the
+        # explicit header-AllowanceCharge review gate after formal validation.
+        self.assertTrue(processed, inbox.diagnostic)
+        move = inbox.move_id
+        self.assertEqual(move.move_type, "out_invoice")
+        self.assertEqual(move.state, "draft")
+        self.assertEqual(move.l10n_ae_selfbilling_agreement_id, agreement)
+        self.assertEqual(
+            (move.amount_untaxed, move.amount_tax, move.amount_total), (90, 4.5, 94.5)
+        )
+        self.assertEqual(inbox.original_xml.content, content)
+        self.assertEqual(
+            len(
+                move.invoice_line_ids.filtered(
+                    lambda line: "Special Rebate" in (line.name or "")
+                )
+            ),
+            1,
+        )
+        allowance_line = move.invoice_line_ids.filtered(
+            lambda line: "Special Rebate" in (line.name or "")
+        )
+        self.assertEqual(allowance_line.price_subtotal, -10)
+        self.assertEqual(allowance_line.tax_ids, self.tax_sale_a)
+        self.assertEqual(move.l10n_ae_received_payable_amount, 94.5)
+        self.assertEqual(len(move.invoice_line_ids), 2)
+        self.assertEqual(move.company_id, self.env.company)
+        self.assertEqual(move.partner_id, self.buyer.partner_id)
+        self.assertEqual(
+            move.l10n_ae_fiscal_uuid, "eeeeeeea-1111-4111-8111-111111111111"
+        )
+        self.assertTrue(move.l10n_ae_received_document)
+        self.assertEqual(move.l10n_ae_received_process, "selfbilling")
+        self.assertFalse(move.l10n_ae_transmission_id)
+        self.assertTrue(inbox.action_process())
+        self.assertEqual(inbox.move_id, move)
+        self.assertEqual(len(move.invoice_line_ids), 2)
+        self.assertEqual(len(inbox.processing_history_ids), 1)
+        self.assertEqual(
+            self.env["account.move"].search_count(
+                [
+                    ("company_id", "=", self.env.company.id),
+                    ("l10n_ae_received_document", "=", True),
+                    (
+                        "l10n_ae_fiscal_uuid",
+                        "=",
+                        "eeeeeeea-1111-4111-8111-111111111111",
+                    ),
+                ]
+            ),
+            1,
+        )
 
     def test_agent_selfbilling_uses_supplier_vat_and_refuses_mismatched_principal(self):
         source, agreement, binding = self._selfbilling_fixture()
