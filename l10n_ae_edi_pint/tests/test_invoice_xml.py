@@ -4,6 +4,7 @@ import hashlib
 import io
 import json
 import os
+import tempfile
 import uuid
 import zipfile
 from decimal import Decimal
@@ -25,6 +26,81 @@ NS = {
 
 @tagged("post_install", "-at_install")
 class TestUaeInvoiceXml(AccountTestInvoicingCommon):
+    def test_received_processing_retains_the_administrative_package_report(self):
+        source = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
+        )
+        source.l10n_ae_fiscal_uuid = "17171717-1717-4717-8717-171717171717"
+        content = etree.tostring(self._received_test_xml(source))
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {"name": "Historical received package review"}
+        )
+        inbox = (
+            self.env["l10n_ae.edi.inbox"]
+            .with_user(self.simple_accountman)
+            .receive_controlled_document(binding.id, "historical-package-380", content)
+        )
+        with patch.dict(
+            os.environ,
+            {
+                "KMEE_UAE_NORMATIVE_RULESET": "kmee-pint-ae-1.0.3-ubl-2.1",
+                "KMEE_UAE_NORMATIVE_DIR": "/opt/uae-addons/.runtime/normative-1.0.3",
+            },
+        ):
+            self.assertTrue(inbox.action_process(), inbox.diagnostic)
+        self.assertEqual(len(inbox.processing_history_ids), 1)
+        history = inbox.processing_history_ids
+        report = json.loads(history.validation_report)
+        self.assertTrue(report["valid"])
+        self.assertEqual(report["ruleset"], "kmee-pint-ae-1.0.3-ubl-2.1")
+        self.assertEqual(
+            report["resources"]["manifest_sha256"],
+            "14929fa98465947811ac3a0b30fc62b2a0eba8dadb7712bd6c2bfa11f1363bd0",
+        )
+        with self.assertRaisesRegex(UserError, "immutable"):
+            history.write({"validation_report": "{}"})
+        original = (
+            inbox.xml_hash,
+            history.id,
+            history.validation_report,
+            history.validation_report_hash,
+            inbox.move_id.id,
+        )
+        with (
+            tempfile.TemporaryDirectory(prefix="uae-empty-current-normative-") as empty,
+            patch.dict(
+                os.environ,
+                {
+                    "KMEE_UAE_NORMATIVE_RULESET": "kmee-pint-ae-1.0.4-ubl-2.1",
+                    "KMEE_UAE_NORMATIVE_DIR": empty,
+                },
+            ),
+        ):
+            self.assertTrue(inbox.action_process())
+        self.assertEqual(len(inbox.processing_history_ids), 1)
+        self.assertEqual(
+            (
+                inbox.xml_hash,
+                inbox.processing_history_ids.id,
+                history.validation_report,
+                history.validation_report_hash,
+                inbox.move_id.id,
+            ),
+            original,
+        )
+        self.assertEqual(inbox.original_xml.content, content)
+        self.assertEqual(inbox.move_id.state, "draft")
+        self.assertEqual(inbox.move_id.move_type, "in_invoice")
+        self.assertEqual(
+            (
+                inbox.move_id.amount_untaxed,
+                inbox.move_id.amount_tax,
+                inbox.move_id.amount_total,
+            ),
+            (100, 5, 105),
+        )
+        self.assertFalse(inbox.move_id.l10n_ae_transmission_id)
+
     def test_pinned_identity_cache_respects_selected_company_access(self):
         invoice = self.init_invoice(
             "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True

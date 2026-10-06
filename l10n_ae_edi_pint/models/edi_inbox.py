@@ -13,6 +13,7 @@ from odoo.tools.binary import BinaryBytes
 
 from ..tools.controlled_inbox import UnreadableReceivedReplay
 from ..tools.validation import (
+    DEFAULT_RULESET,
     MAX_XML_BYTES,
     OfflinePintValidator,
     UnsafeInvoiceXml,
@@ -313,7 +314,10 @@ class UaeEdiInbox(models.Model):
                             "Configure the offline UAE normative resource directory."
                         )
                     )
-                report = OfflinePintValidator(directory).validate(content)
+                ruleset = os.environ.get("KMEE_UAE_NORMATIVE_RULESET", DEFAULT_RULESET)
+                report = OfflinePintValidator(directory, ruleset=ruleset).validate(
+                    content
+                )
                 # Preserve the specific cardinality diagnostic alongside the report.
                 current._received_beneficiary_id(tree)
                 current._received_principal_id(tree)
