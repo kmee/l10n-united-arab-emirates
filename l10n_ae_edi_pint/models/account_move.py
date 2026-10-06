@@ -29,6 +29,32 @@ class AccountMove(models.Model):
     l10n_ae_received_delivery_summary = fields.Text(
         string="Received Delivery", compute="_compute_l10n_ae_received_delivery_summary"
     )
+    l10n_ae_normative_ruleset = fields.Char(
+        string="Pinned PINT Package",
+        compute="_compute_l10n_ae_normative_identity",
+        compute_sudo=False,
+        help="Pinned at preparation; does not prove validation or acceptance.",
+    )
+    l10n_ae_normative_manifest_sha256 = fields.Char(
+        string="Pinned Manifest SHA-256",
+        compute="_compute_l10n_ae_normative_identity",
+        compute_sudo=False,
+    )
+
+    @api.depends("l10n_ae_transmission_id.payload")
+    @api.depends_context("uid")
+    def _compute_l10n_ae_normative_identity(self):
+        for move in self:
+            issue = move.l10n_ae_transmission_id
+            if issue:
+                issue.check_access("read")
+            identity = (
+                (json.loads(issue.payload).get("normative") or {}) if issue else {}
+            )
+            move.l10n_ae_normative_ruleset = identity.get("ruleset") or False
+            move.l10n_ae_normative_manifest_sha256 = (
+                identity.get("manifest_sha256") or False
+            )
 
     def _l10n_ae_snapshot(self):
         snapshot = super()._l10n_ae_snapshot()

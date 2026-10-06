@@ -25,6 +25,72 @@ NS = {
 
 @tagged("post_install", "-at_install")
 class TestUaeInvoiceXml(AccountTestInvoicingCommon):
+    def test_pinned_identity_cache_respects_selected_company_access(self):
+        invoice = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
+        )
+        invoice.l10n_ae_fiscal_uuid = "16161616-1616-4616-8616-161616161616"
+        invoice.l10n_ae_binding_id = self.env["l10n_ae.edi.binding"].create(
+            {"name": "Company-sensitive pinned package review"}
+        )
+        invoice.action_l10n_ae_prepare()
+        other_company = self.env["res.company"].create(
+            {"name": "Synthetic other package review company"}
+        )
+        self.simple_accountman.write({"company_ids": [(4, other_company.id)]})
+        reviewed = invoice.with_user(self.simple_accountman).with_context(
+            allowed_company_ids=[invoice.company_id.id]
+        )
+        self.assertEqual(
+            reviewed.l10n_ae_normative_ruleset, "kmee-pint-ae-1.0.4-ubl-2.1"
+        )
+        restricted = reviewed.with_context(allowed_company_ids=[other_company.id])
+        with self.assertRaises(AccessError):
+            self.assertTrue(restricted.l10n_ae_normative_ruleset)
+        with self.assertRaises(AccessError):
+            self.assertTrue(restricted.l10n_ae_normative_manifest_sha256)
+        self.assertEqual(
+            reviewed.l10n_ae_normative_ruleset, "kmee-pint-ae-1.0.4-ubl-2.1"
+        )
+        self.assertFalse(invoice.l10n_ae_transmission_id.attempt_ids)
+
+    def test_native_form_preserves_readonly_prepared_package_identity(self):
+        invoice = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
+        )
+        unprepared = Form(invoice)
+        self.assertFalse(unprepared.l10n_ae_normative_ruleset)
+        self.assertFalse(unprepared.l10n_ae_normative_manifest_sha256)
+        invoice.l10n_ae_fiscal_uuid = "15151515-1515-4515-8515-151515151515"
+        invoice.l10n_ae_binding_id = self.env["l10n_ae.edi.binding"].create(
+            {"name": "Native pinned package review"}
+        )
+        invoice.action_l10n_ae_prepare()
+        issue = invoice.l10n_ae_transmission_id
+        frozen = (issue.payload, issue.xml_content, issue.idempotency_key)
+        with patch.dict(
+            os.environ,
+            {"KMEE_UAE_NORMATIVE_RULESET": "kmee-pint-ae-1.0.3-ubl-2.1"},
+        ):
+            prepared = Form(invoice)
+            self.assertEqual(
+                prepared.l10n_ae_normative_ruleset, "kmee-pint-ae-1.0.4-ubl-2.1"
+            )
+            self.assertEqual(
+                prepared.l10n_ae_normative_manifest_sha256,
+                "4f225c8095a2f487c5813b4d0e6515c9e7f986ba1a36e34dca7ae305b7899d76",
+            )
+            with self.assertRaisesRegex(AssertionError, "readonly field"):
+                prepared.l10n_ae_normative_ruleset = "kmee-pint-ae-1.0.3-ubl-2.1"
+            with self.assertRaisesRegex(AssertionError, "readonly field"):
+                prepared.l10n_ae_normative_manifest_sha256 = "0" * 64
+        self.assertEqual(
+            (issue.payload, issue.xml_content, issue.idempotency_key), frozen
+        )
+        self.assertFalse(issue.attempt_ids)
+        self.assertFalse(issue.validation_receipt)
+        self.assertEqual(invoice.amount_total, 105)
+
     def test_prepared_packages_survive_configuration_swap_and_rollback(self):
         invoice = self.init_invoice(
             "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
