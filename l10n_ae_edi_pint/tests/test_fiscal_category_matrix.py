@@ -45,6 +45,253 @@ class TestUaeFiscalCategoryMatrix(AccountTestInvoicingCommon):
                 }
             )
 
+    def test_fractional_usd_quantity_keeps_high_precision_price_and_raw_aed_lines(self):
+        # Worked vector, independent of the exporter: 400.1234 USD * 0.125
+        # = 50.015425 net, 2.50077125 VAT, 52.51619625 gross before rounding.
+        # At 3.672500 AED/USD, raw VAT/gross are 9.184082415625 and
+        # 192.865730728125. Rounded document headers are 2.50 / 52.52 USD;
+        # their converted headers are 9.18 / 192.88 AED.
+        # Configure the native quantity precision before entry: at the default
+        # two places Odoo stores 0.125 as 0.13, changing the business quantity.
+        self.env["decimal.precision"].search([("name", "=", "Product Unit")]).digits = 3
+        usd = self.env.ref("base.USD")
+        usd.active = True
+        self.env["res.currency.rate"].create(
+            {
+                "currency_id": usd.id,
+                "company_id": self.env.company.id,
+                "name": "2019-01-01",
+                "rate": 1 / 3.6725,
+            }
+        )
+        tax = self.tax_sale_a.copy(
+            {
+                "name": "Synthetic fractional S",
+                "amount": 5,
+                "ubl_cii_tax_category_code": "S",
+            }
+        )
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {"name": "Synthetic high precision USD"}
+        )
+        invoice = (
+            self.env["account.move"]
+            .with_user(self.simple_accountman)
+            .with_context(allowed_company_ids=[self.env.company.id])
+            .create(
+                {
+                    "move_type": "out_invoice",
+                    "partner_id": self.partner_a.id,
+                    "journal_id": self.company_data["default_journal_sale"].id,
+                    "currency_id": usd.id,
+                    "invoice_date": "2019-01-01",
+                    "l10n_ae_binding_id": binding.id,
+                    "l10n_ae_fiscal_uuid": "fafafafa-1111-4111-8111-111111111111",
+                    "l10n_ae_tax_exchange_rate": "3.672500",
+                    "l10n_ae_tax_exchange_date": "2019-01-01",
+                    "l10n_ae_tax_exchange_source": "SYNTH-USD-FRACTIONAL-PRECISION",
+                    "invoice_line_ids": [
+                        Command.create(
+                            {
+                                "name": "Synthetic fractional high precision service",
+                                "quantity": 0.125,
+                                "price_unit": 400.1234,
+                                "account_id": self.company_data[
+                                    "default_account_revenue"
+                                ].id,
+                                "tax_ids": [Command.set(tax.ids)],
+                            }
+                        )
+                    ],
+                }
+            )
+        )
+        self.assertFalse(invoice.env.su)
+        self.assertEqual(invoice.invoice_line_ids.quantity, 0.125)
+        self.assertEqual(invoice.invoice_line_ids.price_unit, 400.1234)
+        invoice.action_post()
+        self.assertEqual(
+            (invoice.amount_untaxed, invoice.amount_tax, invoice.amount_total),
+            (50.02, 2.50, 52.52),
+        )
+        self.assertEqual(
+            (invoice.amount_tax_signed, invoice.amount_total_signed), (9.18, 192.88)
+        )
+        ledger_fields = [
+            "account_id",
+            "debit",
+            "credit",
+            "amount_currency",
+            "currency_id",
+            "create_date",
+            "write_date",
+        ]
+        ledger = invoice.line_ids.read(ledger_fields)
+        invoice.action_l10n_ae_prepare()
+        issue = invoice.l10n_ae_transmission_id
+        report = invoice.validate_l10n_ae_pint()
+        self.assertTrue(report["valid"], report)
+        self.assertTrue(report["xsd_valid"], report)
+        self.assertEqual(report["ruleset"], "kmee-pint-ae-1.0.4-ubl-2.1")
+        xml = etree.fromstring(issue.xml_content.encode())
+        line = xml.find("cac:InvoiceLine", NS)
+        for path, expected in [
+            ("cbc:InvoicedQuantity", "0.125"),
+            ("cac:Price/cbc:PriceAmount", "400.1234"),
+            ("cbc:LineExtensionAmount", "50.02"),
+        ]:
+            self.assertEqual(
+                Decimal(line.findtext(path, namespaces=NS)), Decimal(expected)
+            )
+        for path, expected in [
+            ("cac:ItemPriceExtension/cbc:Amount", "192.865730728125"),
+            ("cac:ItemPriceExtension/cac:TaxTotal/cbc:TaxAmount", "9.184082415625"),
+        ]:
+            amount = line.find(path, NS)
+            self.assertEqual(amount.get("currencyID"), "AED")
+            # The native price/quantity are floats: tolerate serialization noise,
+            # never a currency-cent rounding or substitution of the header base.
+            self.assertLess(
+                abs(Decimal(amount.text) - Decimal(expected)), Decimal("0.000001")
+            )
+        self.assertEqual(
+            xml.findtext(
+                "cac:TaxTotal/cbc:TaxAmount[@currencyID='AED']", namespaces=NS
+            ),
+            "9.18",
+        )
+        self.assertEqual(
+            xml.findtext(
+                "cac:AdditionalDocumentReference[cbc:DocumentTypeCode='aedtotal-incl-vat']/cbc:DocumentDescription",
+                namespaces=NS,
+            ),
+            "192.88",
+        )
+        self.assertIsNone(
+            xml.find("cac:LegalMonetaryTotal/cbc:PayableRoundingAmount", NS)
+        )
+        original = issue.read(
+            ["payload", "xml_content", "idempotency_key", "create_date", "write_date"]
+        )
+        invoice.action_l10n_ae_prepare()
+        self.assertEqual(invoice.preview_l10n_ae_pint(), issue.xml_content)
+        self.assertEqual(
+            issue.read(
+                [
+                    "payload",
+                    "xml_content",
+                    "idempotency_key",
+                    "create_date",
+                    "write_date",
+                ]
+            ),
+            original,
+        )
+        self.assertEqual(invoice.line_ids.read(ledger_fields), ledger)
+        self.assertFalse(
+            issue.attempt_ids
+            or issue.event_ids
+            or issue.remote_id
+            or issue.validation_receipt
+        )
+
+    def test_many_small_usd_lines_show_both_fiscal_accounting_differences(self):
+        # Independent worked per-line policy: 100 * USD1.23, each tax USD0.06.
+        # Native AED base 100 * 4.52 = 452; native VAT 100 * 0.22 = 22;
+        # native gross 474. Header conversion: USD6 * 3.6725 -> AED22.04,
+        # USD129 * 3.6725 -> AED473.75. Report both differences, never patch them.
+        self.env.company.tax_calculation_rounding_method = "round_per_line"
+        usd = self.env.ref("base.USD")
+        usd.active = True
+        self.env["res.currency.rate"].create(
+            {
+                "currency_id": usd.id,
+                "company_id": self.env.company.id,
+                "name": "2019-01-01",
+                "rate": 1 / 3.6725,
+            }
+        )
+        tax = self.tax_sale_a.copy(
+            {
+                "name": "Synthetic many small S",
+                "amount": 5,
+                "ubl_cii_tax_category_code": "S",
+            }
+        )
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {"name": "Synthetic many small lines"}
+        )
+        invoice = (
+            self.env["account.move"]
+            .with_user(self.simple_accountman)
+            .with_context(allowed_company_ids=[self.env.company.id])
+            .create(
+                {
+                    "move_type": "out_invoice",
+                    "partner_id": self.partner_a.id,
+                    "journal_id": self.company_data["default_journal_sale"].id,
+                    "currency_id": usd.id,
+                    "invoice_date": "2019-01-01",
+                    "l10n_ae_binding_id": binding.id,
+                    "l10n_ae_fiscal_uuid": "fafafafa-2222-4222-8222-222222222222",
+                    "l10n_ae_tax_exchange_rate": "3.672500",
+                    "l10n_ae_tax_exchange_date": "2019-01-01",
+                    "l10n_ae_tax_exchange_source": "SYNTH-USD-100-SMALL-LINES",
+                    "invoice_line_ids": [
+                        Command.create(
+                            {
+                                "name": "Synthetic small line " + str(index),
+                                "quantity": 1,
+                                "price_unit": 1.23,
+                                "account_id": self.company_data[
+                                    "default_account_revenue"
+                                ].id,
+                                "tax_ids": [Command.set(tax.ids)],
+                            }
+                        )
+                        for index in range(100)
+                    ],
+                }
+            )
+        )
+        self.assertFalse(invoice.env.su)
+        invoice.action_post()
+        self.assertEqual(len(invoice.invoice_line_ids), 100)
+        self.assertEqual(
+            (invoice.amount_untaxed, invoice.amount_tax, invoice.amount_total),
+            (123, 6, 129),
+        )
+        self.assertEqual(
+            (
+                invoice.amount_untaxed_signed,
+                invoice.amount_tax_signed,
+                invoice.amount_total_signed,
+            ),
+            (452, 22, 474),
+        )
+        ledger_fields = [
+            "account_id",
+            "debit",
+            "credit",
+            "amount_currency",
+            "create_date",
+            "write_date",
+        ]
+        ledger = invoice.line_ids.read(ledger_fields)
+        for action in (invoice.action_l10n_ae_prepare, invoice.preview_l10n_ae_pint):
+            with self.assertRaisesRegex(
+                UserError,
+                r"Fiscal VAT: 22\.04 AED; accounting VAT: 22\.00 AED\. "
+                r"Fiscal gross: 473\.75 AED; accounting gross: 474\.00 AED",
+            ):
+                action()
+            self.assertEqual(invoice.state, "posted")
+            self.assertFalse(invoice.l10n_ae_transmission_ids)
+            self.assertEqual(invoice.line_ids.read(ledger_fields), ledger)
+            self.assertEqual(
+                self.env.company.tax_calculation_rounding_method, "round_per_line"
+            )
+
     def test_exempt_without_uae_legal_code_is_refused_before_preparation(self):
         tax = self.tax_sale_a.copy(
             {

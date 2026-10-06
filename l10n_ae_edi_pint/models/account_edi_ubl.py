@@ -217,7 +217,15 @@ class AccountEdiUblUae(models.AbstractModel):
         return result
 
     def _ubl_add_line_price_node(self, vals, in_foreign_currency=True):
-        result = super()._ubl_add_line_price_node(vals, in_foreign_currency)
+        # The pinned core infers the price from the rounded accounting base.
+        # Keep its tax-inclusive/discount logic, using raw fiscal details only
+        # for pricing; the original base still supplies the accounting totals.
+        raw_base = self._l10n_ae_raw_fiscal_base_line(vals)
+        price_vals = {
+            **vals,
+            "line_vals": {**vals["line_vals"], "base_line": raw_base},
+        }
+        result = super()._ubl_add_line_price_node(price_vals, in_foreign_currency)
         price = vals["line_node"]["cac:Price"]
         quantity = vals["line_node"].get("cbc:InvoicedQuantity") or vals[
             "line_node"
@@ -240,8 +248,17 @@ class AccountEdiUblUae(models.AbstractModel):
         self._ubl_add_line_allowance_charge_nodes_for_discount(vals)
         return result
 
+    def _l10n_ae_raw_fiscal_base_line(self, vals):
+        # Recompute on an export-only copy with native unrounded tax arithmetic.
+        # This does not change the company's policy or any accounting record.
+        raw_base = dict(vals["line_vals"]["base_line"])
+        self.env["account.tax"]._add_tax_details_in_base_line(
+            raw_base, vals["company"], rounding_method="round_globally"
+        )
+        return raw_base
+
     def _l10n_ae_add_line_aed_amounts(self, vals):
-        details = vals["line_vals"]["base_line"]["tax_details"]
+        details = self._l10n_ae_raw_fiscal_base_line(vals)["tax_details"]
         rate = self._l10n_ae_exchange_rate(vals)
         gross = Decimal(str(details["raw_total_included_currency"])) * rate
         vat = (
@@ -315,24 +332,29 @@ class AccountEdiUblUae(models.AbstractModel):
             )
             if invoice.company_id.currency_id.name == "AED":
                 quantum = Decimal("0.01")
-                expected = (
-                    (gross, invoice.amount_total_signed),
-                    (vat, invoice.amount_tax_signed),
-                )
-                for fiscal_amount, signed_accounting_amount in expected:
-                    accounting_amount = Decimal(
-                        str(-invoice.direction_sign * signed_accounting_amount)
-                    )
-                    if fiscal_amount.quantize(
-                        quantum, rounding=ROUND_HALF_UP
-                    ) != accounting_amount.quantize(quantum, rounding=ROUND_HALF_UP):
-                        raise UserError(
-                            self.env._(
-                                "The fiscal AED amounts do not match accounting. "
-                                "Review the exchange rate and rounding before "
-                                "preparing the e-invoice."
-                            )
+                fiscal_vat = vat.quantize(quantum, rounding=ROUND_HALF_UP)
+                fiscal_gross = gross.quantize(quantum, rounding=ROUND_HALF_UP)
+                accounting_vat = Decimal(
+                    str(-invoice.direction_sign * invoice.amount_tax_signed)
+                ).quantize(quantum, rounding=ROUND_HALF_UP)
+                accounting_gross = Decimal(
+                    str(-invoice.direction_sign * invoice.amount_total_signed)
+                ).quantize(quantum, rounding=ROUND_HALF_UP)
+                if (fiscal_vat, fiscal_gross) != (accounting_vat, accounting_gross):
+                    raise UserError(
+                        self.env._(
+                            "The fiscal AED amounts do not match accounting. "
+                            "Fiscal VAT: %(fiscal_vat)s AED; accounting VAT: "
+                            "%(accounting_vat)s AED. Fiscal gross: %(fiscal_gross)s "
+                            "AED; accounting gross: %(accounting_gross)s AED. "
+                            "Review the exchange rate and rounding before "
+                            "preparing the e-invoice.",
+                            fiscal_vat=str(fiscal_vat),
+                            accounting_vat=str(accounting_vat),
+                            fiscal_gross=str(fiscal_gross),
+                            accounting_gross=str(accounting_gross),
                         )
+                    )
             document["cac:TaxTotal"].append(
                 {
                     "cbc:TaxAmount": {
