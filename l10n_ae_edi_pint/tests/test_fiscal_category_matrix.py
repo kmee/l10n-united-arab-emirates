@@ -45,6 +45,442 @@ class TestUaeFiscalCategoryMatrix(AccountTestInvoicingCommon):
                 }
             )
 
+    def test_tax_inclusive_discount_preserves_net_allowance_and_original_ledger(self):
+        # Independent AED example: gross unit price105 includes5% VAT.
+        # Before discount the net basis is100. A10% discount therefore means
+        # allowance10, net90, VAT4.50 and payable94.50 (IBR-131/147-AE).
+        tax = self.tax_sale_a.copy(
+            {
+                "name": "Synthetic tax-inclusive S",
+                "amount": 5,
+                "price_include_override": "tax_included",
+                "ubl_cii_tax_category_code": "S",
+            }
+        )
+        self.assertTrue(tax.price_include)
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {"name": "Synthetic tax-inclusive discount"}
+        )
+        invoice = (
+            self.env["account.move"]
+            .with_user(self.simple_accountman)
+            .with_context(allowed_company_ids=[self.env.company.id])
+            .create(
+                {
+                    "move_type": "out_invoice",
+                    "partner_id": self.partner_a.id,
+                    "journal_id": self.company_data["default_journal_sale"].id,
+                    "currency_id": self.env.ref("base.AED").id,
+                    "invoice_date": "2019-01-01",
+                    "l10n_ae_binding_id": binding.id,
+                    "l10n_ae_fiscal_uuid": "cececece-1111-4111-8111-111111111111",
+                    "invoice_line_ids": [
+                        Command.create(
+                            {
+                                "name": "Synthetic tax-inclusive service",
+                                "quantity": 1,
+                                "price_unit": 105,
+                                "discount": 10,
+                                "account_id": self.company_data[
+                                    "default_account_revenue"
+                                ].id,
+                                "tax_ids": [Command.set(tax.ids)],
+                            }
+                        )
+                    ],
+                }
+            )
+        )
+        self.assertFalse(invoice.env.su)
+        invoice.action_post()
+        self.assertEqual(
+            (invoice.amount_untaxed, invoice.amount_tax, invoice.amount_total),
+            (90, 4.50, 94.50),
+        )
+        ledger_fields = [
+            "account_id",
+            "debit",
+            "credit",
+            "amount_currency",
+            "currency_id",
+            "create_date",
+            "write_date",
+        ]
+        ledger = invoice.line_ids.read(ledger_fields)
+        invoice.action_l10n_ae_prepare()
+        issue = invoice.l10n_ae_transmission_id
+        original_fields = [
+            "revision",
+            "payload",
+            "payload_hash",
+            "xml_content",
+            "xml_hash",
+            "idempotency_key",
+            "create_date",
+            "write_date",
+        ]
+        original = issue.read(original_fields)
+        report = invoice.validate_l10n_ae_pint()
+        self.assertTrue(report["valid"], report)
+        self.assertTrue(report["xsd_valid"], report)
+        self.assertEqual(report["ruleset"], "kmee-pint-ae-1.0.4-ubl-2.1")
+        self.assertEqual(issue.read(original_fields), original)
+        self.assertEqual(invoice.line_ids.read(ledger_fields), ledger)
+        xml = etree.fromstring(issue.xml_content.encode())
+        line = xml.find("cac:InvoiceLine", NS)
+        self.assertEqual(len(line.findall("cac:AllowanceCharge", NS)), 1)
+        self.assertEqual(
+            line.findtext("cac:AllowanceCharge/cbc:ChargeIndicator", namespaces=NS),
+            "false",
+        )
+        for path, expected in [
+            ("cac:Price/cbc:PriceAmount", "100"),
+            ("cac:AllowanceCharge/cbc:BaseAmount", "100"),
+            ("cac:AllowanceCharge/cbc:Amount", "10"),
+            ("cac:AllowanceCharge/cbc:MultiplierFactorNumeric", "10"),
+            ("cbc:LineExtensionAmount", "90"),
+            ("cac:ItemPriceExtension/cbc:Amount", "94.50"),
+            ("cac:ItemPriceExtension/cac:TaxTotal/cbc:TaxAmount", "4.50"),
+        ]:
+            node = line.find(path, NS)
+            self.assertIsNotNone(node, path)
+            self.assertLess(
+                abs(Decimal(node.text) - Decimal(expected)), Decimal("0.00000001")
+            )
+            if path != "cac:AllowanceCharge/cbc:MultiplierFactorNumeric":
+                self.assertEqual(node.get("currencyID"), "AED")
+        for path, expected in [
+            ("cac:TaxTotal/cbc:TaxAmount", "4.50"),
+            ("cac:LegalMonetaryTotal/cbc:TaxExclusiveAmount", "90"),
+            ("cac:LegalMonetaryTotal/cbc:TaxInclusiveAmount", "94.50"),
+            ("cac:LegalMonetaryTotal/cbc:PayableAmount", "94.50"),
+        ]:
+            self.assertEqual(
+                Decimal(xml.findtext(path, namespaces=NS)), Decimal(expected)
+            )
+        invoice.action_l10n_ae_prepare()
+        self.assertEqual(invoice.preview_l10n_ae_pint(), issue.xml_content)
+        self.assertEqual(issue.read(original_fields), original)
+        self.assertEqual(invoice.line_ids.read(ledger_fields), ledger)
+        self.assertFalse(
+            issue.attempt_ids
+            or issue.event_ids
+            or issue.remote_id
+            or issue.validation_receipt
+        )
+
+    def test_full_line_discount_preserves_allowance_and_zero_payable(self):
+        # Independent AED example: net unit price100 with5% VAT.
+        # A100% line allowance is100, leaving net/VAT/gross/payable zero.
+        # The undiscounted price/basis remain100 (IBR-131/147-AE).
+        tax = self.tax_sale_a.copy(
+            {
+                "name": "Synthetic full-discount S",
+                "amount": 5,
+                "price_include_override": "tax_excluded",
+                "ubl_cii_tax_category_code": "S",
+            }
+        )
+        self.assertFalse(tax.price_include)
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {"name": "Synthetic full line discount"}
+        )
+        invoice = (
+            self.env["account.move"]
+            .with_user(self.simple_accountman)
+            .with_context(allowed_company_ids=[self.env.company.id])
+            .create(
+                {
+                    "move_type": "out_invoice",
+                    "partner_id": self.partner_a.id,
+                    "journal_id": self.company_data["default_journal_sale"].id,
+                    "currency_id": self.env.ref("base.AED").id,
+                    "invoice_date": "2019-01-01",
+                    "l10n_ae_binding_id": binding.id,
+                    "l10n_ae_fiscal_uuid": "bdbdbdbd-1111-4111-8111-111111111111",
+                    "invoice_line_ids": [
+                        Command.create(
+                            {
+                                "name": "Synthetic full line allowance service",
+                                "quantity": 1,
+                                "price_unit": 100,
+                                "discount": 100,
+                                "account_id": self.company_data[
+                                    "default_account_revenue"
+                                ].id,
+                                "tax_ids": [Command.set(tax.ids)],
+                            }
+                        )
+                    ],
+                }
+            )
+        )
+        self.assertFalse(invoice.env.su)
+        invoice.action_post()
+        self.assertEqual(
+            (invoice.amount_untaxed, invoice.amount_tax, invoice.amount_total),
+            (0, 0, 0),
+        )
+        ledger_fields = [
+            "account_id",
+            "debit",
+            "credit",
+            "amount_currency",
+            "currency_id",
+            "create_date",
+            "write_date",
+        ]
+        ledger = invoice.line_ids.read(ledger_fields)
+        invoice.action_l10n_ae_prepare()
+        issue = invoice.l10n_ae_transmission_id
+        original_fields = [
+            "revision",
+            "payload",
+            "payload_hash",
+            "xml_content",
+            "xml_hash",
+            "idempotency_key",
+            "create_date",
+            "write_date",
+        ]
+        original = issue.read(original_fields)
+        report = invoice.validate_l10n_ae_pint()
+        self.assertTrue(report["valid"], report)
+        self.assertTrue(report["xsd_valid"], report)
+        self.assertEqual(report["ruleset"], "kmee-pint-ae-1.0.4-ubl-2.1")
+        self.assertEqual(issue.read(original_fields), original)
+        self.assertEqual(invoice.line_ids.read(ledger_fields), ledger)
+        xml = etree.fromstring(issue.xml_content.encode())
+        line = xml.find("cac:InvoiceLine", NS)
+        self.assertEqual(len(line.findall("cac:AllowanceCharge", NS)), 1)
+        self.assertEqual(
+            line.findtext("cac:AllowanceCharge/cbc:ChargeIndicator", namespaces=NS),
+            "false",
+        )
+        for path, expected in [
+            ("cac:Price/cbc:PriceAmount", "100"),
+            ("cac:AllowanceCharge/cbc:BaseAmount", "100"),
+            ("cac:AllowanceCharge/cbc:Amount", "100"),
+            ("cac:AllowanceCharge/cbc:MultiplierFactorNumeric", "100"),
+            ("cbc:LineExtensionAmount", "0"),
+            ("cac:ItemPriceExtension/cbc:Amount", "0"),
+            ("cac:ItemPriceExtension/cac:TaxTotal/cbc:TaxAmount", "0"),
+        ]:
+            node = line.find(path, NS)
+            self.assertIsNotNone(node, path)
+            self.assertLess(
+                abs(Decimal(node.text) - Decimal(expected)), Decimal("0.00000001")
+            )
+            if path != "cac:AllowanceCharge/cbc:MultiplierFactorNumeric":
+                self.assertEqual(node.get("currencyID"), "AED")
+        for path, expected in [
+            ("cac:TaxTotal/cbc:TaxAmount", "0"),
+            ("cac:LegalMonetaryTotal/cbc:TaxExclusiveAmount", "0"),
+            ("cac:LegalMonetaryTotal/cbc:TaxInclusiveAmount", "0"),
+            ("cac:LegalMonetaryTotal/cbc:PayableAmount", "0"),
+        ]:
+            self.assertEqual(
+                Decimal(xml.findtext(path, namespaces=NS)), Decimal(expected)
+            )
+        invoice.action_l10n_ae_prepare()
+        self.assertEqual(invoice.preview_l10n_ae_pint(), issue.xml_content)
+        self.assertEqual(issue.read(original_fields), original)
+        self.assertEqual(invoice.line_ids.read(ledger_fields), ledger)
+        self.assertFalse(
+            issue.attempt_ids
+            or issue.event_ids
+            or issue.remote_id
+            or issue.validation_receipt
+        )
+
+    def test_discounted_partial_credit_keeps_allowance_reference_and_native_balance(
+        self,
+    ):
+        # Independent AED example: one100 unit less10%=90 net+4.50 VAT.
+        # Crediting half the quantity retains the10% discount: basis50,
+        # allowance5, net45/VAT2.25/gross47.25; original residual47.25.
+        # The native wizard reconciles the credit fully against the original,
+        # so its issue has prepaid47.25/payable0, without a bank payment.
+        tax = self.tax_sale_a.copy(
+            {
+                "name": "Synthetic discounted credit S",
+                "amount": 5,
+                "ubl_cii_tax_category_code": "S",
+            }
+        )
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {"name": "Synthetic discounted partial credit"}
+        )
+        original = (
+            self.env["account.move"]
+            .with_user(self.simple_accountman)
+            .with_context(allowed_company_ids=[self.env.company.id])
+            .create(
+                {
+                    "move_type": "out_invoice",
+                    "partner_id": self.partner_a.id,
+                    "journal_id": self.company_data["default_journal_sale"].id,
+                    "currency_id": self.env.ref("base.AED").id,
+                    "invoice_date": "2019-01-01",
+                    "l10n_ae_binding_id": binding.id,
+                    "l10n_ae_fiscal_uuid": "abababab-1111-4111-8111-111111111111",
+                    "invoice_line_ids": [
+                        Command.create(
+                            {
+                                "name": "Synthetic discounted quantity",
+                                "quantity": 1,
+                                "price_unit": 100,
+                                "discount": 10,
+                                "account_id": self.company_data[
+                                    "default_account_revenue"
+                                ].id,
+                                "tax_ids": [Command.set(tax.ids)],
+                            }
+                        )
+                    ],
+                }
+            )
+        )
+        self.assertFalse(original.env.su)
+        original.action_post()
+        self.assertEqual(
+            (
+                original.amount_untaxed,
+                original.amount_tax,
+                original.amount_total,
+                original.amount_residual,
+            ),
+            (90, 4.50, 94.50, 94.50),
+        )
+        original.action_l10n_ae_prepare()
+        source_issue = original.l10n_ae_transmission_id
+        evidence_fields = [
+            "revision",
+            "payload",
+            "payload_hash",
+            "xml_content",
+            "xml_hash",
+            "idempotency_key",
+            "create_date",
+            "write_date",
+        ]
+        source_evidence = source_issue.read(evidence_fields)
+        source_report = original.validate_l10n_ae_pint()
+        self.assertTrue(source_report["valid"], source_report)
+        self.assertEqual(source_issue.read(evidence_fields), source_evidence)
+        financial_fields = [
+            "account_id",
+            "debit",
+            "credit",
+            "amount_currency",
+            "currency_id",
+            "create_date",
+        ]
+        source_financial = original.line_ids.read(financial_fields)
+        reversal = (
+            self.env["account.move.reversal"]
+            .with_user(self.simple_accountman)
+            .with_context(
+                allowed_company_ids=[self.env.company.id],
+                active_model="account.move",
+                active_ids=original.ids,
+            )
+            .create(
+                {
+                    "move_ids": [Command.set(original.ids)],
+                    "journal_id": original.journal_id.id,
+                    "date": "2019-01-02",
+                    "reason": "Synthetic half-quantity adjustment",
+                    "l10n_ae_credit_reason": "DL8.61.1.C",
+                }
+            )
+        )
+        reversal.refund_moves()
+        credit = reversal.new_move_ids
+        self.assertFalse(credit.env.su)
+        self.assertEqual((credit.state, credit.move_type), ("draft", "out_refund"))
+        self.assertEqual(credit.invoice_line_ids.discount, 10)
+        credit.invoice_line_ids.write({"quantity": 0.5})
+        credit.write(
+            {
+                "l10n_ae_binding_id": binding.id,
+                "l10n_ae_fiscal_uuid": "bcbcbcbc-1111-4111-8111-111111111111",
+            }
+        )
+        credit.action_post()
+        self.assertEqual(
+            (
+                credit.amount_untaxed,
+                credit.amount_tax,
+                credit.amount_total,
+                credit.amount_residual,
+                original.amount_residual,
+            ),
+            (45, 2.25, 47.25, 0, 47.25),
+        )
+        self.assertEqual(credit.l10n_ae_credit_reason, "DL8.61.1.C")
+        self.assertEqual(credit.reversed_entry_id, original)
+        self.assertEqual(original.line_ids.read(financial_fields), source_financial)
+        # Native credit posting legitimately reconciles receivables. Freeze full
+        # timestamps after that action, then require all EDI actions to preserve them.
+        ledger_fields = [*financial_fields, "write_date"]
+        source_ledger = original.line_ids.read(ledger_fields)
+        credit_ledger = credit.line_ids.read(ledger_fields)
+        credit.action_l10n_ae_prepare()
+        issue = credit.l10n_ae_transmission_id
+        credit_evidence = issue.read(evidence_fields)
+        report = credit.validate_l10n_ae_pint()
+        self.assertTrue(report["valid"], report)
+        self.assertTrue(report["xsd_valid"], report)
+        xml = etree.fromstring(issue.xml_content.encode())
+        self.assertEqual(xml.findtext("cbc:CreditNoteTypeCode", namespaces=NS), "381")
+        reference = xml.find("cac:BillingReference/cac:InvoiceDocumentReference", NS)
+        self.assertEqual(reference.findtext("cbc:ID", namespaces=NS), original.name)
+        self.assertEqual(
+            reference.findtext("cbc:IssueDate", namespaces=NS), "2019-01-01"
+        )
+        line = xml.find("cac:CreditNoteLine", NS)
+        self.assertEqual(len(line.findall("cac:AllowanceCharge", NS)), 1)
+        self.assertEqual(
+            line.findtext("cac:AllowanceCharge/cbc:ChargeIndicator", namespaces=NS),
+            "false",
+        )
+        for path, expected in [
+            ("cbc:CreditedQuantity", "0.5"),
+            ("cac:Price/cbc:PriceAmount", "100"),
+            ("cac:AllowanceCharge/cbc:BaseAmount", "50"),
+            ("cac:AllowanceCharge/cbc:Amount", "5"),
+            ("cac:AllowanceCharge/cbc:MultiplierFactorNumeric", "10"),
+            ("cbc:LineExtensionAmount", "45"),
+            ("cac:ItemPriceExtension/cbc:Amount", "47.25"),
+            ("cac:ItemPriceExtension/cac:TaxTotal/cbc:TaxAmount", "2.25"),
+        ]:
+            self.assertEqual(
+                Decimal(line.findtext(path, namespaces=NS)), Decimal(expected)
+            )
+        for path, expected in [
+            ("cac:LegalMonetaryTotal/cbc:TaxExclusiveAmount", "45"),
+            ("cac:LegalMonetaryTotal/cbc:TaxInclusiveAmount", "47.25"),
+            ("cac:LegalMonetaryTotal/cbc:PrepaidAmount", "47.25"),
+            ("cac:LegalMonetaryTotal/cbc:PayableAmount", "0"),
+        ]:
+            self.assertEqual(
+                Decimal(xml.findtext(path, namespaces=NS)), Decimal(expected)
+            )
+        credit.action_l10n_ae_prepare()
+        self.assertEqual(credit.preview_l10n_ae_pint(), issue.xml_content)
+        self.assertEqual(issue.read(evidence_fields), credit_evidence)
+        self.assertEqual(source_issue.read(evidence_fields), source_evidence)
+        self.assertEqual(original.line_ids.read(ledger_fields), source_ledger)
+        self.assertEqual(credit.line_ids.read(ledger_fields), credit_ledger)
+        for transmission in (source_issue, issue):
+            self.assertFalse(
+                transmission.attempt_ids
+                or transmission.event_ids
+                or transmission.remote_id
+                or transmission.validation_receipt
+            )
+
     def test_fractional_usd_quantity_keeps_high_precision_price_and_raw_aed_lines(self):
         # Worked vector, independent of the exporter: 400.1234 USD * 0.125
         # = 50.015425 net, 2.50077125 VAT, 52.51619625 gross before rounding.
