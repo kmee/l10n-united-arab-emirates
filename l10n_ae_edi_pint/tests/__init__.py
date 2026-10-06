@@ -4,3 +4,4 @@ from . import test_invoice_xml
 from . import test_selfbilling_inbound
 from . import test_retention
 from . import test_retention_export_access
+from . import test_fiscal_category_matrix

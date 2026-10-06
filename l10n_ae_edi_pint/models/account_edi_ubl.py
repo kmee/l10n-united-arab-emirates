@@ -58,6 +58,28 @@ class AccountEdiUblUae(models.AbstractModel):
         }
         return result
 
+    def _ubl_get_line_item_node_classified_tax_category_node(self, vals, tax_category):
+        node = super()._ubl_get_line_item_node_classified_tax_category_node(
+            vals, tax_category
+        )
+        if tax_category["tax_category_code"] == "E":
+            # UAE E lines require the legal exemption reference, without a rate.
+            node["cbc:Percent"]["_text"] = None
+            node["cbc:TaxExemptionReasonCode"]["_text"] = tax_category.get(
+                "tax_exemption_reason_code"
+            )
+            node["cbc:TaxExemptionReason"]["_text"] = tax_category.get(
+                "tax_exemption_reason"
+            )
+        return node
+
+    def _ubl_get_tax_category_node(self, vals, tax_category):
+        node = super()._ubl_get_tax_category_node(vals, tax_category)
+        if tax_category["tax_category_code"] == "E":
+            # IBR-119/121-AE distinguish absent rates from an explicit zero rate.
+            node["cbc:Percent"]["_text"] = None
+        return node
+
     def _l10n_ae_exchange_rate(self, vals):
         if vals["currency"].name == "AED":
             return Decimal(1)

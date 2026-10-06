@@ -16,3 +16,4 @@ from . import edi_binding
 from . import res_partner
 from . import res_company
 from . import edi_retention
+from . import account_tax

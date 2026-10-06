@@ -14,6 +14,7 @@ from ..tools.validation import (
     ValidationUnavailable,
     describe_ruleset,
 )
+from .account_tax import UAE_EXEMPTION_REASONS
 
 
 class AccountMove(models.Model):
@@ -88,6 +89,27 @@ class AccountMove(models.Model):
     def action_l10n_ae_validate(self):
         result = super().action_l10n_ae_validate()
         formatter = self.env["account.edi.ubl.kmee_ae"]
+        for move in self:
+            supplier, customer = (
+                (move.partner_id.commercial_partner_id, move.company_id.partner_id)
+                if move.is_self_billing
+                else (move.company_id.partner_id, move.partner_id.commercial_partner_id)
+            )
+            for tax in move.invoice_line_ids.tax_ids.flatten_taxes_hierarchy():
+                if formatter._get_tax_category_code(
+                    customer, supplier, tax
+                ) == "E" and tax.ubl_cii_tax_exemption_reason_code not in dict(
+                    UAE_EXEMPTION_REASONS
+                ):
+                    raise UserError(
+                        self.env._(
+                            "IBR-167-AE: exempt tax '%s' requires an official UAE "
+                            "exemption code DL8.46.1, DL8.46.2, DL8.46.3 or DL8.46.4. "
+                            "Review the tax configuration before preparing "
+                            "the invoice.",
+                            tax.display_name,
+                        )
+                    )
         for move in self.filtered(
             lambda record: record.l10n_ae_document_category == "commercial"
         ):
