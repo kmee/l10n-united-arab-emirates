@@ -325,13 +325,17 @@ class UaeEdiTransmission(models.Model):
             )
         operation = "submit" if self.submission_state == "queued" else "lookup"
         token = str(uuid.uuid4())
-        proof = json.dumps(
-            {
-                "xml_sha256": self.xml_hash,
-                "report": validation,
-                "checked_at": fields.Datetime.to_string(now),
-            },
-            sort_keys=True,
+        proof = (
+            self.validation_receipt
+            if operation == "lookup"
+            else json.dumps(
+                {
+                    "xml_sha256": self.xml_hash,
+                    "report": validation,
+                    "checked_at": fields.Datetime.to_string(now),
+                },
+                sort_keys=True,
+            )
         )
         self.env["l10n_ae.edi.attempt"].sudo().create(
             {
