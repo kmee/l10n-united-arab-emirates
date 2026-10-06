@@ -1,13 +1,19 @@
 # Copyright 2026 KMEE
 # License AGPL-3.0 or later (https://www.gnu.org/licenses/agpl).
 import hashlib
+import json
 import os
 import re
 
 from odoo import api, fields, models
 from odoo.exceptions import UserError
 
-from ..tools.validation import OfflinePintValidator, ValidationUnavailable
+from ..tools.validation import (
+    DEFAULT_RULESET,
+    OfflinePintValidator,
+    ValidationUnavailable,
+    describe_ruleset,
+)
 
 
 class AccountMove(models.Model):
@@ -23,6 +29,17 @@ class AccountMove(models.Model):
     l10n_ae_received_delivery_summary = fields.Text(
         string="Received Delivery", compute="_compute_l10n_ae_received_delivery_summary"
     )
+
+    def _l10n_ae_snapshot(self):
+        snapshot = super()._l10n_ae_snapshot()
+        ruleset = os.environ.get("KMEE_UAE_NORMATIVE_RULESET", DEFAULT_RULESET)
+        try:
+            snapshot["normative"] = describe_ruleset(ruleset)
+        except ValidationUnavailable as error:
+            raise UserError(
+                self.env._("UAE normative configuration is unavailable: %s", str(error))
+            ) from error
+        return snapshot
 
     @api.depends("l10n_ae_received_inbox_ids.delivery_snapshot")
     def _compute_l10n_ae_received_delivery_summary(self):
@@ -166,7 +183,21 @@ class AccountMove(models.Model):
             )
         content = self.preview_l10n_ae_pint().encode("utf-8")
         try:
-            return OfflinePintValidator(directory).validate(content)
+            ruleset = os.environ.get("KMEE_UAE_NORMATIVE_RULESET", DEFAULT_RULESET)
+            identity = describe_ruleset(ruleset)
+            if self.l10n_ae_transmission_id:
+                pinned = json.loads(self.l10n_ae_transmission_id.payload).get(
+                    "normative"
+                )
+                if pinned != identity:
+                    raise UserError(
+                        self.env._(
+                            "The pinned PINT package differs from the configured "
+                            "package. Restore the originally pinned configuration "
+                            "before validating this prepared document."
+                        )
+                    )
+            return OfflinePintValidator(directory, ruleset=ruleset).validate(content)
         except ValidationUnavailable as error:
             raise UserError(
                 self.env._("UAE formal validation is unavailable: %s", str(error))

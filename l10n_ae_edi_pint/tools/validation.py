@@ -17,6 +17,11 @@ MAX_XML_BYTES = 10 * 1024 * 1024
 MAX_REPORT_BYTES = 2 * 1024 * 1024
 UBL_BASE = "https://docs.oasis-open.org/ubl/os-UBL-2.1/"
 MANIFEST = Path(__file__).with_name("normative.json")
+DEFAULT_RULESET = "kmee-pint-ae-1.0.4-ubl-2.1"
+RULESETS = {
+    DEFAULT_RULESET: MANIFEST,
+    "kmee-pint-ae-1.0.3-ubl-2.1": MANIFEST.with_name("normative-1.0.3.json"),
+}
 SVRL_NS = "http://purl.oclc.org/dsdl/svrl"
 
 
@@ -26,6 +31,32 @@ class UnsafeInvoiceXml(ValueError):
 
 class ValidationUnavailable(RuntimeError):
     """Technical failure; never interpreted as fiscal approval."""
+
+
+def _manifest_path(ruleset):
+    if not isinstance(ruleset, str) or ruleset not in RULESETS:
+        raise ValidationUnavailable("Unknown trusted UAE normative ruleset.")
+    return RULESETS[ruleset]
+
+
+def describe_ruleset(ruleset=DEFAULT_RULESET):
+    """Identify a shipped trusted package without claiming XML conformance."""
+    try:
+        content = _manifest_path(ruleset).read_bytes()
+    except OSError as error:
+        raise ValidationUnavailable(
+            "Trusted normative manifest is unavailable."
+        ) from error
+    try:
+        manifest = json.loads(content)
+    except (ValueError, UnicodeDecodeError) as error:
+        raise ValidationUnavailable("Invalid trusted normative manifest.") from error
+    if manifest.get("version") != ruleset:
+        raise ValidationUnavailable("Normative manifest identity mismatch.")
+    return {
+        "ruleset": ruleset,
+        "manifest_sha256": hashlib.sha256(content).hexdigest(),
+    }
 
 
 def parse_invoice_xml(content, *, max_bytes=MAX_XML_BYTES):
@@ -55,8 +86,10 @@ class OfflinePintValidator:
     an address-space limit; macOS must enforce memory through its runtime.
     """
 
-    def __init__(self, resource_directory, *, timeout=30):
+    def __init__(self, resource_directory, *, timeout=30, ruleset=DEFAULT_RULESET):
         self.resource_directory = Path(resource_directory).resolve()
+        _manifest_path(ruleset)
+        self.ruleset = ruleset
         if timeout <= 0 or timeout > 60:
             raise ValueError("Validation deadline must be between zero and 60 seconds.")
         self.timeout = timeout
@@ -75,6 +108,7 @@ class OfflinePintValidator:
                         "-I",
                         str(Path(__file__).resolve()),
                         str(self.resource_directory),
+                        self.ruleset,
                     ],
                     stdin=subprocess.PIPE,
                     stdout=output,
@@ -106,10 +140,12 @@ class OfflinePintValidator:
 
 
 class _PinnedResources:
-    def __init__(self, directory):
+    def __init__(self, directory, ruleset=DEFAULT_RULESET):
         self.directory = Path(directory)
-        manifest_content = MANIFEST.read_bytes()
+        manifest_content = _manifest_path(ruleset).read_bytes()
         self.manifest = json.loads(manifest_content)
+        if self.manifest["version"] != ruleset:
+            raise ValidationUnavailable("Normative manifest identity mismatch.")
         self.manifest_hash = hashlib.sha256(manifest_content).hexdigest()
         self.verified = {}
 
@@ -183,7 +219,7 @@ def _saxon_processor():
     return processor
 
 
-def _validate_offline(content, directory):
+def _validate_offline(content, directory, ruleset=DEFAULT_RULESET):
     root = parse_invoice_xml(content)
     document_type = etree.QName(root).localname
     expected_namespace = (
@@ -205,7 +241,7 @@ def _validate_offline(content, directory):
     if customization not in profiles:
         raise UnsafeInvoiceXml("Unsupported PINT-AE customization.")
     profile, package = profiles[customization]
-    resources = _PinnedResources(directory)
+    resources = _PinnedResources(directory, ruleset)
     schema = _schema(resources, document_type)
     xsd_valid = schema.validate(root)
     report = {
@@ -267,7 +303,7 @@ def _worker():
         resource.setrlimit(resource.RLIMIT_AS, (64 * 1024**3, 64 * 1024**3))
     try:
         report = _validate_offline(
-            sys.stdin.buffer.read(MAX_XML_BYTES + 1), sys.argv[1]
+            sys.stdin.buffer.read(MAX_XML_BYTES + 1), sys.argv[1], sys.argv[2]
         )
     except (UnsafeInvoiceXml, ValidationUnavailable) as error:
         report = {"technical_error": str(error)}

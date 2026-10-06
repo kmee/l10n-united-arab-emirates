@@ -3,9 +3,11 @@
 import hashlib
 import io
 import json
+import os
 import uuid
 import zipfile
 from decimal import Decimal
+from unittest.mock import patch
 
 from lxml import etree
 
@@ -23,6 +25,95 @@ NS = {
 
 @tagged("post_install", "-at_install")
 class TestUaeInvoiceXml(AccountTestInvoicingCommon):
+    def test_prepared_packages_survive_configuration_swap_and_rollback(self):
+        invoice = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
+        )
+        invoice.l10n_ae_fiscal_uuid = "13131313-1313-4313-8313-131313131313"
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {"name": "Synthetic normative rollback binding"}
+        )
+        invoice.l10n_ae_binding_id = binding
+        invoice.action_l10n_ae_prepare()
+        issue = invoice.l10n_ae_transmission_id
+        original = (issue.payload, issue.xml_content, issue.idempotency_key)
+        report = invoice.validate_l10n_ae_pint()
+        self.assertTrue(report["valid"])
+        with patch.dict(
+            os.environ,
+            {
+                "KMEE_UAE_NORMATIVE_RULESET": "kmee-pint-ae-1.0.3-ubl-2.1",
+                "KMEE_UAE_NORMATIVE_DIR": "/opt/uae-addons/.runtime/normative-1.0.3",
+            },
+        ):
+            with self.assertRaisesRegex(UserError, "(?i)pinned.*package"):
+                invoice.validate_l10n_ae_pint()
+            older = self.init_invoice(
+                "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
+            )
+            older.l10n_ae_fiscal_uuid = "14141414-1414-4414-8414-141414141414"
+            older.l10n_ae_binding_id = binding
+            older.action_l10n_ae_prepare()
+            older_issue = older.l10n_ae_transmission_id
+            older_original = (
+                older_issue.payload,
+                older_issue.xml_content,
+                older_issue.idempotency_key,
+            )
+            older_report = older.validate_l10n_ae_pint()
+            self.assertTrue(older_report["valid"])
+            self.assertEqual(older_report["ruleset"], "kmee-pint-ae-1.0.3-ubl-2.1")
+            self.assertEqual(
+                json.loads(older_issue.payload)["normative"],
+                {
+                    "ruleset": "kmee-pint-ae-1.0.3-ubl-2.1",
+                    "manifest_sha256": older_report["resources"]["manifest_sha256"],
+                },
+            )
+        self.assertEqual(invoice.validate_l10n_ae_pint(), report)
+        with self.assertRaisesRegex(UserError, "(?i)pinned.*package"):
+            older.validate_l10n_ae_pint()
+        for current, original_values in (
+            (issue, original),
+            (older_issue, older_original),
+        ):
+            self.assertEqual(
+                (current.payload, current.xml_content, current.idempotency_key),
+                original_values,
+            )
+            self.assertFalse(current.attempt_ids)
+            self.assertFalse(current.validation_receipt)
+            self.assertEqual(current.move_id.amount_total, 105)
+            self.assertEqual(current.move_id.amount_tax, 5)
+
+    def test_preparation_pins_normative_identity_before_transport(self):
+        invoice = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
+        )
+        invoice.l10n_ae_fiscal_uuid = "12121212-1212-4212-8212-121212121212"
+        invoice.l10n_ae_binding_id = self.env["l10n_ae.edi.binding"].create(
+            {"name": "Synthetic pinned normative package"}
+        )
+        invoice.action_l10n_ae_prepare()
+        issue = invoice.l10n_ae_transmission_id
+        snapshot = json.loads(issue.payload)
+        self.assertEqual(
+            snapshot.get("normative"),
+            {
+                "ruleset": "kmee-pint-ae-1.0.4-ubl-2.1",
+                "manifest_sha256": (
+                    "4f225c8095a2f487c5813b4d0e6515c9e7f986ba1a36e34dca7ae305b7899d76"
+                ),
+            },
+        )
+        self.assertFalse(issue.attempt_ids)
+        self.assertFalse(issue.validation_receipt)
+        self.assertEqual(issue.submission_state, "queued")
+        self.assertEqual(invoice.amount_untaxed, 100)
+        self.assertEqual(invoice.amount_tax, 5)
+        self.assertEqual(invoice.amount_total, 105)
+        self.assertEqual(invoice.preview_l10n_ae_pint(), issue.xml_content)
+
     def test_export_with_an_existing_foreign_participant_keeps_exchange(self):
         self.partner_a.write(
             {
