@@ -23,6 +23,326 @@ NS = {
 
 @tagged("post_install", "-at_install")
 class TestUaeInvoiceXml(AccountTestInvoicingCommon):
+    def test_disclosed_agent_invalid_principal_blocks_posting_with_specific_diagnostic(
+        self,
+    ):
+        self.env.company.l10n_ae_edi_auto_prepare = True
+        for principal, diagnostic in (
+            (False, "IBR-137-AE"),
+            ("100000000100003", "IBR-176-AE"),
+            ("synthetic-principal", "Principal ID.*15 ASCII"),
+            ("١٠٠٠٠٠٠٠٠٣٠٠٠٠٣", "Principal ID.*15 ASCII"),
+        ):
+            with self.subTest(principal=principal):
+                invoice = self.init_invoice(
+                    "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=False
+                )
+                invoice.write(
+                    {
+                        "l10n_ae_disclosed_agent": True,
+                        "l10n_ae_principal_id": principal,
+                    }
+                )
+                with self.assertRaisesRegex(UserError, diagnostic):
+                    invoice.action_post()
+                self.assertEqual(invoice.state, "draft")
+                self.assertFalse(invoice.l10n_ae_transmission_id)
+
+    def test_prepared_disclosed_agent_issue_freezes_principal_and_scenario(self):
+        invoice = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
+        )
+        invoice.write(
+            {
+                "l10n_ae_disclosed_agent": True,
+                "l10n_ae_principal_id": "100000000300003",
+                "l10n_ae_fiscal_uuid": "aaaaaaaf-2222-4222-8222-222222222222",
+                "l10n_ae_binding_id": self.env["l10n_ae.edi.binding"]
+                .create({"name": "Disclosed agent preserved issue"})
+                .id,
+            }
+        )
+        invoice.action_l10n_ae_prepare()
+        issue = invoice.l10n_ae_transmission_id
+        self.assertEqual(
+            json.loads(issue.payload).get("principal_id"), "100000000300003"
+        )
+        original = issue.xml_content
+        for values in (
+            {"l10n_ae_principal_id": "100000000400003"},
+            {"l10n_ae_disclosed_agent": False},
+        ):
+            with self.assertRaisesRegex(UserError, "frozen"):
+                invoice.write(values)
+        self.env.company.partner_id.street = "Changed supplier master data"
+        self.assertEqual(invoice.preview_l10n_ae_pint(), original)
+        self.assertTrue(invoice.validate_l10n_ae_pint()["valid"])
+
+    def test_received_agent_free_zone_invoice_and_credit_preserve_principal_and_replay(
+        self,
+    ):
+        original = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
+        )
+        original.write(
+            {
+                "l10n_ae_disclosed_agent": True,
+                "l10n_ae_principal_id": "100000000300003",
+                "l10n_ae_free_zone": True,
+                "l10n_ae_beneficiary_id": "1000000004",
+                "l10n_ae_fiscal_uuid": "aaaaaaaf-3333-4333-8333-333333333333",
+            }
+        )
+        binding = self.env["l10n_ae.edi.binding"].create({"name": "Received agent"})
+        receiver = self.env["l10n_ae.edi.inbox"].with_user(self.simple_accountman)
+        original_content = etree.tostring(self._received_test_xml(original))
+        inbox = receiver.receive_controlled_document(
+            binding.id, "received-agent-invoice", original_content
+        )
+        self.assertTrue(inbox.action_process(), inbox.diagnostic)
+        bill = inbox.move_id
+        self.assertEqual(
+            (bill.move_type, bill.state, bill.amount_tax, bill.amount_total),
+            ("in_invoice", "draft", 5, 105),
+        )
+        self.assertTrue(bill.l10n_ae_disclosed_agent)
+        self.assertTrue(bill.l10n_ae_free_zone)
+        self.assertEqual(bill.l10n_ae_principal_id, "100000000300003")
+        self.assertEqual(bill.l10n_ae_beneficiary_id, "1000000004")
+        self.assertEqual(inbox.original_xml.content, original_content)
+        self.assertEqual(
+            receiver.receive_controlled_document(
+                binding.id, "received-agent-invoice", original_content
+            ),
+            inbox,
+        )
+        self.assertTrue(inbox.action_process())
+        self.assertEqual(inbox.move_id, bill)
+        for field, value in (
+            ("l10n_ae_principal_id", "100000000400003"),
+            ("l10n_ae_disclosed_agent", False),
+        ):
+            with self.assertRaisesRegex(UserError, "received"):
+                bill.write({field: value})
+        credit = self.init_invoice("out_refund", amounts=[40], taxes=self.tax_sale_a)
+        credit.write(
+            {
+                "reversed_entry_id": original.id,
+                "l10n_ae_credit_reason": "DL8.61.1.C",
+                "l10n_ae_disclosed_agent": True,
+                "l10n_ae_principal_id": "100000000300003",
+                "l10n_ae_free_zone": True,
+                "l10n_ae_beneficiary_id": "1000000004",
+                "l10n_ae_fiscal_uuid": "aaaaaaaf-4444-4444-8444-444444444444",
+            }
+        )
+        credit.action_post()
+        self.assertTrue(credit.validate_l10n_ae_pint()["valid"])
+        content = etree.tostring(self._received_test_xml(credit))
+        refund_inbox = receiver.receive_controlled_document(
+            binding.id, "received-agent-credit", content
+        )
+        self.assertTrue(refund_inbox.action_process(), refund_inbox.diagnostic)
+        refund = refund_inbox.move_id
+        self.assertEqual(
+            (refund.move_type, refund.state, refund.amount_tax, refund.amount_total),
+            ("in_refund", "draft", 2, 42),
+        )
+        self.assertEqual(refund.l10n_ae_principal_id, "100000000300003")
+        self.assertTrue(refund.l10n_ae_disclosed_agent)
+        self.assertTrue(refund.l10n_ae_free_zone)
+        self.assertEqual(refund_inbox.original_xml.content, content)
+        self.assertEqual(
+            receiver.receive_controlled_document(
+                binding.id, "received-agent-credit", content
+            ),
+            refund_inbox,
+        )
+        self.assertTrue(refund_inbox.action_process())
+        self.assertEqual(refund_inbox.move_id, refund)
+
+    def test_native_invoice_form_can_review_agent_and_free_zone_identifiers(self):
+        invoice = self.init_invoice("out_invoice", amounts=[100], taxes=self.tax_sale_a)
+        with Form(invoice) as form:
+            form.l10n_ae_disclosed_agent = True
+            form.l10n_ae_principal_id = "100000000300003"
+            form.l10n_ae_free_zone = True
+            form.l10n_ae_beneficiary_id = "1000000004"
+        invoice.action_l10n_ae_validate()
+        self.assertEqual(invoice.l10n_ae_principal_id, "100000000300003")
+        xml = etree.fromstring(invoice.preview_l10n_ae_pint().encode())
+        self.assertEqual(
+            xml.findtext("cbc:ProfileExecutionID", namespaces=NS), "10000100"
+        )
+        self.assertEqual(
+            xml.findtext(
+                "cac:SellerSupplierParty/cac:Party/cac:PartyIdentification/cbc:ID",
+                namespaces=NS,
+            ),
+            "100000000300003",
+        )
+        self.assertEqual(
+            xml.findtext(
+                "cac:BuyerCustomerParty/cac:Party/cac:PartyIdentification/cbc:ID",
+                namespaces=NS,
+            ),
+            "1000000004",
+        )
+
+    def test_principal_without_agent_classification_requires_review(self):
+        invoice = self.init_invoice("out_invoice", amounts=[100], taxes=self.tax_sale_a)
+        invoice.l10n_ae_principal_id = "100000000300003"
+        with self.assertRaisesRegex(UserError, "disclosed-agent"):
+            invoice.action_l10n_ae_validate()
+        self.assertEqual(invoice.state, "draft")
+        self.assertFalse(invoice.l10n_ae_transmission_id)
+
+    def test_received_principal_defects_retain_original_and_require_review(self):
+        source = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
+        )
+        source.write(
+            {
+                "l10n_ae_disclosed_agent": True,
+                "l10n_ae_principal_id": "100000000300003",
+                "l10n_ae_fiscal_uuid": "aaaaaaaf-5555-4555-8555-555555555555",
+            }
+        )
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {"name": "Agent principal defects"}
+        )
+        receiver = self.env["l10n_ae.edi.inbox"].with_user(self.simple_accountman)
+        for defect, diagnostic in (
+            ("missing", "ibr-137-ae"),
+            ("supplier", "ibr-176-ae"),
+            ("duplicate", "principal structure"),
+            ("format", "Principal ID"),
+        ):
+            with self.subTest(defect=defect):
+                tree = self._received_test_xml(source)
+                party = tree.find("cac:SellerSupplierParty/cac:Party", NS)
+                identifier = party.find("cac:PartyIdentification", NS)
+                if defect == "missing":
+                    tree.remove(tree.find("cac:SellerSupplierParty", NS))
+                elif defect == "supplier":
+                    identifier.find("cbc:ID", NS).text = "100000000200003"
+                elif defect == "duplicate":
+                    party.append(etree.fromstring(etree.tostring(identifier)))
+                else:
+                    identifier.find("cbc:ID", NS).text = "synthetic-principal"
+                content = etree.tostring(tree)
+                inbox = receiver.receive_controlled_document(
+                    binding.id, f"agent-defect-{defect}", content
+                )
+                self.assertFalse(inbox.action_process())
+                self.assertIn(diagnostic, inbox.diagnostic)
+                self.assertEqual(inbox.state, "review")
+                self.assertFalse(inbox.move_id)
+                self.assertEqual(inbox.original_xml.content, content)
+
+    def test_native_agent_credit_retains_original_identifiers_as_reviewable_defaults(
+        self,
+    ):
+        original = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
+        )
+        original.write(
+            {
+                "l10n_ae_disclosed_agent": True,
+                "l10n_ae_principal_id": "100000000300003",
+                "l10n_ae_free_zone": True,
+                "l10n_ae_beneficiary_id": "1000000004",
+                "l10n_ae_fiscal_uuid": "aaaaaaaf-7777-4777-8777-777777777777",
+                "l10n_ae_binding_id": self.env["l10n_ae.edi.binding"]
+                .create({"name": "Prepared agent source for native reversal"})
+                .id,
+            }
+        )
+        original.action_l10n_ae_prepare()
+        original_issue = original.l10n_ae_transmission_id
+        original_xml = original_issue.xml_content
+        self.assertTrue(original_issue)
+        self.assertTrue(original.l10n_ae_fiscal_uuid)
+        duplicate = original.copy()
+        self.assertFalse(duplicate.l10n_ae_disclosed_agent)
+        self.assertFalse(duplicate.l10n_ae_principal_id)
+        self.assertFalse(duplicate.l10n_ae_free_zone)
+        self.assertFalse(duplicate.l10n_ae_beneficiary_id)
+        wizard = (
+            self.env["account.move.reversal"]
+            .with_context(active_model="account.move", active_ids=original.ids)
+            .create(
+                {
+                    "reason": "Synthetic agent consideration reduction",
+                    "l10n_ae_credit_reason": "DL8.61.1.C",
+                    "journal_id": original.journal_id.id,
+                    "date": original.invoice_date,
+                }
+            )
+        )
+        wizard.refund_moves()
+        credit = wizard.new_move_ids
+        self.assertEqual((credit.state, credit.move_type), ("draft", "out_refund"))
+        self.assertTrue(credit.l10n_ae_disclosed_agent)
+        self.assertTrue(credit.l10n_ae_free_zone)
+        self.assertEqual(credit.l10n_ae_principal_id, "100000000300003")
+        self.assertEqual(credit.l10n_ae_beneficiary_id, "1000000004")
+        self.assertFalse(credit.l10n_ae_fiscal_uuid)
+        self.assertFalse(credit.l10n_ae_transmission_id)
+        credit.l10n_ae_principal_id = "100000000500003"
+        credit.invoice_line_ids.price_unit = 40
+        credit.l10n_ae_fiscal_uuid = "aaaaaaaf-6666-4666-8666-666666666666"
+        credit.action_post()
+        xml = etree.fromstring(credit.preview_l10n_ae_pint().encode())
+        self.assertEqual(
+            xml.findtext("cbc:ProfileExecutionID", namespaces=NS), "10000100"
+        )
+        self.assertEqual(
+            xml.findtext(
+                "cac:SellerSupplierParty/cac:Party/cac:PartyIdentification/cbc:ID",
+                namespaces=NS,
+            ),
+            "100000000500003",
+        )
+        self.assertTrue(credit.validate_l10n_ae_pint()["valid"])
+        self.assertEqual((credit.amount_tax, credit.amount_total), (2, 42))
+        self.assertEqual(original.l10n_ae_principal_id, "100000000300003")
+        self.assertEqual(original.l10n_ae_transmission_id, original_issue)
+        self.assertEqual(original.preview_l10n_ae_pint(), original_xml)
+
+    def test_disclosed_agent_invoice_preserves_principal_and_supplier_vat(self):
+        invoice = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
+        )
+        invoice.write(
+            {
+                "l10n_ae_disclosed_agent": True,
+                "l10n_ae_principal_id": "100000000300003",
+                "l10n_ae_fiscal_uuid": "aaaaaaaf-1111-4111-8111-111111111111",
+            }
+        )
+        xml = etree.fromstring(invoice.preview_l10n_ae_pint().encode())
+        self.assertEqual(
+            xml.findtext("cbc:ProfileExecutionID", namespaces=NS), "00000100"
+        )
+        self.assertEqual(
+            xml.findtext(
+                "cac:SellerSupplierParty/cac:Party/cac:PartyIdentification/cbc:ID",
+                namespaces=NS,
+            ),
+            "100000000300003",
+        )
+        self.assertEqual(
+            xml.findtext(
+                "cac:AccountingSupplierParty/cac:Party/cac:PartyTaxScheme/cbc:CompanyID",
+                namespaces=NS,
+            ),
+            "100000000100003",
+        )
+        self.assertEqual((invoice.amount_tax, invoice.amount_total), (5, 105))
+        report = invoice.validate_l10n_ae_pint()
+        self.assertTrue(report["valid"], report)
+
     def test_identity_package_refuses_hidden_original_decision_retention_or_hold(self):
         binding = self.env["l10n_ae.edi.binding"].create(
             {"name": "Complete identity evidence access"}

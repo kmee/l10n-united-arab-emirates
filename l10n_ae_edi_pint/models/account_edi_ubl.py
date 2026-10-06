@@ -319,6 +319,14 @@ class AccountEdiUblUae(models.AbstractModel):
         vals["document_node"]["cbc:ProfileExecutionID"] = {
             "_text": invoice._l10n_ae_transaction_flags()
         }
+        if invoice.l10n_ae_disclosed_agent:
+            document["cac:SellerSupplierParty"] = {
+                "cac:Party": {
+                    "cac:PartyIdentification": [
+                        {"cbc:ID": {"_text": invoice.l10n_ae_principal_id}}
+                    ]
+                }
+            }
         if invoice.l10n_ae_free_zone:
             vals["document_node"]["cac:BuyerCustomerParty"] = {
                 "cac:Party": {

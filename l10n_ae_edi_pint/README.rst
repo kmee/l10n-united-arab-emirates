@@ -208,6 +208,19 @@ retention/hold changes. Selection/export does not establish supplier
 authenticity or ASP/FTA acceptance. Full provider protocols, adverse
 recovery, notification policy and acceptance matrices remain required.
 
+For confirmed disclosed-agent transactions, select **Disclosed Agent
+Billing** and enter **Principal ID**, the principal's 15-digit TRN. Keep
+supplier VAT and Free Zone beneficiary separate. **Check UAE Data**,
+preparation and automatic preparation on posting diagnose missing
+Principal ID (IBR-137) or equality with the economic supplier VAT
+(IBR-176). The ASCII-digit format check is local semantic validation.
+Preparation freezes principal and flags. Billing input accepts
+``l10n_ae_principal_id``; replay preserves the issue. Supported received
+agent/Free Zone combinations conserve principal and original bytes in
+draft accounting. Duplicate principal structure or an existing
+self-billed draft with a different principal requires review. These
+flows do not establish ASP/FTA acceptance.
+
 Known issues / Roadmap
 ======================
 

@@ -260,6 +260,7 @@ class UaeEdiInbox(models.Model):
                 report = OfflinePintValidator(directory).validate(content)
                 # Preserve the specific cardinality diagnostic alongside the report.
                 current._received_beneficiary_id(tree)
+                current._received_principal_id(tree)
                 current.env["account.move"]._l10n_ae_check_pint_report(report)
                 move = current.with_company(current.company_id)._process_received_xml()
         except (UserError, UnsafeInvoiceXml, ValidationUnavailable) as error:
@@ -336,6 +337,7 @@ class UaeEdiInbox(models.Model):
             raise UserError(self.env._("Received XML failed its integrity check."))
         tree = parse_invoice_xml(content)
         beneficiary_id = self._received_beneficiary_id(tree)
+        principal_id = self._received_principal_id(tree)
         is_credit = tree.tag == (
             "{urn:oasis:names:specification:ubl:schema:xsd:CreditNote-2}CreditNote"
         )
@@ -353,7 +355,7 @@ class UaeEdiInbox(models.Model):
         transaction_flags = tree.findtext("./{*}ProfileExecutionID")
         if (
             not supported
-            or transaction_flags not in ("00000000", "10000000")
+            or transaction_flags not in ("00000000", "10000000", "00000100", "10000100")
             or tree.findall("./{*}AllowanceCharge")
             or not is_credit
             and float(tree.findtext("./{*}LegalMonetaryTotal/{*}PrepaidAmount") or 0)
@@ -461,7 +463,9 @@ class UaeEdiInbox(models.Model):
             "l10n_ae_origin_system": "controlled-inbound",
             "l10n_ae_origin_document_id": f"{self.binding_id.id}:{self.remote_id}",
             "l10n_ae_fiscal_uuid": tree.findtext("./{*}UUID"),
-            "l10n_ae_free_zone": transaction_flags == "10000000",
+            "l10n_ae_free_zone": transaction_flags[0] == "1",
+            "l10n_ae_disclosed_agent": transaction_flags[5] == "1",
+            "l10n_ae_principal_id": principal_id,
             "l10n_ae_beneficiary_id": beneficiary_id,
             "l10n_ae_received_currency_id": currency.id,
             **fiscal_values,
@@ -541,6 +545,35 @@ class UaeEdiInbox(models.Model):
                 self.env._("The received beneficiary structure requires review.")
             )
         return nodes[0].text or False
+
+    def _received_principal_id(self, tree):
+        nodes = tree.findall("./{*}SellerSupplierParty")
+        if not nodes:
+            return False
+        for child in ("Party", "PartyIdentification", "ID"):
+            if len(nodes) != 1:
+                raise UserError(
+                    self.env._("The received principal structure requires review.")
+                )
+            nodes = nodes[0].findall("./{*}" + child)
+        if len(nodes) != 1:
+            raise UserError(
+                self.env._("The received principal structure requires review.")
+            )
+        principal = nodes[0].text or ""
+        flags = tree.findtext("./{*}ProfileExecutionID") or ""
+        if (
+            len(flags) != 8
+            or flags[5] != "1"
+            or not re.fullmatch(r"[0-9]{15}", principal)
+        ):
+            raise UserError(
+                self.env._(
+                    "The received Principal ID and disclosed-agent scenario "
+                    "require review."
+                )
+            )
+        return principal
 
     def _received_fiscal_values(self, tree, currency_code):
         def amount(xpath):
@@ -806,6 +839,12 @@ class UaeEdiInbox(models.Model):
                     "The existing billing document's scenario and beneficiary "
                     "require review."
                 )
+            )
+        if (candidate.l10n_ae_principal_id or False) != self._received_principal_id(
+            tree
+        ):
+            raise UserError(
+                self.env._("The existing billing document's principal requires review.")
             )
         if self._fiscal_lines_signature(expected) != self._fiscal_lines_signature(tree):
             raise UserError(

@@ -99,6 +99,52 @@ class TestUaeSelfBillingInbound(AccountTestInvoicingCommon):
         )
         return source, recipient_agreement, binding
 
+    def test_agent_selfbilling_uses_supplier_vat_and_refuses_mismatched_principal(self):
+        source, agreement, binding = self._selfbilling_fixture()
+        source.write(
+            {"l10n_ae_disclosed_agent": True, "l10n_ae_principal_id": "100000000100003"}
+        )
+        with self.assertRaisesRegex(UserError, "IBR-176-AE"):
+            source.action_l10n_ae_validate()
+        # The emitting buyer's VAT is not the economic supplier's VAT.
+        source.l10n_ae_principal_id = "100000000600003"
+        self.assertTrue(source.validate_l10n_ae_pint()["valid"])
+        existing = self.init_invoice(
+            "out_invoice",
+            partner=self.buyer.partner_id,
+            invoice_date=source.invoice_date,
+            amounts=[100],
+            taxes=self.tax_sale_a,
+        )
+        existing.write(
+            {
+                "ref": source.name,
+                "l10n_ae_origin_system": "internal-billing",
+                "l10n_ae_origin_document_id": "SYNTH-AGENT-RECONCILIATION",
+                "l10n_ae_disclosed_agent": True,
+                "l10n_ae_principal_id": "100000000300003",
+            }
+        )
+        content = source.preview_l10n_ae_pint().encode()
+        inbox = (
+            self.env["l10n_ae.edi.inbox"]
+            .with_user(self.simple_accountman)
+            .receive_controlled_document(binding.id, "agent-existing-sale", content)
+        )
+        self.assertFalse(inbox.action_process())
+        self.assertIn("principal", inbox.diagnostic.lower())
+        self.assertFalse(inbox.move_id)
+        self.assertFalse(existing.l10n_ae_received_document)
+        self.assertEqual(existing.l10n_ae_principal_id, "100000000300003")
+        existing.l10n_ae_principal_id = "100000000600003"
+        self.assertTrue(inbox.action_process(), inbox.diagnostic)
+        self.assertEqual(inbox.move_id, existing)
+        self.assertEqual(existing.l10n_ae_selfbilling_agreement_id, agreement)
+        self.assertEqual(existing.l10n_ae_principal_id, "100000000600003")
+        self.assertEqual(existing.state, "draft")
+        self.assertEqual((existing.amount_tax, existing.amount_total), (5, 105))
+        self.assertEqual(inbox.original_xml.content, content)
+
     def test_buyer_issued_invoice_is_received_as_a_supplier_sale_without_emission(self):
         supplier = self.env.company
         source, recipient_agreement, binding = self._selfbilling_fixture()
