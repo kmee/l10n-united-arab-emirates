@@ -7,7 +7,7 @@
     "development_status": "Alpha",
     "category": "Accounting/Localizations",
     "author": "KMEE",
-    "website": "https://github.com/kmee/l10n-eua",
+    "website": "https://github.com/kmee/l10n-uae",
     "license": "AGPL-3",
     "depends": ["l10n_ae_edi", "account_edi_ubl_cii"],
     "data": [
