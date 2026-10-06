@@ -61,6 +61,8 @@ class UaeEdiInboxEvidence(models.Model):
         "state",
         "diagnostic",
         "identity_conflict",
+        "ingestion_conflict",
+        "ingestion_event_ids",
         "move_id",
         "credit_reference_snapshot",
         "processing_history_ids",
@@ -76,7 +78,9 @@ class UaeEdiInboxEvidence(models.Model):
                 inbox._build_received_evidence_archive()
             )
 
-    def _build_received_evidence_archive(self, include_identity=True):
+    def _build_received_evidence_archive(
+        self, include_identity=True, include_ingestion=True
+    ):
         self.ensure_one()
         principal = self.env.user.with_user(self.env.uid).sudo(False)
         if not principal.active or not principal.has_group("base.group_allow_export"):
@@ -123,6 +127,7 @@ class UaeEdiInboxEvidence(models.Model):
                 "state",
                 "diagnostic",
                 "identity_conflict",
+                "ingestion_conflict",
                 "move_id",
                 "xml_hash",
             ],
@@ -259,6 +264,37 @@ class UaeEdiInboxEvidence(models.Model):
                 }
                 for name, content in sorted(artifacts.items())
             }
+        event_sources, ingestion, event_packages = inbox._received_ingestion_evidence(
+            include_ingestion
+        )
+        preserve_json(
+            "ingestion-events.json",
+            _received_metadata(
+                ingestion,
+                [
+                    "inbox_id",
+                    "binding_id",
+                    "company_id",
+                    "event_id",
+                    "remote_id",
+                    "xml_hash",
+                    "operator_id",
+                    "occurred_at",
+                    "provider",
+                    "environment",
+                    "recipient_tin",
+                    "disposition",
+                ],
+            ),
+        )
+        manifest["relationships"]["ingestion_events"] = ingestion.ids
+        manifest["relationships"]["ingestion_originals"] = event_sources.ids
+        for name, content in event_packages.items():
+            preserve(name, content)
+        manifest["artifacts"] = {
+            name: {"sha256": hashlib.sha256(content).hexdigest(), "size": len(content)}
+            for name, content in sorted(artifacts.items())
+        }
         preserve_json("manifest.json", manifest)
         output = io.BytesIO()
         with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_STORED) as archive:
@@ -277,6 +313,69 @@ class UaeEdiInboxEvidence(models.Model):
         string="Internal Identity Selections",
         compute="_compute_identity_review",
     )
+
+    def _received_ingestion_evidence(self, include_family):
+        self.ensure_one()
+        inbox = self.sudo(False)
+        inbox.check_access("read")
+        event_sources = (
+            inbox._ingestion_family().with_env(inbox.env) if include_family else inbox
+        )
+        event_sources.check_access("read")
+        ingestion = (
+            inbox.env["l10n_ae.edi.inbox.ingestion"]
+            .sudo()
+            .search(
+                [
+                    ("company_id", "=", inbox.company_id.id),
+                    ("binding_id", "=", inbox.binding_id.id),
+                    ("inbox_id", "in", event_sources.ids),
+                ],
+                order="id",
+            )
+            .with_env(inbox.env)
+        )
+        ingestion.check_access("read")
+        for event in ingestion:
+            source = event.inbox_id
+            if (
+                event.binding_id != source.binding_id
+                or event.company_id != source.company_id
+                or event.remote_id != source.remote_id
+                or event.xml_hash != source.xml_hash
+            ):
+                raise UserError(
+                    self.env._("Received delivery event evidence is inconsistent.")
+                )
+        packages = {}
+        if include_family:
+            for original in event_sources - inbox:
+                name = f"ingestion-originals/{original.id}.zip"
+                packages[name] = original._build_received_evidence_archive(
+                    include_identity=False, include_ingestion=False
+                )
+        return event_sources, ingestion, packages
+
+    def _ingestion_family(self):
+        """Discover connected event originals within the authorized source binding."""
+        self.ensure_one()
+        sources = self.sudo()
+        ledger = self.env["l10n_ae.edi.inbox.ingestion"].sudo()
+        scope = [
+            ("company_id", "=", self.company_id.id),
+            ("binding_id", "=", self.binding_id.id),
+        ]
+        while True:
+            own_events = ledger.search(scope + [("inbox_id", "in", sources.ids)])
+            connected = ledger.search(
+                scope
+                + [
+                    ("event_id", "in", own_events.mapped("event_id")),
+                ]
+            ).inbox_id
+            if not connected - sources:
+                return sources.sorted("id")
+            sources |= connected
 
     def _identity_family(self):
         self.ensure_one()

@@ -54,10 +54,14 @@ class ControlledInboxWorker:
         binding._check_transport_allowed()
         return binding
 
-    def run_once(self, binding_id, remote_id, process=True):
+    def run_once(self, binding_id, remote_id, process=True, event_id=None):
         """Fetch, commit evidence, then optionally process in a new transaction."""
         if not isinstance(remote_id, str) or not 1 <= len(remote_id) <= 256:
             raise ValueError("Invalid controlled incoming document identifier.")
+        if event_id is not None and (
+            not isinstance(event_id, str) or not 1 <= len(event_id) <= 256
+        ):
+            raise ValueError("Invalid controlled incoming event identifier.")
         with self.registry.cursor() as cursor:
             binding = self._binding(cursor, binding_id, process=process)
             tin, provider = binding.company_id.l10n_ae_tin, binding.provider
@@ -70,7 +74,7 @@ class ControlledInboxWorker:
         # No live database cursor or lock during remote retrieval.
         receipt = ControlledAspClient(
             self.endpoint, self.token, provider
-        ).lookup_inbound(tin, remote_id)
+        ).lookup_inbound(tin, remote_id, event_id=event_id)
         if receipt is None:
             with self.registry.cursor() as cursor:
                 self._binding(cursor, binding_id, process=process)
@@ -91,7 +95,10 @@ class ControlledInboxWorker:
                     inbox = binding.env[
                         "l10n_ae.edi.inbox"
                     ].receive_controlled_document(
-                        binding.id, remote_id, receipt["xml"].encode()
+                        binding.id,
+                        remote_id,
+                        receipt["xml"].encode(),
+                        event_id=event_id,
                     )
                     inbox_id = inbox.id
                     cursor.commit()
@@ -143,12 +150,15 @@ class ControlledInboxWorker:
         page = client.list_inbound(tin, checkpoint, limit=limit)
         originals = []
         for document in page["documents"]:
-            receipt = client.lookup_inbound(tin, document["remote_id"])
+            event_id = document.get("event_id")
+            receipt = client.lookup_inbound(
+                tin, document["remote_id"], event_id=event_id
+            )
             if receipt is None:
                 raise ControlledAspError("missing_inbound_artifact")
             if receipt["xml_sha256"] != document["xml_sha256"]:
                 raise ControlledAspError("correlation")
-            originals.append((document["remote_id"], receipt["xml"].encode()))
+            originals.append((document["remote_id"], receipt["xml"].encode(), event_id))
         for attempt in range(3):
             try:
                 with self.registry.cursor() as cursor:
@@ -173,12 +183,12 @@ class ControlledInboxWorker:
                             "has_more": False,
                         }
                     inbox_ids = []
-                    for remote_id, content in originals:
+                    for remote_id, content, event_id in originals:
                         try:
                             inbox = binding.env[
                                 "l10n_ae.edi.inbox"
                             ].receive_controlled_document(
-                                binding.id, remote_id, content
+                                binding.id, remote_id, content, event_id=event_id
                             )
                         except UnreadableReceivedReplay:
                             # Exact bytes were already retained; reveal no source ID.

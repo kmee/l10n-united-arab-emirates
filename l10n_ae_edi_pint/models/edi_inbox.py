@@ -53,6 +53,12 @@ class UaeEdiInbox(models.Model):
     )
     diagnostic = fields.Text(readonly=True)
     identity_conflict = fields.Boolean(string="Remote ID Conflict", readonly=True)
+    ingestion_conflict = fields.Boolean(string="Delivery Event Conflict", readonly=True)
+    ingestion_event_ids = fields.One2many(
+        "l10n_ae.edi.inbox.ingestion",
+        "inbox_id",
+        readonly=True,
+    )
     move_id = fields.Many2one(
         "account.move",
         string="Accounting Document",
@@ -122,7 +128,9 @@ class UaeEdiInbox(models.Model):
             )
 
     @api.model
-    def receive_controlled_document(self, binding_id, remote_id, content):
+    def receive_controlled_document(
+        self, binding_id, remote_id, content, event_id=None
+    ):
         """Persist controlled authenticated bytes without an accounting commit."""
         self._check_operator(process=False)
         binding = self.env["l10n_ae.edi.binding"].browse(binding_id).exists()
@@ -135,9 +143,16 @@ class UaeEdiInbox(models.Model):
             raise UserError(self.env._("Invalid received document identifier."))
         if not isinstance(content, bytes) or not 0 < len(content) <= MAX_XML_BYTES:
             raise UserError(self.env._("Invalid received XML size or encoding."))
+        if event_id is not None and (
+            not isinstance(event_id, str) or not 1 <= len(event_id) <= 256
+        ):
+            raise UserError(self.env._("Invalid received delivery event identifier."))
         digest = hashlib.sha256(content).hexdigest()
+        # Change the row version without altering binding facts. A lock alone
+        # cannot refresh another transaction's repeatable-read identity snapshot.
         self.env.cr.execute(
-            "SELECT id FROM l10n_ae_edi_binding WHERE id = %s FOR UPDATE", [binding.id]
+            "UPDATE l10n_ae_edi_binding SET write_date = write_date WHERE id = %s",
+            [binding.id],
         )
         # Identity cannot depend on which prior originals a receiver may read.
         # Authorization above bounds this lookup to this exact company/binding.
@@ -159,9 +174,24 @@ class UaeEdiInbox(models.Model):
             try:
                 current.check_access("read")
             except AccessError:
-                raise UnreadableReceivedReplay(
-                    self.env._("The retained received original is not readable.")
-                ) from None
+                message = self.env._("The retained received original is not readable.")
+                if event_id is not None and not receiver.env[
+                    "l10n_ae.edi.inbox.ingestion"
+                ].search_count(
+                    [
+                        ("company_id", "=", binding.company_id.id),
+                        ("binding_id", "=", binding.id),
+                        ("inbox_id", "=", existing.id),
+                        ("event_id", "=", event_id),
+                    ],
+                    limit=1,
+                ):
+                    # New event evidence is not yet retained. It cannot be silently
+                    # skipped by pagination or disclosed through the hidden source.
+                    raise AccessError(message) from None
+                raise UnreadableReceivedReplay(message) from None
+            if event_id is not None:
+                self.env["l10n_ae.edi.inbox.ingestion"]._record(current, event_id)
             return current
         other = receiver.search(identity_domain)
         conflict = {
@@ -173,7 +203,7 @@ class UaeEdiInbox(models.Model):
         }
         if other:
             super(UaeEdiInbox, other.sudo()).write(conflict)
-        return (
+        original = (
             super(UaeEdiInbox, receiver)
             .create(
                 {
@@ -194,6 +224,9 @@ class UaeEdiInbox(models.Model):
             )
             .with_env(self.env)
         )
+        if event_id is not None:
+            self.env["l10n_ae.edi.inbox.ingestion"]._record(original, event_id)
+        return original
 
     @api.model_create_multi
     def create(self, vals_list):
@@ -224,7 +257,7 @@ class UaeEdiInbox(models.Model):
             "SELECT id FROM l10n_ae_edi_inbox WHERE id = %s FOR UPDATE", [current.id]
         )
         current.invalidate_recordset()
-        if current.identity_review_pending:
+        if current.ingestion_conflict or current.identity_review_pending:
             return False
         if current.move_id:
             current.move_id.with_user(current.env.uid).sudo(False).check_access("read")

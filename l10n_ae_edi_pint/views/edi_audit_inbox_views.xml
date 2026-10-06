@@ -36,6 +36,7 @@
                             groups="base.group_allow_export"
                         />
                         <field name="identity_conflict" />
+                        <field name="ingestion_conflict" />
                         <field name="diagnostic" />
                     </group>
                     <group
@@ -48,6 +49,38 @@
                             readonly="1"
                             nolabel="1"
                         />
+                    </group>
+                    <group string="Delivery Event History" col="1">
+                        <field name="ingestion_event_ids" readonly="1" nolabel="1">
+                            <list create="false" edit="false" delete="false">
+                                <field name="event_id" />
+                                <field name="remote_id" />
+                                <field name="occurred_at" />
+                                <field name="operator_id" options="{'no_open': True}" />
+                                <field name="disposition" />
+                            </list>
+                            <form
+                                create="false"
+                                edit="false"
+                                delete="false"
+                                duplicate="false"
+                            >
+                                <group>
+                                    <field name="event_id" />
+                                    <field name="remote_id" />
+                                    <field name="xml_hash" />
+                                    <field name="occurred_at" />
+                                    <field
+                                        name="operator_id"
+                                        options="{'no_open': True}"
+                                    />
+                                    <field name="disposition" />
+                                    <field name="provider" />
+                                    <field name="environment" />
+                                    <field name="recipient_tin" />
+                                </group>
+                            </form>
+                        </field>
                     </group>
                     <group string="Processing History" col="1">
                         <field name="processing_history_ids" readonly="1" nolabel="1">

@@ -17,3 +17,7 @@ access_uae_inbox_review_auditor,UAE audit processing history,l10n_ae.edi.inbox.r
 access_uae_inbox_review_accountant,UAE accountant processing history,l10n_ae.edi.inbox.review,account.group_account_readonly,r,
 access_uae_inbox_review_invoice,UAE invoice user processing history,l10n_ae.edi.inbox.review,account.group_account_invoice,r,
 access_uae_inbox_review_receiver,UAE receiver processing history,l10n_ae.edi.inbox.review,l10n_ae_edi_pint.group_document_receiver,r,
+access_uae_inbox_ingestion_auditor,UAE delivery event auditor,l10n_ae.edi.inbox.ingestion,l10n_ae_edi.group_fiscal_auditor,r,
+access_uae_inbox_ingestion_accountant,UAE delivery event accountant,l10n_ae.edi.inbox.ingestion,account.group_account_readonly,r,
+access_uae_inbox_ingestion_invoice,UAE delivery event invoice,l10n_ae.edi.inbox.ingestion,account.group_account_invoice,r,
+access_uae_inbox_ingestion_receiver,UAE delivery event receiver,l10n_ae.edi.inbox.ingestion,l10n_ae_edi_pint.group_document_receiver,r,

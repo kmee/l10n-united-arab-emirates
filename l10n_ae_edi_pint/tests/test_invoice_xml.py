@@ -1905,6 +1905,325 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         customer.append(supplier_party)
         return tree
 
+    def test_repeated_credit_delivery_keeps_one_refund_and_original_reference(self):
+        source = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
+        )
+        source.l10n_ae_fiscal_uuid = "bbbbbbbc-1111-4111-8111-111111111111"
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {"name": "Credit delivery events"}
+        )
+        receiver = self.env["l10n_ae.edi.inbox"].with_user(self.simple_accountman)
+        original = receiver.receive_controlled_document(
+            binding.id,
+            "credit-original",
+            etree.tostring(self._received_test_xml(source)),
+        )
+        self.assertTrue(original.action_process(), original.diagnostic)
+        credit = self.init_invoice("out_refund", amounts=[40], taxes=self.tax_sale_a)
+        credit.write(
+            {
+                "reversed_entry_id": source.id,
+                "l10n_ae_credit_reason": "DL8.61.1.C",
+                "l10n_ae_fiscal_uuid": "bbbbbbbc-2222-4222-8222-222222222222",
+            }
+        )
+        credit.action_post()
+        content = etree.tostring(self._received_test_xml(credit))
+        inbox = receiver.receive_controlled_document(
+            binding.id, "credit-delivery", content, event_id="credit-event-one"
+        )
+        self.assertTrue(inbox.action_process(), inbox.diagnostic)
+        refund = inbox.move_id
+        for event_id in ("credit-event-one", "credit-event-two", "credit-event-two"):
+            replay = receiver.receive_controlled_document(
+                binding.id, "credit-delivery", content, event_id=event_id
+            )
+            self.assertEqual(replay, inbox)
+            self.assertTrue(replay.action_process(), replay.diagnostic)
+            self.assertEqual(replay.move_id, refund)
+        self.assertEqual(
+            (
+                refund.move_type,
+                refund.state,
+                refund.amount_untaxed,
+                refund.amount_tax,
+                refund.amount_total,
+            ),
+            ("in_refund", "draft", 40, 2, 42),
+        )
+        self.assertEqual(refund.reversed_entry_id, original.move_id)
+        self.assertEqual(refund.l10n_ae_credit_reason, "DL8.61.1.C")
+        self.assertEqual(
+            inbox.credit_reference_snapshot,
+            [
+                {
+                    "number": source.name,
+                    "issue_date": str(source.invoice_date),
+                    "move_id": original.move_id.id,
+                }
+            ],
+        )
+        self.assertEqual(inbox.original_xml.content, content)
+        self.assertEqual(
+            inbox.ingestion_event_ids.mapped("event_id"),
+            ["credit-event-one", "credit-event-two"],
+        )
+        self.assertEqual(len(inbox.processing_history_ids), 1)
+        self.assertFalse(refund.l10n_ae_transmission_id)
+
+    def test_delivery_evidence_cannot_be_forged_by_defaults_crud_or_elevation(self):
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {"name": "Protected event evidence"}
+        )
+        model = self.env["l10n_ae.edi.inbox"].with_user(self.simple_accountman)
+        original = model.with_context(
+            default_event_id="forged-event",
+            default_operator_id=1,
+            default_occurred_at="2000-01-01 00:00:00",
+            default_disposition="collision",
+            default_ingestion_conflict=True,
+        ).receive_controlled_document(
+            binding.id,
+            "protected-event-source",
+            b"<original/>",
+            event_id="actual-event",
+        )
+        event = original.ingestion_event_ids
+        self.assertEqual(event.event_id, "actual-event")
+        self.assertEqual(event.operator_id, self.simple_accountman)
+        self.assertNotEqual(str(event.occurred_at), "2000-01-01 00:00:00")
+        self.assertEqual(event.disposition, "retained")
+        self.assertFalse(original.ingestion_conflict)
+        values = event.read(
+            ["event_id", "inbox_id", "operator_id", "occurred_at", "disposition"]
+        )
+        for elevated in (False, True):
+            target = event.sudo() if elevated else event
+            ledger = target.env["l10n_ae.edi.inbox.ingestion"]
+            for operation in (
+                lambda ledger=ledger: ledger.create({"event_id": "forged"}),
+                lambda ledger=ledger: ledger.with_context(
+                    default_event_id="forged"
+                ).create({}),
+                lambda target=target: target.write({"event_id": "forged"}),
+                lambda target=target: target.copy(),
+                lambda target=target: target.unlink(),
+            ):
+                with self.env.cr.savepoint(), self.assertRaises(UserError):
+                    operation()
+        self.assertEqual(
+            event.read(
+                ["event_id", "inbox_id", "operator_id", "occurred_at", "disposition"]
+            ),
+            values,
+        )
+        for invalid in (False, 1, "", "x" * 257, {}):
+            with self.subTest(event_id=invalid), self.assertRaises(UserError):
+                model.receive_controlled_document(
+                    binding.id, "invalid-event", b"<original/>", event_id=invalid
+                )
+        legacy = model.receive_controlled_document(
+            binding.id, "unknown-event", b"<legacy/>"
+        )
+        self.assertFalse(legacy.ingestion_event_ids)
+
+    def test_event_collision_with_changed_bytes_cannot_be_overridden_by_variant_review(
+        self,
+    ):
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {"name": "Event versus document identity"}
+        )
+        model = self.env["l10n_ae.edi.inbox"].with_user(self.simple_accountman)
+        tree = self._received_test_xml()
+        first = model.receive_controlled_document(
+            binding.id, "same-document", etree.tostring(tree), event_id="same-event"
+        )
+        tree.insert(0, etree.Comment("Retained conflicting delivery bytes"))
+        second = model.receive_controlled_document(
+            binding.id, "same-document", etree.tostring(tree), event_id="same-event"
+        )
+        self.assertTrue(first.identity_conflict and second.identity_conflict)
+        self.assertTrue(first.ingestion_conflict and second.ingestion_conflict)
+        second.action_select_identity_variant(
+            "Compared both document variants.", "SYNTH-EVENT-REVIEW"
+        )
+        self.assertFalse(second.identity_review_pending)
+        for original in (first, second):
+            self.assertFalse(original.action_process())
+            self.assertFalse(original.move_id)
+            self.assertFalse(original.processing_history_ids)
+        self.assertEqual(first.ingestion_event_ids.disposition, "retained")
+        self.assertEqual(second.ingestion_event_ids.disposition, "collision")
+
+    def test_received_event_package_retains_every_conflicting_association(self):
+        binding = self.env["l10n_ae.edi.binding"].create({"name": "Portable events"})
+        receiver = self.env["l10n_ae.edi.inbox"].with_user(self.simple_accountman)
+        content = b"<synthetic-original/>"
+        original = receiver.receive_controlled_document(
+            binding.id, "first-document", content, event_id="portable-event"
+        )
+        auditor = new_test_user(
+            self.env,
+            login="synthetic-event-export-auditor",
+            groups="l10n_ae_edi.group_fiscal_auditor,base.group_allow_export",
+            company_id=self.env.company.id,
+            company_ids=self.env.company.ids,
+        )
+        audit = original.with_user(auditor)
+        before = audit.evidence_archive.content
+        second = receiver.receive_controlled_document(
+            binding.id,
+            "second-document",
+            b"<other-original/>",
+            event_id="portable-event",
+        )
+        after = audit.evidence_archive.content
+        self.assertNotEqual(before, after)
+        with zipfile.ZipFile(io.BytesIO(after)) as archive:
+            events = json.loads(archive.read("ingestion-events.json"))
+            self.assertEqual(
+                [row["event_id"] for row in events],
+                ["portable-event", "portable-event"],
+            )
+            self.assertEqual(
+                [row["inbox_id"] for row in events], [original.id, second.id]
+            )
+            self.assertEqual(
+                [row["disposition"] for row in events], ["retained", "collision"]
+            )
+            self.assertEqual(
+                [row["operator_id"] for row in events],
+                [self.simple_accountman.id, self.simple_accountman.id],
+            )
+            self.assertEqual(archive.read("document.xml"), content)
+            manifest = json.loads(archive.read("manifest.json"))
+            self.assertEqual(
+                manifest["relationships"]["ingestion_events"],
+                [row["id"] for row in events],
+            )
+            nested_content = archive.read(f"ingestion-originals/{second.id}.zip")
+            with zipfile.ZipFile(io.BytesIO(nested_content)) as nested:
+                self.assertEqual(nested.read("document.xml"), b"<other-original/>")
+                self.assertEqual(
+                    json.loads(nested.read("receipt.json"))["ingestion_conflict"], True
+                )
+        for hidden in (original.ingestion_event_ids, second):
+            rule = self.env["ir.access"].create(
+                {
+                    "name": "Synthetic complete event archive access",
+                    "model_id": self.env["ir.model"]._get(hidden._name).id,
+                    "operation": "r",
+                    "domain": f"[('id', '!=', {hidden.id})]",
+                }
+            )
+            try:
+                self.env.invalidate_all()
+                for source in (audit, audit.sudo()):
+                    with self.assertRaises(AccessError):
+                        source.read(["evidence_archive"])
+            finally:
+                rule.unlink()
+                self.env.invalidate_all()
+            self.assertEqual(audit.evidence_archive.content, after)
+
+    def test_reused_delivery_event_preserves_associations_and_blocks_processing(self):
+        binding = self.env["l10n_ae.edi.binding"].create({"name": "Conflicting event"})
+        receiver = self.env["l10n_ae.edi.inbox"].with_user(self.simple_accountman)
+        content = etree.tostring(self._received_test_xml())
+        first = receiver.receive_controlled_document(
+            binding.id, "original-reference", content, event_id="reused-event"
+        )
+        self.assertTrue(first.action_process(), first.diagnostic)
+        bill = first.move_id
+        event = first.ingestion_event_ids
+        association = event.read(
+            [
+                "event_id",
+                "inbox_id",
+                "remote_id",
+                "xml_hash",
+                "operator_id",
+                "occurred_at",
+                "disposition",
+            ]
+        )
+        second = receiver.receive_controlled_document(
+            binding.id, "other-reference", content, event_id="reused-event"
+        )
+        self.assertNotEqual(first, second)
+        self.assertTrue(first.ingestion_conflict)
+        self.assertTrue(second.ingestion_conflict)
+        self.assertEqual((first.state, second.state), ("review", "review"))
+        self.assertEqual(
+            event.read(
+                [
+                    "event_id",
+                    "inbox_id",
+                    "remote_id",
+                    "xml_hash",
+                    "operator_id",
+                    "occurred_at",
+                    "disposition",
+                ]
+            ),
+            association,
+        )
+        self.assertEqual(second.ingestion_event_ids.disposition, "collision")
+        for original in (first, second):
+            self.assertFalse(original.action_process())
+            self.assertEqual(original.original_xml.content, content)
+            self.assertEqual(original.ingestion_event_ids.event_id, "reused-event")
+        self.assertEqual(first.move_id, bill)
+        self.assertFalse(second.move_id)
+        self.assertEqual(
+            (bill.move_type, bill.state, bill.amount_total),
+            ("in_invoice", "draft", 105),
+        )
+        replay = receiver.receive_controlled_document(
+            binding.id, "other-reference", content, event_id="reused-event"
+        )
+        self.assertEqual(replay, second)
+        self.assertEqual(len(second.ingestion_event_ids), 1)
+        self.assertEqual(len(first.processing_history_ids), 1)
+        self.assertFalse(second.processing_history_ids)
+
+    def test_received_events_replay_without_duplicate_original_or_bill(self):
+        binding = self.env["l10n_ae.edi.binding"].create({"name": "Event identity"})
+        receiver = self.env["l10n_ae.edi.inbox"].with_user(self.simple_accountman)
+        content = etree.tostring(self._received_test_xml())
+        original = receiver.receive_controlled_document(
+            binding.id, "invoice-event-source", content, event_id="delivery-first"
+        )
+        self.assertTrue(original.action_process(), original.diagnostic)
+        bill = original.move_id
+        self.assertEqual(
+            (bill.move_type, bill.state, bill.amount_total),
+            ("in_invoice", "draft", 105),
+        )
+        first = original.ingestion_event_ids
+        self.assertEqual(len(first), 1)
+        retained = first.read(["event_id", "inbox_id", "operator_id", "occurred_at"])
+        for event_id in ("delivery-first", "delivery-second", "delivery-second"):
+            replay = receiver.receive_controlled_document(
+                binding.id, "invoice-event-source", content, event_id=event_id
+            )
+            self.assertEqual(replay, original)
+            self.assertTrue(replay.action_process(), replay.diagnostic)
+            self.assertEqual(replay.move_id, bill)
+        self.assertEqual(len(original.ingestion_event_ids), 2)
+        self.assertEqual(
+            original.ingestion_event_ids.mapped("event_id"),
+            ["delivery-first", "delivery-second"],
+        )
+        self.assertEqual(
+            first.read(["event_id", "inbox_id", "operator_id", "occurred_at"]), retained
+        )
+        self.assertEqual(first.operator_id, self.simple_accountman)
+        self.assertEqual(original.original_xml.content, content)
+        self.assertEqual(len(original.processing_history_ids), 1)
+        self.assertFalse(original.ingestion_conflict)
+
     def test_received_free_zone_preserves_beneficiary_without_changing_vat(self):
         source = self.init_invoice(
             "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True

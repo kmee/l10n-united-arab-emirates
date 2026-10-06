@@ -30,7 +30,7 @@
                         type="object"
                         string="Process Received Document"
                         groups="account.group_account_manager"
-                        invisible="state == 'processed' or identity_review_pending"
+                        invisible="state == 'processed' or identity_review_pending or ingestion_conflict"
                     />
                     <button
                         name="action_open_move"
@@ -61,6 +61,7 @@
                         <field name="xml_hash" class="text-wrap text-break" />
                         <field name="move_id" />
                         <field name="identity_conflict" />
+                        <field name="ingestion_conflict" />
                         <field name="identity_review_pending" />
                     </group>
                     <group string="Review Diagnostic" invisible="not diagnostic">
@@ -126,6 +127,38 @@
                                         />
                                     </list>
                                 </field>
+                            </form>
+                        </field>
+                    </group>
+                    <group string="Delivery Event History" col="1">
+                        <field name="ingestion_event_ids" readonly="1" nolabel="1">
+                            <list create="false" edit="false" delete="false">
+                                <field name="event_id" />
+                                <field name="remote_id" />
+                                <field name="occurred_at" />
+                                <field name="operator_id" options="{'no_open': True}" />
+                                <field name="disposition" />
+                            </list>
+                            <form
+                                create="false"
+                                edit="false"
+                                delete="false"
+                                duplicate="false"
+                            >
+                                <group>
+                                    <field name="event_id" />
+                                    <field name="remote_id" />
+                                    <field name="xml_hash" />
+                                    <field name="occurred_at" />
+                                    <field
+                                        name="operator_id"
+                                        options="{'no_open': True}"
+                                    />
+                                    <field name="disposition" />
+                                    <field name="provider" />
+                                    <field name="environment" />
+                                    <field name="recipient_tin" />
+                                </group>
                             </form>
                         </field>
                     </group>
