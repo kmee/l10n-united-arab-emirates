@@ -184,6 +184,194 @@ class TestUaeSalesAdvance(AccountTestInvoicingCommon):
         )
         self.assertEqual(final.preview_l10n_ae_pint(), final_xml)
 
+    def test_fixed_advance_and_final_keep_native_allocations_and_frozen_references(
+        self,
+    ):
+        # Independently worked fixed gross33.34 against net100/VAT5/gross105:
+        # VAT5*(33.34/105) rounds1.59; net33.34-1.59=31.75. The final
+        # deducts those allocated amounts: net68.25/VAT3.41/gross71.66.
+        # Raw line VAT follows the precise native proportional price, not the
+        # rounded header allocation; original XML must pass unchanged rules.
+        self.simple_accountman.group_ids |= self.env.ref(
+            "sales_team.group_sale_salesman_all_leads"
+        )
+        operator_env = (
+            self.env["sale.order"]
+            .with_user(self.simple_accountman)
+            .with_context(allowed_company_ids=[self.env.company.id])
+            .env
+        )
+        self.assertFalse(operator_env.su)
+        order = operator_env["sale.order"].create(
+            {
+                "partner_id": self.partner_a.id,
+                "order_line": [
+                    Command.create(
+                        {
+                            "product_id": self.product_a.id,
+                            "product_uom_qty": 1,
+                            "price_unit": 100,
+                            "tax_ids": [Command.set(self.tax_sale_a.ids)],
+                        }
+                    )
+                ],
+            }
+        )
+        order.action_confirm()
+        operator_env["sale.advance.payment.inv"].create(
+            {
+                "sale_order_ids": [Command.set(order.ids)],
+                "advance_payment_method": "fixed",
+                "fixed_amount": 33.34,
+            }
+        ).create_invoices()
+        advance = order.invoice_ids
+        self.assertEqual(len(advance), 1)
+        advance.write(
+            {"invoice_date": "2019-01-01", "l10n_ae_binding_id": self.binding.id}
+        )
+        advance.action_post()
+        self.assertEqual(
+            (advance.amount_untaxed, advance.amount_tax, advance.amount_total),
+            (31.75, 1.59, 33.34),
+        )
+        advance.action_l10n_ae_prepare()
+        advance_report = advance.validate_l10n_ae_pint()
+        self.assertTrue(advance_report["valid"], advance_report)
+        advance_xml = etree.fromstring(
+            advance.l10n_ae_transmission_id.xml_content.encode()
+        )
+        for xpath, expected in [
+            ("cac:LegalMonetaryTotal/cbc:TaxExclusiveAmount", "31.75"),
+            ("cac:TaxTotal/cbc:TaxAmount", "1.59"),
+            ("cac:LegalMonetaryTotal/cbc:TaxInclusiveAmount", "33.34"),
+            ("cac:LegalMonetaryTotal/cbc:PayableAmount", "33.34"),
+        ]:
+            self.assertEqual(advance_xml.findtext(xpath, namespaces=NS), expected)
+        original = advance.l10n_ae_transmission_id
+        original_fields = [
+            "payload",
+            "xml_content",
+            "idempotency_key",
+            "payload_hash",
+            "xml_hash",
+            "revision",
+            "create_date",
+            "write_date",
+        ]
+        original_evidence = original.read(original_fields)
+        operator_env["account.payment.register"].with_context(
+            active_model="account.move", active_ids=advance.ids
+        ).create(
+            {
+                "journal_id": self.company_data["default_journal_bank"].id,
+                "amount": 33.34,
+            }
+        ).action_create_payments()
+        self.assertEqual(advance.amount_residual, 0)
+        ledger_fields = [
+            "account_id",
+            "debit",
+            "credit",
+            "amount_currency",
+            "currency_id",
+            "quantity",
+            "price_unit",
+            "discount",
+            "tax_ids",
+            "name",
+            "create_date",
+            "write_date",
+        ]
+        advance_ledger = advance.line_ids.read(ledger_fields)
+        operator_env["sale.advance.payment.inv"].create(
+            {
+                "sale_order_ids": [Command.set(order.ids)],
+                "advance_payment_method": "delivered",
+                "deduct_down_payments": True,
+            }
+        ).create_invoices()
+        final = order.invoice_ids - advance
+        self.assertEqual(len(final), 1)
+        final.write(
+            {"invoice_date": "2019-01-02", "l10n_ae_binding_id": self.binding.id}
+        )
+        final.action_post()
+        self.assertEqual(
+            (
+                final.amount_untaxed,
+                final.amount_tax,
+                final.amount_total,
+                final.amount_residual,
+            ),
+            (68.25, 3.41, 71.66, 71.66),
+        )
+        advance_after_post = advance.line_ids.read(ledger_fields)
+        for before, after in zip(advance_ledger, advance_after_post, strict=True):
+            self.assertEqual(
+                {key: value for key, value in before.items() if key != "write_date"},
+                {key: value for key, value in after.items() if key != "write_date"},
+            )
+        final_ledger = final.line_ids.read(ledger_fields)
+        final.action_l10n_ae_prepare()
+        report = final.validate_l10n_ae_pint()
+        self.assertTrue(report["valid"], report)
+        self.assertTrue(report["xsd_valid"], report)
+        self.assertEqual(report["ruleset"], "kmee-pint-ae-1.0.4-ubl-2.1")
+        xml = etree.fromstring(final.l10n_ae_transmission_id.xml_content.encode())
+        for xpath, expected in [
+            ("cac:LegalMonetaryTotal/cbc:TaxExclusiveAmount", "68.25"),
+            ("cac:TaxTotal/cbc:TaxAmount", "3.41"),
+            ("cac:LegalMonetaryTotal/cbc:TaxInclusiveAmount", "71.66"),
+            ("cac:LegalMonetaryTotal/cbc:PayableAmount", "71.66"),
+            ("cac:BillingReference/cac:InvoiceDocumentReference/cbc:ID", advance.name),
+            (
+                "cac:BillingReference/cac:InvoiceDocumentReference/cbc:IssueDate",
+                "2019-01-01",
+            ),
+        ]:
+            self.assertEqual(xml.findtext(xpath, namespaces=NS), expected)
+        self.assertEqual(
+            json.loads(final.l10n_ae_transmission_id.payload)["taxed_advances"],
+            [
+                {
+                    "source_move_id": advance.id,
+                    "number": advance.name,
+                    "issue_date": "2019-01-01",
+                    "consumed_net": "31.75",
+                    "consumed_vat": "1.59",
+                }
+            ],
+        )
+        self.assertEqual(
+            sum(
+                final.line_ids.filtered(
+                    lambda line: line.account_id == self.advance_account
+                ).mapped("balance")
+            ),
+            31.75,
+        )
+        for move in (advance, final):
+            before = move.l10n_ae_transmission_id.read(original_fields)
+            move.action_l10n_ae_prepare()
+            self.assertEqual(
+                move.preview_l10n_ae_pint(), move.l10n_ae_transmission_id.xml_content
+            )
+            self.assertEqual(move.l10n_ae_transmission_id.read(original_fields), before)
+            issue = move.l10n_ae_transmission_id
+            self.assertFalse(
+                issue.attempt_ids
+                or issue.event_ids
+                or issue.remote_id
+                or issue.validation_receipt
+            )
+        self.assertEqual(original.read(original_fields), original_evidence)
+        self.assertEqual(advance.line_ids.read(ledger_fields), advance_after_post)
+        self.assertEqual(final.line_ids.read(ledger_fields), final_ledger)
+        self.assertEqual(advance.amount_untaxed + final.amount_untaxed, 100)
+        self.assertEqual(advance.amount_tax + final.amount_tax, 5)
+        self.assertEqual(advance.amount_total + final.amount_total, 105)
+
     def test_frozen_advance_and_final_preserve_their_sales_links(self):
         order = self.env["sale.order"].create(
             {

@@ -62,7 +62,11 @@ class AccountMove(models.Model):
             # Publish the consumption change through the original's row version.
             # A stale repeatable-read request then retries its entire action.
             # Original fiscal number/UUID/snapshot/XML remain unchanged.
-            sources.write({"write_date": self.env.cr.now()})
+            # A source-row revision coordinates repeatable-read consumption.
+            # It must not run invoice-line synchronization for this metadata.
+            sources.with_context(
+                skip_invoice_sync=True, skip_is_manually_modified=True
+            ).write({"write_date": self.env.cr.now()})
             sources.flush_recordset(["write_uid", "write_date"])
 
     def _post(self, soft=True):
