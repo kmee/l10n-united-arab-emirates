@@ -13,6 +13,10 @@ from odoo.addons.l10n_ae_edi.tools.controlled_client import (
 )
 
 
+class UnreadableReceivedReplay(AccessError):
+    """An exact retained replay exists, but its original cannot be disclosed."""
+
+
 class ControlledInboxWorker:
     """Loopback receipt of a known original or a retained recipient queue page."""
 
@@ -170,9 +174,16 @@ class ControlledInboxWorker:
                         }
                     inbox_ids = []
                     for remote_id, content in originals:
-                        inbox = binding.env[
-                            "l10n_ae.edi.inbox"
-                        ].receive_controlled_document(binding.id, remote_id, content)
+                        try:
+                            inbox = binding.env[
+                                "l10n_ae.edi.inbox"
+                            ].receive_controlled_document(
+                                binding.id, remote_id, content
+                            )
+                        except UnreadableReceivedReplay:
+                            # Exact bytes were already retained; reveal no source ID.
+                            # Other access/authority failures still abort the page.
+                            continue
                         inbox_ids.append(inbox.id)
                     if originals:
                         binding._store_controlled_inbound_checkpoint(

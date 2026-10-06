@@ -9,6 +9,7 @@ from odoo import api, fields, models
 from odoo.exceptions import AccessError, UserError
 from odoo.tools.binary import BinaryBytes
 
+from ..tools.controlled_inbox import UnreadableReceivedReplay
 from ..tools.validation import (
     MAX_XML_BYTES,
     OfflinePintValidator,
@@ -138,19 +139,31 @@ class UaeEdiInbox(models.Model):
         self.env.cr.execute(
             "SELECT id FROM l10n_ae_edi_binding WHERE id = %s FOR UPDATE", [binding.id]
         )
-        existing = self.search(
-            [
-                ("binding_id", "=", binding.id),
-                ("remote_id", "=", remote_id),
-                ("xml_hash", "=", digest),
-            ],
-            limit=1,
+        # Identity cannot depend on which prior originals a receiver may read.
+        # Authorization above bounds this lookup to this exact company/binding.
+        # Caller defaults must not fabricate receipt state or accounting links.
+        # pylint: disable=context-overridden
+        receiver = self.sudo().with_context(
+            {"allowed_company_ids": [binding.company_id.id]}
+        )
+        identity_domain = [
+            ("company_id", "=", binding.company_id.id),
+            ("binding_id", "=", binding.id),
+            ("remote_id", "=", remote_id),
+        ]
+        existing = receiver.search(
+            identity_domain + [("xml_hash", "=", digest)], limit=1
         )
         if existing:
-            return existing
-        other = self.search(
-            [("binding_id", "=", binding.id), ("remote_id", "=", remote_id)]
-        )
+            current = existing.with_user(self.env.uid).sudo(False)
+            try:
+                current.check_access("read")
+            except AccessError:
+                raise UnreadableReceivedReplay(
+                    self.env._("The retained received original is not readable.")
+                ) from None
+            return current
+        other = receiver.search(identity_domain)
         conflict = {
             "state": "review",
             "identity_conflict": True,
@@ -160,11 +173,6 @@ class UaeEdiInbox(models.Model):
         }
         if other:
             super(UaeEdiInbox, other.sudo()).write(conflict)
-        # Caller defaults must not fabricate receipt state or accounting links.
-        # pylint: disable=context-overridden
-        receiver = self.sudo().with_context(
-            {"allowed_company_ids": [binding.company_id.id]}
-        )
         return (
             super(UaeEdiInbox, receiver)
             .create(

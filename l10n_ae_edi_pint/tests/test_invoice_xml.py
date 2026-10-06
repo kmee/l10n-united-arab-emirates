@@ -21,6 +21,49 @@ NS = {
 
 @tagged("post_install", "-at_install")
 class TestUaeInvoiceXml(AccountTestInvoicingCommon):
+    def test_received_identity_conflict_includes_an_unreadable_original(self):
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {"name": "Restricted original identity"}
+        )
+        receiver = self.env["l10n_ae.edi.inbox"].with_user(self.simple_accountman)
+        first = receiver.receive_controlled_document(
+            binding.id, "restricted-same-id", b"<original/>"
+        )
+        restriction = self.env["ir.access"].create(
+            {
+                "name": "Synthetic restricted receipt original",
+                "model_id": self.env["ir.model"]._get("l10n_ae.edi.inbox").id,
+                "operation": "r",
+                "domain": f"[('id', '!=', {first.id})]",
+            }
+        )
+        try:
+            self.env.invalidate_all()
+            changed = receiver.receive_controlled_document(
+                binding.id, "restricted-same-id", b"<changed/>"
+            )
+            self.assertEqual(changed.state, "review")
+            self.assertTrue(changed.identity_conflict)
+            self.assertFalse(changed.action_process())
+            with self.assertRaises(AccessError), self.cr.savepoint():
+                receiver.receive_controlled_document(
+                    binding.id, "restricted-same-id", b"<original/>"
+                )
+            with self.assertRaises(AccessError):
+                first.read(["original_xml"])
+        finally:
+            restriction.unlink()
+            self.env.invalidate_all()
+        originals = receiver.search(
+            [("binding_id", "=", binding.id), ("remote_id", "=", "restricted-same-id")]
+        )
+        self.assertEqual(originals, first | changed)
+        self.assertEqual(originals.mapped("state"), ["review", "review"])
+        self.assertTrue(all(originals.mapped("identity_conflict")))
+        self.assertEqual(first.original_xml.content, b"<original/>")
+        self.assertEqual(changed.original_xml.content, b"<changed/>")
+        self.assertFalse(originals.move_id)
+
     def test_internal_review_preserves_authority_and_hidden_original_access(self):
         reader = new_test_user(
             self.env,
