@@ -94,9 +94,16 @@ class ControlledAspClient:
         query = urlencode({"tin": tin, "key": idempotency_key})
         return self._request("GET", "/submissions/by-key?" + query)
 
-    def lookup_inbound(self, tin, remote_id):
+    def lookup_inbound(self, tin, remote_id, event_id=None):
         """Retrieve an original XML envelope from KMEE's controlled inbox."""
-        query = urlencode({"tin": tin, "id": remote_id})
+        if event_id is not None and (
+            not isinstance(event_id, str) or not 1 <= len(event_id) <= 256
+        ):
+            raise ControlledAspError("invalid_event_request")
+        params = {"tin": tin, "id": remote_id}
+        if event_id is not None:
+            params["event_id"] = event_id
+        query = urlencode(params)
         result = self._request("GET", "/inbound/by-id?" + query)
         if result is None:
             return None
@@ -104,6 +111,8 @@ class ControlledAspClient:
             result.get("provider") != self.provider
             or result.get("tin") != tin
             or result.get("remote_id") != remote_id
+            or event_id is not None
+            and result.get("event_id") != event_id
             or not isinstance(result.get("xml"), str)
             or hashlib.sha256(result["xml"].encode()).hexdigest()
             != result.get("xml_sha256")
@@ -155,10 +164,21 @@ class ControlledAspClient:
                 not isinstance(document, dict)
                 or not isinstance(document.get("remote_id"), str)
                 or not 1 <= len(document["remote_id"]) <= 256
-                or document["remote_id"] in seen
+                or "event_id" in document
+                and (
+                    not isinstance(document["event_id"], str)
+                    or not 1 <= len(document["event_id"]) <= 256
+                )
                 or not isinstance(document.get("xml_sha256"), str)
                 or not re.fullmatch(r"[0-9a-f]{64}", document["xml_sha256"])
             ):
                 raise ControlledAspError("correlation")
-            seen.add(document["remote_id"])
+            identity = (
+                ("event", document["event_id"])
+                if "event_id" in document
+                else ("document", document["remote_id"])
+            )
+            if identity in seen:
+                raise ControlledAspError("correlation")
+            seen.add(identity)
         return result
