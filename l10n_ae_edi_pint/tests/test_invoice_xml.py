@@ -23,6 +23,408 @@ NS = {
 
 @tagged("post_install", "-at_install")
 class TestUaeInvoiceXml(AccountTestInvoicingCommon):
+    def test_export_with_an_existing_foreign_participant_keeps_exchange(self):
+        self.partner_a.write(
+            {
+                "country_id": self.env.ref("base.au").id,
+                "state_id": self.env.ref("base.state_au_2").id,
+                "street": "Synthetic integrated export buyer street",
+                "city": "Sydney",
+                "vat": False,
+                "routing_scheme": "0151",
+                "routing_endpoint": "53004085616",
+                "additional_identifiers": {"AU_ACN": "004085616"},
+                "l10n_ae_registration_type": False,
+            }
+        )
+        invoice = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
+        )
+        invoice.write(
+            {
+                "l10n_ae_exports": True,
+                "l10n_ae_fiscal_uuid": "bbbbbbbf-3333-4333-8333-333333333333",
+                "l10n_ae_binding_id": self.env["l10n_ae.edi.binding"]
+                .create({"name": "Integrated foreign export buyer"})
+                .id,
+            }
+        )
+        invoice.action_l10n_ae_prepare()
+        issue = invoice.l10n_ae_transmission_id
+        self.assertEqual(issue.exchange_mode, "exchange")
+        self.assertEqual(issue.delivery_c3_state, "unknown")
+        self.assertEqual(issue.reporting_c3_state, "unknown")
+        self.assertIsNone(json.loads(issue.payload)["destination"])
+        self.assertIsNone(json.loads(issue.payload)["buyer_onboarding_review"])
+        endpoint = etree.fromstring(issue.xml_content.encode()).find(
+            "cac:AccountingCustomerParty/cac:Party/cbc:EndpointID", NS
+        )
+        self.assertEqual(
+            (endpoint.get("schemeID"), endpoint.text), ("0151", "53004085616")
+        )
+        self.assertEqual(invoice.amount_total, 105)
+        self.assertTrue(invoice.validate_l10n_ae_pint()["valid"])
+
+    def test_explicit_foreign_vat_is_preserved_and_requires_formal_review(self):
+        self.partner_a.write(
+            {
+                "country_id": self.env.ref("base.au").id,
+                "state_id": self.env.ref("base.state_au_2").id,
+                "street": "Synthetic export buyer street",
+                "city": "Sydney",
+                "vat": "53004085616",
+                "routing_endpoint": False,
+                "additional_identifiers": {"AU_ACN": "004085616"},
+                "l10n_ae_registration_type": False,
+            }
+        )
+        invoice = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
+        )
+        invoice.write(
+            {
+                "l10n_ae_exports": True,
+                "l10n_ae_export_buyer_no_peppol": True,
+                "l10n_ae_buyer_onboarding_review_date": "2019-01-01",
+                "l10n_ae_buyer_onboarding_review_reference": "SYNTH-EXPORT-VAT-REVIEW",
+                "l10n_ae_fiscal_uuid": "bbbbbbbf-4444-4444-8444-444444444444",
+                "l10n_ae_binding_id": self.env["l10n_ae.edi.binding"]
+                .create({"name": "Explicit foreign VAT review"})
+                .id,
+            }
+        )
+        tree = etree.fromstring(invoice.preview_l10n_ae_pint().encode())
+        tax = tree.find("cac:AccountingCustomerParty/cac:Party/cac:PartyTaxScheme", NS)
+        self.assertIsNotNone(tax)
+        self.assertEqual(tax.findtext("cac:TaxScheme/cbc:ID", namespaces=NS), "GST")
+        invoice.action_l10n_ae_prepare()
+        issue = invoice.l10n_ae_transmission_id
+        with self.assertRaisesRegex(UserError, "(?i)ibr-133-ae"):
+            invoice.action_l10n_ae_validate_pint()
+        self.assertEqual(self.partner_a.vat, "53004085616")
+        self.assertEqual(json.loads(issue.payload)["buyer"]["vat"], "53004085616")
+        self.assertEqual(invoice.preview_l10n_ae_pint(), issue.xml_content)
+        self.assertFalse(issue.attempt_ids)
+        self.assertFalse(issue.event_ids)
+        self.assertEqual(issue.validation_c2_state, "unknown")
+        self.assertEqual((invoice.state, invoice.amount_total), ("posted", 105))
+
+    def test_selfbilling_export_review_cannot_replace_the_actual_company_buyer(self):
+        bill, _agreement = self._selfbilling_bill_with_agreement()
+        self.partner_a.routing_endpoint = False
+        bill.write(
+            {
+                "l10n_ae_exports": True,
+                "l10n_ae_export_buyer_no_peppol": True,
+                "l10n_ae_buyer_onboarding_review_date": "2019-01-01",
+                "l10n_ae_buyer_onboarding_review_reference": "SYNTH-SELFBILL-EXPORT",
+            }
+        )
+        with self.assertRaisesRegex(UserError, "Review the existing Participant ID"):
+            bill.action_l10n_ae_validate()
+        self.assertEqual(bill.company_id.partner_id.routing_endpoint, "1000000001")
+        self.assertFalse(self.partner_a.routing_endpoint)
+        self.assertFalse(bill.l10n_ae_transmission_id)
+
+    def test_native_form_can_record_the_reviewed_non_peppol_export_buyer(self):
+        self.partner_a.routing_endpoint = False
+        invoice = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=False
+        )
+        with Form(invoice) as form:
+            form.l10n_ae_exports = True
+            form.l10n_ae_export_buyer_no_peppol = True
+            form.l10n_ae_buyer_onboarding_review_date = "2019-01-01"
+            form.l10n_ae_buyer_onboarding_review_reference = (
+                "SYNTH-NATIVE-EXPORT-REVIEW"
+            )
+        invoice.action_l10n_ae_validate()
+        self.assertTrue(invoice.l10n_ae_exports)
+        self.assertTrue(invoice.l10n_ae_export_buyer_no_peppol)
+        self.assertEqual(
+            invoice.l10n_ae_buyer_onboarding_review_reference,
+            "SYNTH-NATIVE-EXPORT-REVIEW",
+        )
+        self.assertEqual((invoice.state, invoice.amount_total), ("draft", 105))
+        self.assertFalse(invoice.l10n_ae_transmission_id)
+
+    def test_commercial_exports_require_category_review_before_destination_selection(
+        self,
+    ):
+        outside_scope = self.tax_sale_a.copy(
+            {
+                "name": "Synthetic export commercial outside-scope tax",
+                "amount": 0,
+                "ubl_cii_tax_category_code": "O",
+                "ubl_cii_tax_exemption_reason": "Outside scope",
+            }
+        )
+        for endpoint, declaration in (("1000000002", False), (False, True)):
+            with self.subTest(endpoint=endpoint):
+                self.partner_a.routing_endpoint = endpoint
+                invoice = self.init_invoice(
+                    "out_invoice", amounts=[100], taxes=outside_scope, post=False
+                )
+                invoice.write(
+                    {
+                        "l10n_ae_document_category": "commercial",
+                        "l10n_ae_exports": True,
+                        "l10n_ae_export_buyer_no_peppol": declaration,
+                        "l10n_ae_buyer_onboarding_review_date": "2019-01-01",
+                        "l10n_ae_buyer_onboarding_review_reference": "SYNTH-REVIEW",
+                    }
+                )
+                with self.assertRaisesRegex(
+                    UserError, "Exports.*commercial invoice or credit note"
+                ):
+                    invoice.action_l10n_ae_validate()
+                self.assertEqual(invoice.l10n_ae_document_category, "commercial")
+                self.assertTrue(invoice.l10n_ae_exports)
+                self.assertEqual(self.partner_a.routing_endpoint, endpoint)
+                self.assertEqual((invoice.state, invoice.amount_total), ("draft", 100))
+                self.assertFalse(invoice.l10n_ae_transmission_id)
+
+    def test_prepared_export99_preserves_review_foreign_identity_and_free_zone(self):
+        self.partner_a.write(
+            {
+                "name": "Synthetic Australian Export Buyer",
+                "country_id": self.env.ref("base.au").id,
+                "state_id": self.env.ref("base.state_au_2").id,
+                "street": "Synthetic export buyer street",
+                "city": "Sydney",
+                "vat": False,
+                "routing_endpoint": False,
+                "additional_identifiers": {"AU_ACN": "004085616"},
+                "l10n_ae_registration_type": False,
+                "l10n_ae_registration_authority": "Synthetic Australian Registry",
+            }
+        )
+        invoice = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
+        )
+        invoice.write(
+            {
+                "l10n_ae_exports": True,
+                "l10n_ae_export_buyer_no_peppol": True,
+                "l10n_ae_free_zone": True,
+                "l10n_ae_beneficiary_id": "1000000003",
+                "l10n_ae_buyer_onboarding_review_date": "2019-01-01",
+                "l10n_ae_buyer_onboarding_review_reference": "SYNTH-EXPORT-REVIEW",
+                "l10n_ae_fiscal_uuid": "bbbbbbbf-2222-4222-8222-222222222222",
+                "l10n_ae_binding_id": self.env["l10n_ae.edi.binding"]
+                .create({"name": "Reviewed foreign export destination"})
+                .id,
+            }
+        )
+        invoice.action_l10n_ae_prepare()
+        transmission = invoice.l10n_ae_transmission_id
+        payload, xml = transmission.payload, transmission.xml_content
+        snapshot = json.loads(payload)
+        self.assertEqual(
+            snapshot.get("buyer_onboarding_review"),
+            {
+                "status": "not_registered_in_peppol",
+                "date": "2019-01-01",
+                "source": "SYNTH-EXPORT-REVIEW",
+            },
+        )
+        self.assertEqual(
+            snapshot["destination"],
+            {
+                "scheme": "0235",
+                "endpoint": "9900000099",
+                "reason": "export_buyer_no_peppol",
+            },
+        )
+        buyer = snapshot["buyer"]
+        self.assertIsNone(buyer["endpoint"])
+        self.assertIsNone(buyer["vat"])
+        self.assertEqual(buyer["name"], "Synthetic Australian Export Buyer")
+        self.assertEqual(buyer["country"], "AU")
+        self.assertEqual(buyer["street"], "Synthetic export buyer street")
+        self.assertEqual(buyer["legal_registration"], "004085616")
+        self.assertEqual(buyer["legal_registration_type"], "AU_ACN")
+        self.assertEqual(
+            buyer["legal_registration_authority"], "Synthetic Australian Registry"
+        )
+        self.assertEqual(
+            buyer.get("additional_identifiers"),
+            {"AU_ACN": "004085616", "AU_ABN": "53004085616"},
+        )
+        self.assertEqual(snapshot["transaction_flags"], "10000001")
+        self.assertEqual(snapshot["beneficiary_id"], "1000000003")
+        self.assertIsNone(snapshot["alternative_delivery"])
+        self.assertEqual(transmission.exchange_mode, "reporting_only")
+        self.assertEqual(transmission.confirmation_state, "pending")
+        self.assertEqual(transmission.delivery_c3_state, "not_applicable")
+        self.assertEqual(transmission.reporting_c3_state, "not_applicable")
+        self.assertFalse(transmission.attempt_ids)
+        self.assertFalse(transmission.event_ids)
+        for field, value in (
+            ("l10n_ae_export_buyer_no_peppol", False),
+            ("l10n_ae_buyer_onboarding_review_date", "2019-01-02"),
+            ("l10n_ae_buyer_onboarding_review_reference", "REPLACED-REVIEW"),
+            ("l10n_ae_exports", False),
+        ):
+            with (
+                self.subTest(field=field),
+                self.assertRaisesRegex(UserError, "frozen UAE invoice"),
+            ):
+                invoice.write({field: value})
+        self.partner_a.write(
+            {
+                "name": "Later buyer name",
+                "street": "Later buyer address",
+                "additional_identifiers": {"AU_ACN": "000000019"},
+                "l10n_ae_registration_authority": "Later authority",
+            }
+        )
+        self.assertEqual(invoice.preview_l10n_ae_pint(), xml)
+        self.assertEqual(transmission.payload, payload)
+        self.assertTrue(invoice.validate_l10n_ae_pint()["valid"])
+        self.assertEqual(
+            (invoice.amount_untaxed, invoice.amount_tax, invoice.amount_total),
+            (100, 5, 105),
+        )
+
+    def test_export99_refuses_conflicting_declarations_and_existing_participant(self):
+        for values, endpoint, diagnostic in (
+            (
+                {"l10n_ae_exports": False},
+                False,
+                "Select Exports before confirming a non-Peppol export buyer",
+            ),
+            ({}, "1000000002", "Review the existing Participant ID"),
+            (
+                {"l10n_ae_deemed_supply": True},
+                False,
+                "combined export and deemed-supply routing policy",
+            ),
+            (
+                {"l10n_ae_buyer_not_implemented": True},
+                False,
+                "conflicting buyer status declarations",
+            ),
+        ):
+            with self.subTest(values=values, endpoint=endpoint):
+                self.partner_a.routing_endpoint = endpoint
+                invoice = self.init_invoice(
+                    "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=False
+                )
+                invoice.write(
+                    {
+                        "l10n_ae_exports": True,
+                        "l10n_ae_export_buyer_no_peppol": True,
+                        "l10n_ae_buyer_onboarding_review_date": "2019-01-01",
+                        "l10n_ae_buyer_onboarding_review_reference": "SYNTH-REVIEW",
+                        **values,
+                    }
+                )
+                with self.assertRaisesRegex(UserError, diagnostic):
+                    invoice.action_l10n_ae_validate()
+                self.assertEqual(self.partner_a.routing_endpoint, endpoint)
+                self.assertFalse(invoice.l10n_ae_fiscal_uuid)
+                self.assertFalse(invoice.l10n_ae_transmission_id)
+                self.assertEqual(invoice.state, "draft")
+
+    def test_export99_requires_explicit_dated_recipient_review_before_posting(self):
+        self.env.company.l10n_ae_edi_auto_prepare = True
+        self.partner_a.routing_endpoint = False
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {"name": "Reviewed export recipient"}
+        )
+        for declaration, date, reference, diagnostic in (
+            (False, False, False, "Review the export buyer.*Peppol status"),
+            (True, False, "SYNTH-REVIEW", "export buyer status review date and source"),
+            (True, "2019-01-01", False, "export buyer status review date and source"),
+            (True, "2019-01-01", "  ", "export buyer status review date and source"),
+        ):
+            with self.subTest(declaration=declaration, date=date, reference=reference):
+                invoice = self.init_invoice(
+                    "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=False
+                )
+                invoice.write(
+                    {
+                        "l10n_ae_exports": True,
+                        "l10n_ae_export_buyer_no_peppol": declaration,
+                        "l10n_ae_buyer_onboarding_review_date": date,
+                        "l10n_ae_buyer_onboarding_review_reference": reference,
+                        "l10n_ae_binding_id": binding.id,
+                        "l10n_ae_fiscal_uuid": str(uuid.uuid4()),
+                    }
+                )
+                with self.assertRaisesRegex(UserError, diagnostic):
+                    invoice.action_post()
+                self.assertEqual(invoice.state, "draft")
+                self.assertFalse(invoice.l10n_ae_transmission_id)
+
+    def test_reviewed_non_peppol_export_routes_to_99_preserving_the_buyer(self):
+        self.partner_a.write(
+            {
+                "name": "Synthetic Australian Export Buyer",
+                "country_id": self.env.ref("base.au").id,
+                "state_id": self.env.ref("base.state_au_2").id,
+                "street": "Synthetic export buyer street",
+                "city": "Sydney",
+                "vat": False,
+                "routing_endpoint": False,
+                "additional_identifiers": {"AU_ACN": "004085616"},
+                "l10n_ae_registration_authority": "Synthetic Australian Registry",
+            }
+        )
+        invoice = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
+        )
+        invoice.write(
+            {
+                "l10n_ae_exports": True,
+                "l10n_ae_export_buyer_no_peppol": True,
+                "l10n_ae_buyer_onboarding_review_date": "2019-01-01",
+                "l10n_ae_buyer_onboarding_review_reference": (
+                    "SYNTH-EXPORT-BUYER-PEPPOL-REVIEW"
+                ),
+                "l10n_ae_fiscal_uuid": "bbbbbbbf-1111-4111-8111-111111111111",
+            }
+        )
+        tree = etree.fromstring(invoice.preview_l10n_ae_pint().encode())
+        buyer = tree.find("cac:AccountingCustomerParty/cac:Party", NS)
+        endpoint = buyer.find("cbc:EndpointID", NS)
+        self.assertEqual(
+            (endpoint.get("schemeID"), endpoint.text), ("0235", "9900000099")
+        )
+        self.assertEqual(
+            tree.findtext("cbc:ProfileExecutionID", namespaces=NS), "00000001"
+        )
+        self.assertEqual(
+            buyer.findtext("cac:PartyLegalEntity/cbc:RegistrationName", namespaces=NS),
+            "Synthetic Australian Export Buyer",
+        )
+        self.assertEqual(
+            buyer.findtext("cac:PostalAddress/cbc:StreetName", namespaces=NS),
+            "Synthetic export buyer street",
+        )
+        self.assertEqual(
+            buyer.findtext(
+                "cac:PostalAddress/cac:Country/cbc:IdentificationCode", namespaces=NS
+            ),
+            "AU",
+        )
+        self.assertEqual(
+            buyer.findtext("cac:PartyLegalEntity/cbc:CompanyID", namespaces=NS),
+            "004085616",
+        )
+        self.assertFalse(
+            buyer.findall("cac:PartyTaxScheme", NS),
+            self.partner_a.read(["vat", "additional_identifiers"]),
+        )
+        self.assertFalse(self.partner_a.routing_endpoint)
+        self.assertEqual(
+            (invoice.amount_untaxed, invoice.amount_tax, invoice.amount_total),
+            (100, 5, 105),
+        )
+        report = invoice.validate_l10n_ae_pint()
+        self.assertTrue(report["valid"], report)
+
     def test_disclosed_agent_invalid_principal_blocks_posting_with_specific_diagnostic(
         self,
     ):

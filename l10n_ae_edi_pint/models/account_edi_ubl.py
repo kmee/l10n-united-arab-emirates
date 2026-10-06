@@ -127,6 +127,40 @@ class AccountEdiUblUae(models.AbstractModel):
             }
         return result
 
+    def _ubl_add_accounting_customer_party_tax_scheme_nodes(self, vals):
+        result = super()._ubl_add_accounting_customer_party_tax_scheme_nodes(vals)
+        partner = vals["party_vals"]["partner"].commercial_partner_id
+        if (
+            vals["invoice"].l10n_ae_exports
+            and partner.country_code != "AE"
+            and not partner.vat
+        ):
+            # Odoo may store a tax identifier derived from the legal registration.
+            # It does not establish the buyer VAT identity. Preserve master data;
+            # explicitly supplied VAT remains subject to formal validation.
+            vals["party_node"]["cac:PartyTaxScheme"] = []
+        return result
+
+    def _ubl_add_accounting_customer_party_legal_entity_nodes(self, vals):
+        result = super()._ubl_add_accounting_customer_party_legal_entity_nodes(vals)
+        partner = vals["party_vals"]["partner"].commercial_partner_id
+        destination = vals["invoice"]._l10n_ae_destination_override()
+        if (
+            partner.country_code != "AE"
+            and destination
+            and destination["reason"] == "export_buyer_no_peppol"
+        ):
+            identifier = partner._get_preferred_legal_entity_identifier_vals()
+            for node in vals["party_node"]["cac:PartyLegalEntity"]:
+                if node["cbc:CompanyID"].get("_text"):
+                    # The original national identifier type is not a UAE license.
+                    # IBR-180 requires a type for the predefined 0235 destination.
+                    node["cbc:CompanyID"].update(
+                        schemeAgencyID=identifier.get("key"),
+                        schemeAgencyName=partner.l10n_ae_registration_authority or None,
+                    )
+        return result
+
     def _ubl_add_party_tax_scheme_nodes(self, vals):
         result = super()._ubl_add_party_tax_scheme_nodes(vals)
         partner = vals["party_vals"]["partner"].commercial_partner_id
