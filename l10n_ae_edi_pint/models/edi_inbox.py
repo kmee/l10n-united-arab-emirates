@@ -413,7 +413,7 @@ class UaeEdiInbox(models.Model):
         )
         transaction_flags = tree.findtext("./{*}ProfileExecutionID")
         ecommerce_invoice = (
-            transaction_flags == "00000010"
+            transaction_flags in ("00000010", "10000010")
             and not selfbilling
             and not is_credit
             and type_code == "380"

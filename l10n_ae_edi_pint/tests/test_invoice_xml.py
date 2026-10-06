@@ -2054,6 +2054,343 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
                 hashlib.sha256(exported_delivery).hexdigest(),
             )
 
+    def test_received_free_zone_ecommerce_combines_beneficiary_delivery_and_replay(
+        self,
+    ):
+        source = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
+        )
+        fiscal_uuid = "eeeeeeea-1111-4111-8111-111111111111"
+        source.write(
+            {
+                "l10n_ae_free_zone": True,
+                "l10n_ae_beneficiary_id": "1000000004",
+                "l10n_ae_fiscal_uuid": fiscal_uuid,
+            }
+        )
+        tree = self._received_test_xml(source)
+        tree.find("cbc:ProfileExecutionID", NS).text = "10000010"
+        address = tree.find("cac:Delivery/cac:DeliveryLocation/cac:Address", NS)
+        self.assertIsNotNone(address)
+        for name, value in (
+            ("StreetName", "Synthetic combined delivery street"),
+            ("CityName", "Dubai"),
+            ("CountrySubentity", "DXB"),
+        ):
+            node = address.find(f"cbc:{name}", NS)
+            self.assertIsNotNone(node)
+            node.text = value
+        content = etree.tostring(tree, encoding="UTF-8", xml_declaration=True)
+        self.assertEqual(tree.findtext("cbc:InvoiceTypeCode", namespaces=NS), "380")
+        self.assertEqual(
+            tree.findtext("cbc:CustomizationID", namespaces=NS),
+            "urn:peppol:pint:billing-1@ae-1",
+        )
+        self.assertEqual(
+            tree.findtext(
+                "cac:BuyerCustomerParty/cac:Party/cac:PartyIdentification/cbc:ID",
+                namespaces=NS,
+            ),
+            "1000000004",
+        )
+        for party in ("AccountingSupplierParty", "AccountingCustomerParty"):
+            for path in (
+                "cac:Party/cbc:EndpointID",
+                "cac:Party/cac:PartyTaxScheme/cbc:CompanyID",
+            ):
+                identity = tree.findtext(f"cac:{party}/{path}", namespaces=NS)
+                self.assertTrue(identity)
+                self.assertNotEqual(identity, "1000000004")
+        self.assertEqual(
+            tree.findtext(
+                "cac:InvoiceLine/cac:Item/cac:ClassifiedTaxCategory/cbc:ID",
+                namespaces=NS,
+            ),
+            "S",
+        )
+        self.assertEqual(
+            Decimal(
+                tree.findtext(
+                    "cac:InvoiceLine/cac:Item/cac:ClassifiedTaxCategory/cbc:Percent",
+                    namespaces=NS,
+                )
+            ),
+            5,
+        )
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {"name": "Received combined Free Zone e-commerce"}
+        )
+        receiver = self.env["l10n_ae.edi.inbox"].with_user(self.simple_accountman)
+        inbox = receiver.receive_controlled_document(
+            binding.id, "combined-freezone-ecommerce", content
+        )
+        processed = inbox.action_process()
+        report = json.loads(inbox.processing_history_ids.validation_report)
+        self.assertTrue(report["xsd_valid"], report)
+        self.assertTrue(report["valid"], report)
+        self.assertTrue(processed, inbox.diagnostic)
+        bill = inbox.move_id
+        self.assertEqual((bill.move_type, bill.state), ("in_invoice", "draft"))
+        self.assertEqual(bill.company_id, self.env.company)
+        self.assertEqual(bill.partner_id, self.partner_a)
+        self.assertTrue(bill.l10n_ae_free_zone)
+        self.assertTrue(bill.l10n_ae_ecommerce)
+        self.assertFalse(bill.l10n_ae_disclosed_agent)
+        self.assertEqual(bill.l10n_ae_beneficiary_id, "1000000004")
+        self.assertEqual(bill.l10n_ae_fiscal_uuid, fiscal_uuid)
+        self.assertEqual(
+            (bill.amount_untaxed, bill.amount_tax, bill.amount_total), (100, 5, 105)
+        )
+        self.assertEqual(inbox.original_xml.content, content)
+        self.assertEqual(inbox.xml_hash, hashlib.sha256(content).hexdigest())
+        snapshot = inbox.delivery_snapshot
+        self.assertEqual(
+            snapshot["address"]["street_name"], "Synthetic combined delivery street"
+        )
+        self.assertEqual(snapshot["address"]["city_name"], "Dubai")
+        self.assertEqual(snapshot["address"]["country_subentity"], "DXB")
+        self.assertEqual(
+            snapshot["original_xml_sha256"], hashlib.sha256(content).hexdigest()
+        )
+        for partner in (bill.partner_id, self.env.company.partner_id):
+            self.assertNotEqual(partner.street, "Synthetic combined delivery street")
+        self.assertIn(
+            "Synthetic combined delivery street", bill.l10n_ae_received_delivery_summary
+        )
+        for values in (
+            {"l10n_ae_ecommerce": False},
+            {"l10n_ae_free_zone": False},
+            {"l10n_ae_beneficiary_id": "1000000005"},
+        ):
+            with self.assertRaisesRegex(UserError, "received"):
+                bill.write(values)
+        replay = receiver.receive_controlled_document(
+            binding.id, "combined-freezone-ecommerce", content
+        )
+        self.assertEqual(replay, inbox)
+        self.assertTrue(replay.action_process(), replay.diagnostic)
+        other = receiver.receive_controlled_document(
+            binding.id, "combined-freezone-ecommerce-second-reference", content
+        )
+        self.assertTrue(other.action_process(), other.diagnostic)
+        self.assertEqual(other.move_id, bill)
+        self.assertEqual(other.delivery_snapshot, snapshot)
+        self.assertEqual(len(inbox.processing_history_ids), 1)
+        self.assertEqual(
+            self.env["account.move"].search_count(
+                [
+                    ("company_id", "=", self.env.company.id),
+                    ("l10n_ae_received_document", "=", True),
+                    ("l10n_ae_fiscal_uuid", "=", fiscal_uuid),
+                ]
+            ),
+            1,
+        )
+        self.assertFalse(bill.l10n_ae_transmission_id)
+
+    def test_combined_free_zone_ecommerce_requires_both_declared_groups(self):
+        source = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
+        )
+        source.write(
+            {
+                "l10n_ae_free_zone": True,
+                "l10n_ae_beneficiary_id": "1000000004",
+                "l10n_ae_fiscal_uuid": "eeeeeee9-1111-4111-8111-111111111111",
+            }
+        )
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {"name": "Combined Free Zone e-commerce missing declarations"}
+        )
+        receiver = self.env["l10n_ae.edi.inbox"].with_user(self.simple_accountman)
+        for index, missing in enumerate(
+            ("Beneficiary", "StreetName", "CityName", "CountrySubentity")
+        ):
+            with self.subTest(missing=missing):
+                tree = self._received_test_xml(source)
+                tree.find("cbc:ProfileExecutionID", NS).text = "10000010"
+                fiscal_uuid = f"eeeeeeeb-000{index}-4000-8000-111111111111"
+                tree.find("cbc:UUID", NS).text = fiscal_uuid
+                address = tree.find("cac:Delivery/cac:DeliveryLocation/cac:Address", NS)
+                self.assertIsNotNone(address)
+                for name, value in (
+                    ("StreetName", "Synthetic combined incomplete street"),
+                    ("CityName", "Dubai"),
+                    ("CountrySubentity", "DXB"),
+                ):
+                    node = address.find(f"cbc:{name}", NS)
+                    self.assertIsNotNone(node)
+                    node.text = value
+                if missing == "Beneficiary":
+                    tree.remove(tree.find("cac:BuyerCustomerParty", NS))
+                    rule = "ibr-007-ae"
+                else:
+                    address.remove(address.find(f"cbc:{missing}", NS))
+                    rule = "ibr-142-ae"
+                content = etree.tostring(tree, encoding="UTF-8", xml_declaration=True)
+                inbox = receiver.receive_controlled_document(
+                    binding.id, f"combined-missing-{index}", content
+                )
+                self.assertFalse(inbox.action_process())
+                self.assertEqual(inbox.state, "review")
+                self.assertFalse(inbox.move_id)
+                self.assertFalse(inbox.delivery_snapshot)
+                self.assertEqual(inbox.original_xml.content, content)
+                self.assertEqual(inbox.xml_hash, hashlib.sha256(content).hexdigest())
+                report = json.loads(inbox.processing_history_ids.validation_report)
+                self.assertTrue(report["xsd_valid"], report)
+                self.assertFalse(report["valid"], report)
+                self.assertIn(rule, inbox.diagnostic.lower())
+                self.assertEqual(len(inbox.processing_history_ids), 1)
+                self.assertEqual(
+                    self.env["account.move"].search_count(
+                        [
+                            ("company_id", "=", self.env.company.id),
+                            ("l10n_ae_received_document", "=", True),
+                            ("l10n_ae_fiscal_uuid", "=", fiscal_uuid),
+                        ]
+                    ),
+                    0,
+                )
+
+    def test_received_ecommerce_archive_refuses_a_tampered_delivery_snapshot(self):
+        tree = self._received_test_xml()
+        tree.find("cbc:ProfileExecutionID", NS).text = "00000010"
+        tree.find("cbc:UUID", NS).text = "eeeeeeec-1111-4111-8111-111111111111"
+        address = tree.find("cac:Delivery/cac:DeliveryLocation/cac:Address", NS)
+        self.assertIsNotNone(address)
+        for name, value in (
+            ("StreetName", "Synthetic preserved integrity street"),
+            ("CityName", "Dubai"),
+            ("CountrySubentity", "DXB"),
+        ):
+            node = address.find(f"cbc:{name}", NS)
+            self.assertIsNotNone(node)
+            node.text = value
+        content = etree.tostring(tree, encoding="UTF-8", xml_declaration=True)
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {"name": "Received e-commerce delivery integrity"}
+        )
+        receiver = self.env["l10n_ae.edi.inbox"].with_user(self.simple_accountman)
+        inbox = receiver.receive_controlled_document(
+            binding.id, "ecommerce-delivery-integrity", content
+        )
+        self.assertTrue(inbox.action_process(), inbox.diagnostic)
+        report = json.loads(inbox.processing_history_ids.validation_report)
+        self.assertTrue(report["xsd_valid"], report)
+        self.assertTrue(report["valid"], report)
+        bill = inbox.move_id
+        self.assertTrue(bill)
+        self.assertEqual((bill.move_type, bill.state), ("in_invoice", "draft"))
+        self.assertEqual(
+            (bill.amount_untaxed, bill.amount_tax, bill.amount_total), (100, 5, 105)
+        )
+
+        auditor = new_test_user(
+            self.env,
+            login="synthetic-ecommerce-integrity-auditor",
+            groups="l10n_ae_edi.group_fiscal_auditor,base.group_allow_export",
+            company_id=self.env.company.id,
+            company_ids=self.env.company.ids,
+        )
+        audit = inbox.with_user(auditor)
+        snapshot = json.loads(json.dumps(inbox.delivery_snapshot))
+        original_xml = inbox.original_xml.content
+        original_hash = inbox.xml_hash
+        state = inbox.state
+        bill_id = bill.id
+        bill_facts = (
+            bill.move_type,
+            bill.state,
+            bill.amount_untaxed,
+            bill.amount_tax,
+            bill.amount_total,
+        )
+        history_facts = [
+            (row.id, row.validation_report_hash)
+            for row in inbox.processing_history_ids.sorted("id")
+        ]
+
+        before = audit.evidence_archive.content
+        with zipfile.ZipFile(io.BytesIO(before)) as archive:
+            self.assertEqual(json.loads(archive.read("delivery.json")), snapshot)
+            self.assertEqual(archive.read("document.xml"), original_xml)
+
+        variants = []
+        for key, value in (
+            ("original_xml_sha256", "0" * 64),
+            ("actual_delivery_date", "2031-01-01"),
+            ("delivery_xml", "<forged-delivery/>"),
+        ):
+            altered = json.loads(json.dumps(snapshot))
+            altered[key] = value
+            variants.append((key, altered))
+        altered = json.loads(json.dumps(snapshot))
+        altered["address"]["street_name"] = "Synthetic tampered persisted delivery"
+        variants.extend((("street_name", altered), ("missing_snapshot", False)))
+        for name, altered in variants:
+            with self.subTest(tampered=name):
+                self.env.cr.execute(
+                    "UPDATE l10n_ae_edi_inbox SET "
+                    "delivery_snapshot=%s::jsonb WHERE id=%s",
+                    [json.dumps(altered), inbox.id],
+                )
+                self.env.invalidate_all()
+                try:
+                    with self.assertRaisesRegex(
+                        UserError, "Received delivery evidence does not match"
+                    ):
+                        audit.read(["evidence_archive"])
+                    self.assertEqual(inbox.original_xml.content, original_xml)
+                    self.assertEqual(inbox.xml_hash, original_hash)
+                    self.assertEqual(inbox.state, state)
+                    self.assertEqual(inbox.move_id.id, bill_id)
+                    self.assertEqual(
+                        (
+                            bill.move_type,
+                            bill.state,
+                            bill.amount_untaxed,
+                            bill.amount_tax,
+                            bill.amount_total,
+                        ),
+                        bill_facts,
+                    )
+                    self.assertEqual(
+                        [
+                            (row.id, row.validation_report_hash)
+                            for row in inbox.processing_history_ids.sorted("id")
+                        ],
+                        history_facts,
+                    )
+                finally:
+                    self.env.cr.execute(
+                        "UPDATE l10n_ae_edi_inbox SET "
+                        "delivery_snapshot=%s::jsonb WHERE id=%s",
+                        [json.dumps(snapshot), inbox.id],
+                    )
+                    self.env.invalidate_all()
+                self.assertEqual(audit.evidence_archive.content, before)
+
+        with zipfile.ZipFile(io.BytesIO(audit.evidence_archive.content)) as archive:
+            restored_delivery = archive.read("delivery.json")
+            self.assertEqual(json.loads(restored_delivery), snapshot)
+            manifest = json.loads(archive.read("manifest.json"))
+            self.assertEqual(
+                manifest["artifacts"]["delivery.json"]["sha256"],
+                hashlib.sha256(restored_delivery).hexdigest(),
+            )
+        self.assertEqual(inbox.original_xml.content, original_xml)
+        self.assertEqual(inbox.xml_hash, original_hash)
+        self.assertEqual(inbox.state, state)
+        self.assertEqual(inbox.move_id.id, bill_id)
+        self.assertEqual(
+            [
+                (row.id, row.validation_report_hash)
+                for row in inbox.processing_history_ids.sorted("id")
+            ],
+            history_facts,
+        )
+
     def test_received_ecommerce_missing_required_delivery_stays_in_review(self):
         binding = self.env["l10n_ae.edi.binding"].create(
             {"name": "Incomplete received e-commerce delivery"}
