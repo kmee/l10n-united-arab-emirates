@@ -4,7 +4,7 @@
         <field name="name">l10n_ae.edi.incident.form</field>
         <field name="model">l10n_ae.edi.incident</field>
         <field name="arch" type="xml">
-            <form string="UAE System Incident" duplicate="false">
+            <form string="UAE Compliance Incident" duplicate="false">
                 <header>
                     <button
                         name="action_open"
@@ -19,21 +19,48 @@
                 <sheet>
                     <group>
                         <field name="name" readonly="state == 'open'" />
+                        <field name="incident_kind" readonly="state == 'open'" />
                         <field
                             name="company_id"
                             readonly="1"
                             options="{'no_create': True, 'no_open': True}"
                         />
-                        <field name="affected_roles" readonly="state == 'open'" />
-                        <field name="occurrence_at" readonly="state == 'open'" />
-                        <field name="detected_at" readonly="state == 'open'" />
+                        <field
+                            name="affected_roles"
+                            readonly="state == 'open'"
+                            invisible="incident_kind != 'system_failure'"
+                        />
+                        <field
+                            name="occurrence_at"
+                            readonly="state == 'open'"
+                            invisible="incident_kind != 'system_failure'"
+                        />
+                        <field
+                            name="detected_at"
+                            readonly="state == 'open'"
+                            invisible="incident_kind != 'system_failure'"
+                        />
+                        <field
+                            name="fta_confirmation_received_at"
+                            readonly="state == 'open'"
+                            invisible="incident_kind != 'registration_change'"
+                        />
+                        <field
+                            name="fta_confirmation_reference"
+                            readonly="state == 'open'"
+                            invisible="incident_kind != 'registration_change'"
+                        />
                         <field name="reason" readonly="state == 'open'" />
                         <field
                             name="responsible_id"
                             readonly="state == 'open'"
                             options="{'no_create': True, 'no_open': True}"
+                            domain="[('active', '=', True), ('share', '=', False), ('company_ids', 'in', [company_id])]"
                         />
                     </group>
+                    <p class="text-muted">
+                        Times are shown in your Odoo time zone. Deadlines use the legal event date in Asia/Dubai: failure occurrence or receipt of the FTA registration confirmation.
+                    </p>
                     <group string="Reviewed UAE Calendar">
                         <field name="calendar_start" readonly="state == 'open'" />
                         <field name="calendar_end" readonly="state == 'open'" />
@@ -47,7 +74,11 @@
                         <field name="calendar_version" readonly="state == 'open'" />
                         <field name="source_reference" readonly="state == 'open'" />
                         <field name="review_note" readonly="state == 'open'" />
-                        <field name="timezone" readonly="1" />
+                        <field
+                            name="timezone"
+                            string="Deadline Time Zone"
+                            readonly="1"
+                        />
                         <field name="notification_due_date" readonly="1" />
                     </group>
                     <group string="Incident History">
@@ -72,6 +103,7 @@
         <field name="arch" type="xml">
             <list>
                 <field name="name" />
+                <field name="incident_kind" />
                 <field
                     name="company_id"
                     options="{'no_create': True, 'no_open': True}"
@@ -87,13 +119,13 @@
         </field>
     </record>
     <record id="edi_incident_action" model="ir.actions.act_window">
-        <field name="name">UAE System Incidents</field>
+        <field name="name">UAE Compliance Incidents</field>
         <field name="res_model">l10n_ae.edi.incident</field>
         <field name="view_mode">list,form</field>
     </record>
     <menuitem
         id="edi_incident_menu"
-        name="UAE System Incidents"
+        name="UAE Compliance Incidents"
         parent="account.menu_finance_configuration"
         action="edi_incident_action"
         groups="account.group_account_manager"

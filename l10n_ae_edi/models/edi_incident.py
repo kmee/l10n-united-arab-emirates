@@ -10,11 +10,19 @@ from odoo.exceptions import AccessError, UserError, ValidationError
 
 class UaeEdiIncident(models.Model):
     _name = "l10n_ae.edi.incident"
-    _description = "UAE System Failure Incident"
+    _description = "UAE Compliance Incident"
     _inherit: ClassVar[list[str]] = ["mail.thread", "mail.activity.mixin"]
     _check_company_auto = True
 
     name = fields.Char(required=True)
+    incident_kind = fields.Selection(
+        [
+            ("system_failure", "System Failure"),
+            ("registration_change", "Registration Amendment"),
+        ],
+        required=True,
+        default="system_failure",
+    )
     company_id = fields.Many2one(
         "res.company",
         required=True,
@@ -31,6 +39,10 @@ class UaeEdiIncident(models.Model):
     )
     occurrence_at = fields.Datetime(string="Failure Occurred At")
     detected_at = fields.Datetime(string="Failure Detected At")
+    fta_confirmation_received_at = fields.Datetime(
+        string="FTA Confirmation Received At"
+    )
+    fta_confirmation_reference = fields.Text(string="FTA Confirmation Reference")
     reason = fields.Text()
     responsible_id = fields.Many2one("res.users", ondelete="restrict")
     timezone = fields.Char(default="Asia/Dubai", required=True, readonly=True)
@@ -151,9 +163,6 @@ class UaeEdiIncident(models.Model):
         self.ensure_one()
         if not all(
             (
-                self.affected_roles,
-                self.occurrence_at,
-                self.detected_at,
                 self.calendar_start,
                 self.calendar_end,
             )
@@ -171,16 +180,32 @@ class UaeEdiIncident(models.Model):
                 self.env._("Review the incident, source and calendar coverage.")
             )
         now = fields.Datetime.now()
-        if self.detected_at < self.occurrence_at or self.detected_at > now:
-            raise ValidationError(
-                self.env._("Review occurrence and detection timestamps.")
-            )
+        if self.incident_kind == "registration_change":
+            anchor_at = self.fta_confirmation_received_at
+            remaining = 5
+            if not anchor_at or not (self.fta_confirmation_reference or "").strip():
+                raise ValidationError(
+                    self.env._("Review the FTA confirmation receipt and reference.")
+                )
+            if anchor_at > now:
+                raise ValidationError(
+                    self.env._("FTA confirmation receipt cannot be in the future.")
+                )
+        else:
+            anchor_at = self.occurrence_at
+            remaining = 2
+            if not all((self.affected_roles, anchor_at, self.detected_at)) or (
+                self.detected_at < anchor_at or self.detected_at > now
+            ):
+                raise ValidationError(
+                    self.env._("Review affected roles, occurrence and detection.")
+                )
         anchor = fields.Datetime.context_timestamp(
-            self.with_context(tz="Asia/Dubai"), self.occurrence_at
+            self.with_context(tz="Asia/Dubai"), anchor_at
         ).date()
         if not self.calendar_start <= anchor <= self.calendar_end:
             raise ValidationError(
-                self.env._("The reviewed calendar must cover occurrence.")
+                self.env._("The reviewed calendar must cover the legal event date.")
             )
         values = self.calendar_holidays
         if not isinstance(values, list):
@@ -206,7 +231,7 @@ class UaeEdiIncident(models.Model):
                     self.env._("Review holiday coverage and duplicate dates.")
                 )
             holidays.add(day)
-        day, remaining = anchor, 2
+        day = anchor
         while remaining:
             day += timedelta(days=1)
             if day > self.calendar_end:
@@ -242,13 +267,25 @@ class UaeEdiIncident(models.Model):
                 self.env._("Review an active internal owner in this company.")
             )
         self.with_user(owner).check_access("read")
+        registration = self.incident_kind == "registration_change"
         self.activity_schedule(
             "mail.mail_activity_data_todo",
             date_deadline=due,
-            summary=self.env._("Review UAE system failure notification"),
-            note=self.env._(
-                "Review the taxpayer notice and contact the appointed ASP. "
-                "This internal reminder does not send or acknowledge a notification."
+            summary=(
+                self.env._("Review UAE registration amendment notice")
+                if registration
+                else self.env._("Review UAE system failure notification")
+            ),
+            note=(
+                self.env._(
+                    "Review the written notice to the appointed ASP. "
+                    "This internal reminder does not send or acknowledge a notice."
+                )
+                if registration
+                else self.env._(
+                    "Review the taxpayer notice and contact the appointed ASP. "
+                    "This internal reminder does not send or acknowledge a notice."
+                )
             ),
             user_id=owner.id,
         )
