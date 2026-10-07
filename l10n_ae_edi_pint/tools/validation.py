@@ -254,6 +254,7 @@ def _validate_offline(content, directory, ruleset=DEFAULT_RULESET):
             "files": resources.verified,
         },
         "layers": [],
+        "supplemental_checks": [],
         "xsd_errors": [
             {"line": issue.line, "code": issue.type_name} for issue in schema.error_log
         ],
@@ -288,7 +289,38 @@ def _validate_offline(content, directory, ruleset=DEFAULT_RULESET):
             report["layers"].append(
                 {"name": name, "resource": resource_name, "failures": failures}
             )
-    report["valid"] = all(not layer["failures"] for layer in report["layers"])
+    # The specific supplier/customer templates in the pinned compiled packages
+    # shadow their generic PostalAddress rule. Keep this check explicitly local:
+    # neither the official SVRL layers nor their resource identity are rewritten.
+    cac = "urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2"
+    basic = cbc["cbc"]
+    failures = []
+    for address in root.iter(f"{{{cac}}}PostalAddress"):
+        country = address.findtext(f"{{{cac}}}Country/{{{basic}}}IdentificationCode")
+        subdivision = address.findtext(f"{{{basic}}}CountrySubentity")
+        if country == "AE" and subdivision not in {
+            "AUH", "DXB", "SHJ", "UAQ", "FUJ", "AJM", "RAK"
+        }:
+            failures.append(
+                {
+                    "code": "ibr-128-ae",
+                    "location": root.getroottree().getpath(address),
+                    "message": "A UAE postal address requires a valid emirate code.",
+                }
+            )
+    report["supplemental_checks"].append(
+        {
+            "name": "kmee-ae-postal-address-v1",
+            "source": (
+                "https://docs.peppol.eu/poac/ae/pint-ae/trn-invoice/rule/ibr-128-ae/"
+            ),
+            "failures": failures,
+        }
+    )
+    report["valid"] = all(
+        not check["failures"]
+        for check in report["layers"] + report["supplemental_checks"]
+    )
     return report
 
 
