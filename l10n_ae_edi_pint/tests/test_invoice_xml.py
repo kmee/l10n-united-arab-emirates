@@ -32,6 +32,108 @@ NS = {
 
 @tagged("post_install", "-at_install")
 class TestUaeInvoiceXml(AccountTestInvoicingCommon):
+    def test_prepared_native_send_refuses_explicit_conflicting_format(self):
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {"name": "Synthetic native-send conflict sandbox"}
+        )
+        invoice = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
+        ).with_user(self.simple_accountman)
+        invoice.partner_id.invoice_sending_method = "manual"
+        invoice.l10n_ae_binding_id = binding
+        self.assertFalse(invoice.env.su)
+        invoice.action_l10n_ae_prepare()
+        issue = invoice.l10n_ae_transmission_id
+
+        def frozen_facts():
+            invoice.invalidate_recordset()
+            issue.invalidate_recordset()
+            return {
+                "issue_id": invoice.l10n_ae_transmission_id.id,
+                "payload_hash": issue.payload_hash,
+                "xml_hash": issue.xml_hash,
+                "xml_content": issue.xml_content,
+                "idempotency_key": issue.idempotency_key,
+                "submission_state": issue.submission_state,
+                "attempt_ids": issue.attempt_ids.ids,
+                "event_ids": issue.event_ids.ids,
+                "ledger": invoice.line_ids.read(
+                    [
+                        "account_id",
+                        "partner_id",
+                        "currency_id",
+                        "debit",
+                        "credit",
+                        "balance",
+                        "amount_currency",
+                        "tax_ids",
+                    ]
+                ),
+            }
+
+        original = frozen_facts()
+        invoice_write_date = invoice.write_date
+        self.assertFalse(invoice.ubl_cii_xml_id)
+        self.assertFalse(invoice.invoice_pdf_report_id)
+        artifacts_before = (
+            self.env["ir.attachment"]
+            .search([("res_model", "=", "account.move"), ("res_id", "=", invoice.id)])
+            .ids
+        )
+        wizard = (
+            self.env["account.move.send.wizard"]
+            .with_user(self.simple_accountman)
+            .create({"move_id": invoice.id})
+        )
+        self.assertFalse(wizard.sending_methods)
+        wizard.write({"invoice_edi_format": "facturx"})
+        self.assertEqual(wizard.invoice_edi_format, "facturx")
+        with (
+            self.cr.savepoint(),
+            self.assertRaisesRegex(
+                UserError,
+                "The selected eInvoice format conflicts with "
+                "the frozen UAE PINT-AE issue\\.",
+            ),
+        ):
+            wizard.action_send_and_print()
+        self.assertEqual(frozen_facts(), original)
+        self.assertEqual(invoice.write_date, invoice_write_date)
+        self.assertFalse(invoice.ubl_cii_xml_id)
+        self.assertFalse(invoice.invoice_pdf_report_id)
+        self.assertEqual(
+            self.env["ir.attachment"]
+            .search([("res_model", "=", "account.move"), ("res_id", "=", invoice.id)])
+            .ids,
+            artifacts_before,
+        )
+        self.assertEqual(
+            self.env["l10n_ae.edi.transmission"].search_count(
+                [("move_id", "=", invoice.id)]
+            ),
+            1,
+        )
+
+        # Public native Generate still associates exactly the frozen issue XML.
+        generate_wizard = (
+            self.env["account.move.send.wizard"]
+            .with_user(self.simple_accountman)
+            .create({"move_id": invoice.id})
+        )
+        self.assertEqual(generate_wizard.invoice_edi_format, "kmee_ae_pint")
+        self.assertFalse(generate_wizard.sending_methods)
+        generate_wizard.action_send_and_print()
+        self.assertEqual(frozen_facts(), original)
+        self.assertEqual(
+            invoice.ubl_cii_xml_id.raw.content, original["xml_content"].encode("utf-8")
+        )
+        self.assertEqual(
+            self.env["l10n_ae.edi.transmission"].search_count(
+                [("move_id", "=", invoice.id)]
+            ),
+            1,
+        )
+
     def test_emitted_commercial_invoice_preserves_package_across_official_cycle(self):
         # Independent worksheet: one AED100 supply, category O/0%, VAT0,
         # exclusive/inclusive/payable100. No allowance, advance or refund.
