@@ -4304,6 +4304,85 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         self.assertEqual(len(original.processing_history_ids), 1)
         self.assertFalse(original.ingestion_conflict)
 
+    def test_received_summary_preserves_period_original_and_one_supplier_draft(self):
+        source = self.init_invoice(
+            "out_invoice", amounts=[40, 60], taxes=self.tax_sale_a, post=True
+        )
+        source.write(
+            {
+                "l10n_ae_summary": True,
+                "l10n_ae_invoicing_period_start": "2019-01-01",
+                "l10n_ae_invoicing_period_end": "2019-01-31",
+                "l10n_ae_fiscal_uuid": "cccccccf-1111-4111-8111-111111111111",
+            }
+        )
+        content = etree.tostring(self._received_test_xml(source))
+        original_hash = hashlib.sha256(content).hexdigest()
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {"name": "Synthetic received Summary period"}
+        )
+        receiver = (
+            self.env["l10n_ae.edi.inbox"]
+            .with_user(self.simple_accountman)
+            .with_context(allowed_company_ids=[self.env.company.id])
+        )
+        self.assertFalse(receiver.env.su)
+        inbox = receiver.receive_controlled_document(
+            binding.id, "received-summary-month", content
+        )
+        processed = inbox.action_process()
+        report = json.loads(inbox.processing_history_ids.validation_report)
+        self.assertTrue(report["valid"], report)
+        self.assertEqual(report["ruleset"], "kmee-pint-ae-1.0.4-ubl-2.1")
+        self.assertTrue(processed, inbox.diagnostic)
+        bill = inbox.move_id
+        self.assertEqual((bill.move_type, bill.state), ("in_invoice", "draft"))
+        self.assertTrue(bill.l10n_ae_summary)
+        self.assertEqual(
+            (
+                bill.l10n_ae_invoicing_period_start.isoformat(),
+                bill.l10n_ae_invoicing_period_end.isoformat(),
+            ),
+            ("2019-01-01", "2019-01-31"),
+        )
+        self.assertEqual(
+            (bill.amount_untaxed, bill.amount_tax, bill.amount_total), (100, 5, 105)
+        )
+        self.assertEqual(inbox.original_xml.content, content)
+        self.assertEqual(inbox.xml_hash, original_hash)
+        self.assertFalse(bill.l10n_ae_transmission_ids)
+        ledger_fields = [
+            "account_id",
+            "partner_id",
+            "currency_id",
+            "date",
+            "debit",
+            "credit",
+            "balance",
+            "amount_currency",
+            "tax_ids",
+            "write_date",
+        ]
+        ledger = bill.line_ids.sorted("id").read(ledger_fields)
+        timestamps = bill.read(["create_date", "write_date"])
+        replay = receiver.receive_controlled_document(
+            binding.id, "received-summary-month", content
+        )
+        self.assertEqual(replay, inbox)
+        self.assertTrue(replay.action_process(), replay.diagnostic)
+        self.assertEqual(replay.move_id, bill)
+        self.assertEqual(bill.line_ids.sorted("id").read(ledger_fields), ledger)
+        self.assertEqual(bill.read(["create_date", "write_date"]), timestamps)
+        self.assertEqual(inbox.original_xml.content, content)
+        self.assertEqual(inbox.xml_hash, original_hash)
+        for values in (
+            {"l10n_ae_summary": False},
+            {"l10n_ae_invoicing_period_start": "2019-02-01"},
+            {"l10n_ae_invoicing_period_end": "2019-02-28"},
+        ):
+            with self.assertRaisesRegex(UserError, "received"):
+                bill.write(values)
+
     def test_received_free_zone_preserves_beneficiary_without_changing_vat(self):
         source = self.init_invoice(
             "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
