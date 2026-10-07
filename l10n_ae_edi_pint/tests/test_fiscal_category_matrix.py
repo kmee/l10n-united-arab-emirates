@@ -1381,6 +1381,71 @@ class TestUaeFiscalCategoryMatrix(AccountTestInvoicingCommon):
                 self.env.company.tax_calculation_rounding_method, "round_per_line"
             )
 
+    def test_all_exempt_tax_invoice_requires_review_without_blocking_posting(self):
+        tax = self.env.ref(
+            f"account.{self.env.company.id}_uae_sale_tax_exempted"
+        )
+        tax.write(
+            {
+                "ubl_cii_tax_exemption_reason_code": "DL8.46.2",
+                "ubl_cii_tax_exemption_reason": "Synthetic reviewed residential lease",
+            }
+        )
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {"name": "Synthetic all-E tax invoice"}
+        )
+        invoice = self.env["account.move"].with_user(self.simple_accountman).create(
+            {
+                "move_type": "out_invoice",
+                "partner_id": self.partner_a.id,
+                "journal_id": self.company_data["default_journal_sale"].id,
+                "invoice_date": "2019-01-01",
+                "currency_id": self.env.ref("base.AED").id,
+                "l10n_ae_binding_id": binding.id,
+                "l10n_ae_document_category": "tax",
+                "invoice_line_ids": [
+                    Command.create(
+                        {
+                            "name": "Synthetic reviewed residential lease",
+                            "price_unit": 25,
+                            "account_id": self.company_data[
+                                "default_account_revenue"
+                            ].id,
+                            "tax_ids": [Command.set(tax.ids)],
+                        }
+                    )
+                ],
+            }
+        )
+        self.assertFalse(invoice.env.su)
+        with self.assertRaisesRegex(UserError, "IBR-151-AE"):
+            invoice.action_l10n_ae_validate()
+        self.assertEqual(invoice.state, "draft")
+        self.assertFalse(invoice.l10n_ae_transmission_ids)
+        self.assertFalse(invoice.l10n_ae_fiscal_uuid)
+        self.env.company.l10n_ae_edi_auto_prepare = True
+        invoice.action_post()
+        self.assertEqual(invoice.state, "posted")
+        self.assertEqual(
+            (invoice.amount_untaxed, invoice.amount_tax, invoice.amount_total),
+            (25, 0, 25),
+        )
+        self.assertEqual(invoice.l10n_ae_preparation_state, "review")
+        self.assertIn("IBR-151-AE", invoice.l10n_ae_preparation_error)
+        self.assertFalse(invoice.l10n_ae_transmission_ids)
+        self.assertFalse(invoice.l10n_ae_fiscal_uuid)
+        ledger_fields = [
+            "account_id", "debit", "credit", "amount_currency", "create_date", "write_date"
+        ]
+        ledger = invoice.line_ids.read(ledger_fields)
+        with self.assertRaisesRegex(UserError, "IBR-151-AE"):
+            invoice.action_l10n_ae_prepare()
+        self.assertEqual(invoice.line_ids.read(ledger_fields), ledger)
+        self.assertEqual(invoice.l10n_ae_document_category, "tax")
+        self.assertFalse(invoice.l10n_ae_transmission_ids)
+        self.assertFalse(invoice.l10n_ae_fiscal_uuid)
+        self.assertEqual(tax.ubl_cii_tax_exemption_reason_code, "DL8.46.2")
+
     def test_exempt_without_uae_legal_code_is_refused_before_preparation(self):
         tax = self.tax_sale_a.copy(
             {
