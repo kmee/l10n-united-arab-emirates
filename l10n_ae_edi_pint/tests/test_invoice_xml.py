@@ -14,7 +14,6 @@ from unittest.mock import patch
 
 from lxml import etree
 
-from odoo import fields
 from odoo.exceptions import AccessError, UserError, ValidationError
 from odoo.tests import Form, tagged
 from odoo.tests.common import new_test_user
@@ -6091,10 +6090,8 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         self.assertFalse(invoice.env.su)
         displayed = {
             "l10n_ae_effective_tax_exchange_rate": "3.672500",
-            "l10n_ae_effective_tax_exchange_date": fields.Date.to_date("2018-12-31"),
-            "l10n_ae_effective_tax_exchange_conversion_date": fields.Date.to_date(
-                "2019-01-01"
-            ),
+            "l10n_ae_effective_tax_exchange_date": "2018-12-31",
+            "l10n_ae_effective_tax_exchange_conversion_date": "2019-01-01",
             "l10n_ae_effective_tax_exchange_source": "Odoo currency rates: USD to AED",
             "l10n_ae_effective_tax_exchange_origin": "native_unverified",
             "l10n_ae_effective_tax_exchange_diagnostic": False,
