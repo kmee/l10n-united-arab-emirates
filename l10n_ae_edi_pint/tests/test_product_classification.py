@@ -55,7 +55,10 @@ class TestUaeProductClassification(AccountTestInvoicingCommon):
             }
         )
         binding = self.env["l10n_ae.edi.binding"].create(
-            {"name": "Synthetic service classification sandbox"}
+            {
+                "name": "Synthetic service classification sandbox",
+                "fiscal_uuid_policy": "controlled_local",
+            }
         )
         invoice = self.init_invoice("out_invoice", amounts=[100], taxes=self.tax_sale_a)
         invoice.invoice_line_ids.product_id = product
