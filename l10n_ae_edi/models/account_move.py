@@ -110,6 +110,9 @@ class AccountMove(models.Model):
     @api.model_create_multi
     def create(self, vals_list):
         history_fields = {
+            "l10n_ae_preparation_state",
+            "l10n_ae_preparation_error",
+            "l10n_ae_preparation_review_at",
             "l10n_ae_correction_id",
             "l10n_ae_transmission_id",
             "l10n_ae_transmission_ids",
@@ -208,6 +211,37 @@ class AccountMove(models.Model):
         readonly=True,
         copy=False,
     )
+    l10n_ae_preparation_state = fields.Selection(
+        [
+            ("pending", "Not Prepared"),
+            ("review", "Requires Review"),
+            ("ready", "Prepared"),
+        ],
+        string="UAE Preparation Status",
+        compute="_compute_l10n_ae_preparation_state",
+    )
+    l10n_ae_preparation_error = fields.Text(
+        string="UAE Preparation Diagnostic",
+        readonly=True,
+        copy=False,
+    )
+    l10n_ae_preparation_review_at = fields.Datetime(
+        string="UAE Preparation Review Recorded At",
+        readonly=True,
+        copy=False,
+    )
+
+    @api.depends("l10n_ae_transmission_id", "l10n_ae_preparation_error")
+    def _compute_l10n_ae_preparation_state(self):
+        for move in self:
+            move.l10n_ae_preparation_state = (
+                "ready"
+                if move.l10n_ae_transmission_id
+                else "review"
+                if move.l10n_ae_preparation_error
+                else "pending"
+            )
+
     l10n_ae_submission_state = fields.Selection(
         related="l10n_ae_transmission_id.submission_state",
         string="UAE Submission Status",
@@ -281,16 +315,37 @@ class AccountMove(models.Model):
                 )
             )
         )
-        candidates.action_l10n_ae_validate()
         posted = super()._post(soft=soft)
         for move in posted & candidates:
-            if not move.l10n_ae_binding_id:
-                move.l10n_ae_binding_id = move.company_id.l10n_ae_edi_binding_id
-            move.with_company(move.company_id).action_l10n_ae_prepare()
+            try:
+                # Accounting has already posted. Roll back only this local fiscal
+                # preparation if its data/configuration requires correction.
+                with self.env.cr.savepoint():
+                    if not move.l10n_ae_binding_id:
+                        move.l10n_ae_binding_id = move.company_id.l10n_ae_edi_binding_id
+                    move.with_company(move.company_id).action_l10n_ae_prepare()
+            except AccessError:
+                # Do not turn missing authorization into a successful action.
+                raise
+            except UserError as error:
+                super(
+                    AccountMove,
+                    move.with_context(
+                        skip_invoice_sync=True, skip_is_manually_modified=True
+                    ),
+                ).write(
+                    {
+                        "l10n_ae_preparation_error": str(error),
+                        "l10n_ae_preparation_review_at": fields.Datetime.now(),
+                    }
+                )
         return posted
 
     def write(self, vals):
         protected = {
+            "l10n_ae_preparation_state",
+            "l10n_ae_preparation_error",
+            "l10n_ae_preparation_review_at",
             "l10n_ae_correction_id",
             "l10n_ae_transmission_ids",
             "l10n_ae_transmission_id",
@@ -965,6 +1020,18 @@ class AccountMove(models.Model):
                 ).write({"l10n_ae_transmission_id": transmission.id})
                 if correction:
                     correction.sudo()._complete(transmission)
+        if self.l10n_ae_preparation_error or self.l10n_ae_preparation_review_at:
+            super(
+                AccountMove,
+                self.with_context(
+                    skip_invoice_sync=True, skip_is_manually_modified=True
+                ),
+            ).write(
+                {
+                    "l10n_ae_preparation_error": False,
+                    "l10n_ae_preparation_review_at": False,
+                }
+            )
         return {
             "type": "ir.actions.act_window",
             "res_model": "l10n_ae.edi.transmission",
