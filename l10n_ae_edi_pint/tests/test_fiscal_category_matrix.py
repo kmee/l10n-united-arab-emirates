@@ -46,12 +46,16 @@ class TestUaeFiscalCategoryMatrix(AccountTestInvoicingCommon):
             )
 
     def test_new_uae_chart_initializes_the_native_pint_categories(self):
-        company = self.env["res.company"].create({
-            "name": "Synthetic fresh UAE PINT chart",
-            "country_id": self.env.ref("base.ae").id,
-            "currency_id": self.env.ref("base.AED").id,
-        })
-        self.env["account.chart.template"].try_loading("ae", company, install_demo=False)
+        company = self.env["res.company"].create(
+            {
+                "name": "Synthetic fresh UAE PINT chart",
+                "country_id": self.env.ref("base.ae").id,
+                "currency_id": self.env.ref("base.AED").id,
+            }
+        )
+        self.env["account.chart.template"].try_loading(
+            "ae", company, install_demo=False
+        )
         # Independently transcribed native identities/category table from the
         # public LGPL-3 Odoo PR262200; this is configuration, not eligibility
         # proof for VAT-only imports or the complete reverse-charge calculation.
@@ -83,7 +87,9 @@ class TestUaeFiscalCategoryMatrix(AccountTestInvoicingCommon):
             self.assertFalse(tax.ubl_cii_tax_exemption_reason_code)
         self.assertEqual(actual, expected)
         imported_vat = self.env.ref(f"account.{company.id}_uae_import_tax")
-        self.assertEqual((imported_vat.amount, imported_vat.amount_type), (100, "division"))
+        self.assertEqual(
+            (imported_vat.amount, imported_vat.amount_type), (100, "division")
+        )
         standard = self.env.ref(f"account.{company.id}_uae_sale_tax_5_dubai")
         self.assertEqual((standard.amount, standard.amount_type), (5, "percent"))
 
@@ -91,74 +97,158 @@ class TestUaeFiscalCategoryMatrix(AccountTestInvoicingCommon):
         company = self.env.company
         tax = self.env.ref(f"account.{company.id}_uae_sale_tax_0")
         tax_fields = [
-            "amount", "amount_type", "type_tax_use", "invoice_repartition_line_ids",
-            "refund_repartition_line_ids", "tax_group_id", "price_include_override",
+            "amount",
+            "amount_type",
+            "type_tax_use",
+            "invoice_repartition_line_ids",
+            "refund_repartition_line_ids",
+            "tax_group_id",
+            "price_include_override",
         ]
         tax_definition = tax.read(tax_fields)
         self.assertEqual(tax.amount, 0)
         self.assertFalse(tax.ubl_cii_tax_exemption_reason_code)
         binding = self.env["l10n_ae.edi.binding"].create({"name": "Native zero tax"})
-        invoice = self.env["account.move"].with_user(self.simple_accountman).create({
-            "move_type": "out_invoice",
-            "partner_id": self.partner_a.id,
-            "journal_id": self.company_data["default_journal_sale"].id,
-            "currency_id": self.env.ref("base.AED").id,
-            "invoice_date": "2019-01-01",
-            "l10n_ae_binding_id": binding.id,
-            "l10n_ae_fiscal_uuid": "cececece-4444-4444-8444-444444444444",
-            "invoice_line_ids": [Command.create({
-                "name": "Native zero-rated supply",
-                "price_unit": 100,
-                "account_id": self.company_data["default_account_revenue"].id,
-                "tax_ids": [Command.set(tax.ids)],
-            })],
-        })
+        invoice = (
+            self.env["account.move"]
+            .with_user(self.simple_accountman)
+            .create(
+                {
+                    "move_type": "out_invoice",
+                    "partner_id": self.partner_a.id,
+                    "journal_id": self.company_data["default_journal_sale"].id,
+                    "currency_id": self.env.ref("base.AED").id,
+                    "invoice_date": "2019-01-01",
+                    "l10n_ae_binding_id": binding.id,
+                    "l10n_ae_fiscal_uuid": "cececece-4444-4444-8444-444444444444",
+                    "invoice_line_ids": [
+                        Command.create(
+                            {
+                                "name": "Native zero-rated supply",
+                                "price_unit": 100,
+                                "account_id": self.company_data[
+                                    "default_account_revenue"
+                                ].id,
+                                "tax_ids": [Command.set(tax.ids)],
+                            }
+                        )
+                    ],
+                }
+            )
+        )
         self.assertFalse(invoice.env.su)
         invoice.action_post()
-        self.assertEqual((invoice.amount_untaxed, invoice.amount_tax, invoice.amount_total), (100, 0, 100))
-        ledger_fields = ["account_id", "debit", "credit", "amount_currency", "currency_id", "create_date", "write_date"]
+        self.assertEqual(
+            (invoice.amount_untaxed, invoice.amount_tax, invoice.amount_total),
+            (100, 0, 100),
+        )
+        ledger_fields = [
+            "account_id",
+            "debit",
+            "credit",
+            "amount_currency",
+            "currency_id",
+            "create_date",
+            "write_date",
+        ]
         ledger = invoice.line_ids.read(ledger_fields)
         invoice.action_l10n_ae_prepare()
         issue = invoice.l10n_ae_transmission_id
         self.assertTrue(issue)
         root = etree.fromstring(issue.xml_content.encode())
-        self.assertEqual(root.findtext("cac:InvoiceLine/cac:Item/cac:ClassifiedTaxCategory/cbc:ID", namespaces=NS), "Z")
-        self.assertEqual(root.findtext("cac:TaxTotal/cac:TaxSubtotal/cac:TaxCategory/cbc:ID", namespaces=NS), "Z")
-        self.assertEqual(Decimal(root.findtext("cac:InvoiceLine/cac:Item/cac:ClassifiedTaxCategory/cbc:Percent", namespaces=NS)), Decimal("0"))
-        self.assertEqual(Decimal(root.findtext("cac:LegalMonetaryTotal/cbc:PayableAmount", namespaces=NS)), Decimal("100"))
+        self.assertEqual(
+            root.findtext(
+                "cac:InvoiceLine/cac:Item/cac:ClassifiedTaxCategory/cbc:ID",
+                namespaces=NS,
+            ),
+            "Z",
+        )
+        self.assertEqual(
+            root.findtext(
+                "cac:TaxTotal/cac:TaxSubtotal/cac:TaxCategory/cbc:ID", namespaces=NS
+            ),
+            "Z",
+        )
+        self.assertEqual(
+            Decimal(
+                root.findtext(
+                    "cac:InvoiceLine/cac:Item/cac:ClassifiedTaxCategory/cbc:Percent",
+                    namespaces=NS,
+                )
+            ),
+            Decimal(0),
+        )
+        self.assertEqual(
+            Decimal(
+                root.findtext("cac:LegalMonetaryTotal/cbc:PayableAmount", namespaces=NS)
+            ),
+            Decimal(100),
+        )
         report = invoice.validate_l10n_ae_pint()
         self.assertTrue(report["valid"], report)
         self.assertEqual(invoice.line_ids.read(ledger_fields), ledger)
         self.assertEqual(tax.read(tax_fields), tax_definition)
-        original = issue.read(["xml_content", "xml_hash", "payload", "payload_hash", "idempotency_key", "create_date", "write_date"])
+        original = issue.read(
+            [
+                "xml_content",
+                "xml_hash",
+                "payload",
+                "payload_hash",
+                "idempotency_key",
+                "create_date",
+                "write_date",
+            ]
+        )
         tax.ubl_cii_tax_category_code = "O"
         invoice.action_l10n_ae_prepare()
         self.assertEqual(issue.read(list(original[0])), original)
         self.assertEqual(invoice.line_ids.read(ledger_fields), ledger)
         self.assertFalse(issue.attempt_ids or issue.event_ids)
 
-    def test_native_chart_reload_fills_missing_zero_category_and_keeps_reviewed_values(self):
+    def test_native_chart_reload_fills_missing_zero_category_and_keeps_reviewed_values(
+        self,
+    ):
         company = self.env.company
         zero = self.env.ref(f"account.{company.id}_uae_sale_tax_0")
-        custom = zero.copy({"name": "Reviewed custom exempt tax", "ubl_cii_tax_category_code": "E"})
+        custom = zero.copy(
+            {"name": "Reviewed custom exempt tax", "ubl_cii_tax_category_code": "E"}
+        )
         financial_fields = [
-            "id", "name", "active", "amount", "amount_type", "type_tax_use",
-            "invoice_repartition_line_ids", "refund_repartition_line_ids",
-            "tax_group_id", "price_include_override", "fiscal_position_ids",
+            "id",
+            "name",
+            "active",
+            "amount",
+            "amount_type",
+            "type_tax_use",
+            "invoice_repartition_line_ids",
+            "refund_repartition_line_ids",
+            "tax_group_id",
+            "price_include_override",
+            "fiscal_position_ids",
         ]
-        native = self.env["account.tax"].with_context(active_test=False).search([
-            ("company_id", "=", company.id),
-        ])
+        native = (
+            self.env["account.tax"]
+            .with_context(active_test=False)
+            .search(
+                [
+                    ("company_id", "=", company.id),
+                ]
+            )
+        )
         before = native.read(financial_fields)
         zero.ubl_cii_tax_category_code = False
-        self.env["account.chart.template"].try_loading("ae", company, install_demo=False, force_create=False)
+        self.env["account.chart.template"].try_loading(
+            "ae", company, install_demo=False, force_create=False
+        )
         self.assertEqual(zero.ubl_cii_tax_category_code, "Z")
         self.assertEqual(custom.ubl_cii_tax_category_code, "E")
         self.assertEqual(native.read(financial_fields), before)
         self.assertEqual(self.env.ref(f"account.{company.id}_uae_sale_tax_0"), zero)
         # A reviewed selection is retained on subsequent chart reloads.
         zero.ubl_cii_tax_category_code = "O"
-        self.env["account.chart.template"].try_loading("ae", company, install_demo=False, force_create=False)
+        self.env["account.chart.template"].try_loading(
+            "ae", company, install_demo=False, force_create=False
+        )
         self.assertEqual(zero.ubl_cii_tax_category_code, "O")
         self.assertEqual(custom.ubl_cii_tax_category_code, "E")
         self.assertEqual(native.read(financial_fields), before)

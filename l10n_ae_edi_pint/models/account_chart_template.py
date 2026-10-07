@@ -1,6 +1,7 @@
 # Copyright 2026 KMEE
 # License AGPL-3.0 or later (https://www.gnu.org/licenses/agpl).
 from odoo import models
+
 from odoo.addons.account.models.chart_template import template
 
 
@@ -33,6 +34,8 @@ class AccountChartTemplate(models.AbstractModel):
         data = self.with_company(company)._get_ae_kmee_pint_account_tax()
         for xmlid, values in data.items():
             # Exact company XMLIDs: do not fall back to a parent's shared taxes.
-            tax = self.env.ref(f"account.{company.id}_{xmlid}", raise_if_not_found=False)
+            tax = self.env.ref(
+                f"account.{company.id}_{xmlid}", raise_if_not_found=False
+            )
             if tax and tax.company_id == company and not tax.ubl_cii_tax_category_code:
                 tax.ubl_cii_tax_category_code = values["ubl_cii_tax_category_code"]
