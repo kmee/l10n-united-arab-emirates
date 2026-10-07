@@ -618,6 +618,7 @@ class TestUaeSalesAdvance(AccountTestInvoicingCommon):
         other_data = self.setup_other_company(name="Synthetic independent UAE company")
         other = other_data["company"]
         other.write({"l10n_ae_tin": "1000000011", "l10n_ae_tin_confirmed": True})
+        other.partner_id.state_id = self.env.ref("base.state_ae_du")
         source_line = advance.invoice_line_ids.filtered("is_downpayment")
         # Public ORM accepts a Sales relation without a company check on that field.
         final = (
