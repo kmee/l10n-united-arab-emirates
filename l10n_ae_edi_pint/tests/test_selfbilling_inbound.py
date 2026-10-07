@@ -1,11 +1,13 @@
 # Copyright 2026 KMEE
 # License AGPL-3.0 or later (https://www.gnu.org/licenses/agpl).
+import hashlib
 import json
 
 from lxml import etree
 
 from odoo.exceptions import UserError
 from odoo.tests import tagged
+from odoo.tests.common import new_test_user
 
 from odoo.addons.account.tests.common import AccountTestInvoicingCommon
 
@@ -100,6 +102,123 @@ class TestUaeSelfBillingInbound(AccountTestInvoicingCommon):
             }
         )
         return source, recipient_agreement, binding
+
+    def test_received_blank_agreement_evidence_requires_review_and_repaired_retry(self):
+        source, agreement, binding = self._selfbilling_fixture()
+        company = self.env.company
+        manager = new_test_user(
+            self.env,
+            login="uae-inbound-agreement-manager",
+            groups="account.group_account_manager",
+            company_id=company.id,
+            company_ids=[(6, 0, company.ids)],
+        )
+        self.assertFalse(manager.has_group("base.group_system"))
+        self.assertEqual(manager.company_ids, company)
+        agreement = agreement.with_user(manager).with_context(
+            allowed_company_ids=company.ids
+        )
+        inbox_model = (
+            self.env["l10n_ae.edi.inbox"]
+            .with_user(manager)
+            .with_context(allowed_company_ids=company.ids)
+        )
+        moves = (
+            self.env["account.move"]
+            .with_user(manager)
+            .with_context(allowed_company_ids=company.ids)
+        )
+        domain = [("company_id", "=", company.id), ("move_type", "=", "out_invoice")]
+        before = moves.search_count(domain)
+        content = source.preview_l10n_ae_pint().encode()
+        digest = hashlib.sha256(content).hexdigest()
+        inbox = inbox_model.receive_controlled_document(
+            binding.id, "nonblank-received-agreement", content
+        )
+        history_before = []
+        history_fields = [
+            "operator_id",
+            "company_id",
+            "xml_hash",
+            "outcome",
+            "diagnostic",
+            "validation_report",
+            "validation_report_hash",
+            "normative_ruleset",
+            "normative_manifest_hash",
+            "move_id",
+        ]
+        for index, name in enumerate(("scope", "name", "onboarding_reference"), 1):
+            original = agreement[name]
+            agreement.write({name: " \t\n "})
+            self.assertFalse(inbox.action_process(), name)
+            self.assertEqual(inbox.state, "review")
+            self.assertIn("agreement", inbox.diagnostic)
+            self.assertFalse(inbox.move_id)
+            self.assertEqual(moves.search_count(domain), before)
+            self.assertEqual(inbox.original_xml.content, content)
+            self.assertEqual(inbox.xml_hash, digest)
+            history = inbox.processing_history_ids.sorted("id")
+            self.assertEqual(len(history), index)
+            self.assertEqual(history[:-1].read(history_fields), history_before)
+            current = history[-1]
+            self.assertEqual(current.operator_id, manager)
+            self.assertEqual(current.company_id, company)
+            self.assertEqual(current.xml_hash, digest)
+            self.assertEqual(current.outcome, "review")
+            self.assertFalse(current.move_id)
+            report = json.loads(current.validation_report)
+            self.assertTrue(report["valid"], report)
+            self.assertTrue(report["xsd_valid"], report)
+            self.assertEqual(
+                hashlib.sha256(current.validation_report.encode()).hexdigest(),
+                current.validation_report_hash,
+            )
+            history_before = history.read(history_fields)
+            agreement.write({name: original})
+
+        repaired = {
+            "name": "  SYNTH-AGREEMENT-REPAIRED  ",
+            "scope": "  Reviewed synthetic services\n",
+            "onboarding_reference": "  SYNTH-BUYER-ONBOARD-REPAIRED  ",
+        }
+        agreement.write(repaired)
+        self.assertTrue(inbox.action_process(), inbox.diagnostic)
+        self.assertEqual(inbox.state, "processed")
+        sale = inbox.move_id
+        self.assertEqual((sale.move_type, sale.state), ("out_invoice", "draft"))
+        self.assertEqual(sale.company_id, company)
+        self.assertEqual(sale.partner_id, self.buyer.partner_id)
+        self.assertEqual(
+            (sale.amount_untaxed, sale.amount_tax, sale.amount_total), (100, 5, 105)
+        )
+        self.assertEqual(sale.l10n_ae_selfbilling_agreement_id, agreement)
+        snapshot = {
+            "reference": repaired["name"],
+            "local_role": "supplier",
+            "start_date": "2026-01-01",
+            "end_date": False,
+            "scope": repaired["scope"],
+            "onboarding_reference": repaired["onboarding_reference"],
+        }
+        self.assertEqual(sale.l10n_ae_received_agreement_snapshot, snapshot)
+        self.assertFalse(sale.l10n_ae_transmission_ids)
+        history = inbox.processing_history_ids.sorted("id")
+        self.assertEqual(len(history), 4)
+        self.assertEqual(history[:-1].read(history_fields), history_before)
+        self.assertEqual(history[-1].outcome, "processed")
+        self.assertEqual(history[-1].operator_id, manager)
+        self.assertEqual(history[-1].xml_hash, digest)
+        self.assertEqual(history[-1].move_id, sale)
+        self.assertEqual(moves.search_count(domain), before + 1)
+        agreement.write({"scope": " ", "active": False})
+        self.assertTrue(inbox.action_process(), inbox.diagnostic)
+        self.assertEqual(inbox.move_id, sale)
+        self.assertEqual(len(inbox.processing_history_ids), 4)
+        self.assertEqual(sale.l10n_ae_received_agreement_snapshot, snapshot)
+        self.assertEqual(inbox.original_xml.content, content)
+        self.assertEqual(inbox.xml_hash, digest)
+        self.assertEqual(moves.search_count(domain), before + 1)
 
     def test_received_single_s_header_allowance_creates_one_adjustment_line(self):
         source, agreement, binding = self._selfbilling_fixture()
