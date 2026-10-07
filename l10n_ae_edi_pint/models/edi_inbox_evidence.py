@@ -70,6 +70,8 @@ class UaeEdiInboxEvidence(models.Model):
         "delivery_snapshot",
         "processing_history_ids",
         "processing_history_ids.validation_report_hash",
+        "processing_history_ids.normative_ruleset",
+        "processing_history_ids.normative_manifest_hash",
         "retention_ids",
         "retention_ids.write_date",
         "retention_ids.hold_ids",
@@ -161,6 +163,8 @@ class UaeEdiInboxEvidence(models.Model):
                 "outcome",
                 "diagnostic",
                 "move_id",
+                "normative_ruleset",
+                "normative_manifest_hash",
                 "validation_report_hash",
             ],
         )

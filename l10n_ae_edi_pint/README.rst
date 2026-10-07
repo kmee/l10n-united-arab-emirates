@@ -36,6 +36,12 @@ evidence and a versioned retention appendix. Reviewed obligations and
 active/released holds remain portable without processing the original or
 creating accounting entries.
 
+Each processing-history entry records the selected PINT package and
+manifest digest separately from its validation report. A missing
+validation resource still retains the selected package for a safe retry.
+Older history without a recorded package remains unpinned and is never
+assigned the current default.
+
 .. IMPORTANT::
    This is an alpha version, the data model and design can change at any time without warning.
    Only for development or testing purpose, do not use in production.

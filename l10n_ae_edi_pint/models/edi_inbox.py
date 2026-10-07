@@ -301,6 +301,7 @@ class UaeEdiInbox(models.Model):
                 current._identity_family().invalidate_recordset(["evidence_archive"])
             return True
         report = False
+        selected_package = False
         try:
             with current.env.cr.savepoint():
                 content = current.original_xml.content
@@ -308,7 +309,67 @@ class UaeEdiInbox(models.Model):
                     raise UserError(
                         current.env._("Received XML failed its integrity check.")
                     )
+                ruleset = os.environ.get("KMEE_UAE_NORMATIVE_RULESET", DEFAULT_RULESET)
+                selected_package = describe_ruleset(ruleset)
                 tree = parse_invoice_xml(content)
+                prior_identity = False
+                for history in current.processing_history_ids.sorted("id"):
+                    if (
+                        history.normative_ruleset
+                        or history.normative_manifest_hash
+                        or history.validation_report
+                    ):
+                        if history.normative_ruleset or history.normative_manifest_hash:
+                            if not (
+                                history.normative_ruleset
+                                and history.normative_manifest_hash
+                            ):
+                                raise UserError(
+                                    current.env._(
+                                        "This received document's selected PINT "
+                                        "evidence is incomplete; contact support."
+                                    )
+                                )
+                            prior_identity = {
+                                "ruleset": history.normative_ruleset,
+                                "manifest_sha256": history.normative_manifest_hash,
+                            }
+                        else:
+                            try:
+                                report_text = history.validation_report
+                                expected_report_hash = hashlib.sha256(
+                                    report_text.encode("utf-8")
+                                ).hexdigest()
+                                if (
+                                    history.validation_report_hash
+                                    != expected_report_hash
+                                ):
+                                    raise ValueError(
+                                        "Retained PINT report hash mismatch"
+                                    )
+                                retained_report = json.loads(report_text)
+                                prior_identity = {
+                                    "ruleset": retained_report["ruleset"],
+                                    "manifest_sha256": retained_report["resources"][
+                                        "manifest_sha256"
+                                    ],
+                                }
+                            except (KeyError, TypeError, ValueError) as error:
+                                raise UserError(
+                                    current.env._(
+                                        "This received document's retained PINT "
+                                        "identity is unavailable; contact support."
+                                    )
+                                ) from error
+                        break
+                if prior_identity and prior_identity != selected_package:
+                    raise UserError(
+                        current.env._(
+                            "This received document's pinned PINT package differs "
+                            "from the configured package. Ask support to restore "
+                            "the original configuration before retrying."
+                        )
+                    )
                 directory = os.environ.get("KMEE_UAE_NORMATIVE_DIR")
                 if not directory:
                     raise UserError(
@@ -316,22 +377,6 @@ class UaeEdiInbox(models.Model):
                             "Configure the offline UAE normative resource directory."
                         )
                     )
-                ruleset = os.environ.get("KMEE_UAE_NORMATIVE_RULESET", DEFAULT_RULESET)
-                prior = current.processing_history_ids.filtered("validation_report")[:1]
-                if prior:
-                    retained = json.loads(prior.validation_report)
-                    pinned = {
-                        "ruleset": retained["ruleset"],
-                        "manifest_sha256": retained["resources"]["manifest_sha256"],
-                    }
-                    if pinned != describe_ruleset(ruleset):
-                        raise UserError(
-                            current.env._(
-                                "This received document's pinned PINT package differs "
-                                "from the configured package. Ask support to restore "
-                                "the original configuration before retrying."
-                            )
-                        )
                 report = OfflinePintValidator(directory, ruleset=ruleset).validate(
                     content
                 )
@@ -345,19 +390,30 @@ class UaeEdiInbox(models.Model):
                 {"state": "review", "diagnostic": str(error)}
             )
             current._record_processing_history(
-                "review", diagnostic=str(error), validation_report=report
+                "review",
+                diagnostic=str(error),
+                validation_report=report,
+                selected_package=selected_package,
             )
             return False
         super(UaeEdiInbox, current.sudo()).write(
             {"state": "processed", "diagnostic": False, "move_id": move.id}
         )
         current._record_processing_history(
-            "processed", move=move, validation_report=report
+            "processed",
+            move=move,
+            validation_report=report,
+            selected_package=selected_package,
         )
         return True
 
     def _record_processing_history(
-        self, outcome, diagnostic=False, move=False, validation_report=False
+        self,
+        outcome,
+        diagnostic=False,
+        move=False,
+        validation_report=False,
+        selected_package=False,
     ):
         self.ensure_one()
         history = self.env["l10n_ae.edi.inbox.review"]._record(
@@ -366,6 +422,7 @@ class UaeEdiInbox(models.Model):
             diagnostic=diagnostic,
             move=move,
             validation_report=validation_report,
+            selected_package=selected_package,
         )
         self._identity_family().invalidate_recordset(["evidence_archive"])
         self._ingestion_family().invalidate_recordset(

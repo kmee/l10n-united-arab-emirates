@@ -9,6 +9,7 @@ import tempfile
 import uuid
 import zipfile
 from decimal import Decimal
+from pathlib import Path
 from unittest.mock import patch
 
 from lxml import etree
@@ -1041,6 +1042,199 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
             ),
             1,
         )
+
+    def test_received_technical_review_pins_package_before_resources_exist(self):
+        source = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
+        )
+        source.l10n_ae_fiscal_uuid = "19191919-1919-4919-8919-191919191919"
+        content = etree.tostring(self._received_test_xml(source))
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {"name": "Synthetic technical-review package pin"}
+        )
+        inbox = (
+            self.env["l10n_ae.edi.inbox"]
+            .with_user(self.simple_accountman)
+            .receive_controlled_document(
+                binding.id, "technical-review-package-pin", content
+            )
+        )
+        self.assertFalse(inbox.env.su)
+        self.assertEqual(inbox.env.uid, self.simple_accountman.id)
+        self.assertFalse(inbox.env.user._is_admin())
+        original_xml_hash = inbox.xml_hash
+        history_fields = [
+            "normative_ruleset",
+            "normative_manifest_hash",
+            "validation_report",
+            "validation_report_hash",
+            "diagnostic",
+            "outcome",
+            "move_id",
+            "xml_hash",
+            "occurred_at",
+            "operator_id",
+            "create_date",
+            "write_date",
+        ]
+        package_manifests = {
+            "kmee-pint-ae-1.0.3-ubl-2.1": "normative-1.0.3.json",
+            "kmee-pint-ae-1.0.4-ubl-2.1": "normative.json",
+        }
+        manifest_hashes = {
+            ruleset: hashlib.sha256(
+                (Path(__file__).resolve().parents[1] / "tools" / filename).read_bytes()
+            ).hexdigest()
+            for ruleset, filename in package_manifests.items()
+        }
+        self.assertNotEqual(
+            manifest_hashes["kmee-pint-ae-1.0.3-ubl-2.1"],
+            manifest_hashes["kmee-pint-ae-1.0.4-ubl-2.1"],
+        )
+
+        with (
+            tempfile.TemporaryDirectory(prefix="uae-inbound-empty-package-") as empty,
+            patch.dict(
+                os.environ,
+                {
+                    "KMEE_UAE_NORMATIVE_RULESET": "kmee-pint-ae-1.0.3-ubl-2.1",
+                    "KMEE_UAE_NORMATIVE_DIR": empty,
+                },
+            ),
+        ):
+            self.assertFalse(inbox.action_process())
+
+        self.assertEqual(inbox.state, "review")
+        self.assertFalse(inbox.move_id)
+        self.assertFalse(inbox.processing_history_ids[-1].validation_report)
+        self.assertIn("resource is unavailable", inbox.diagnostic.lower())
+        first_history = inbox.processing_history_ids.sorted("id")
+        self.assertEqual(len(first_history), 1)
+        self.assertEqual(first_history.normative_ruleset, "kmee-pint-ae-1.0.3-ubl-2.1")
+        self.assertEqual(
+            first_history.normative_manifest_hash,
+            manifest_hashes["kmee-pint-ae-1.0.3-ubl-2.1"],
+        )
+        first_history_before = first_history.read(history_fields)
+
+        with patch.dict(
+            os.environ,
+            {
+                "KMEE_UAE_NORMATIVE_RULESET": "kmee-pint-ae-1.0.4-ubl-2.1",
+                "KMEE_UAE_NORMATIVE_DIR": "/opt/uae-addons/.runtime/normative",
+            },
+        ):
+            self.assertFalse(inbox.action_process())
+
+        self.assertEqual(inbox.state, "review")
+        self.assertFalse(inbox.move_id)
+        self.assertIn("pinned pint package", inbox.diagnostic.lower())
+        self.assertEqual(inbox.original_xml.content, content)
+        self.assertEqual(inbox.xml_hash, original_xml_hash)
+        self.assertEqual(first_history.read(history_fields), first_history_before)
+        drift_history = inbox.processing_history_ids.sorted("id")[-1]
+        self.assertEqual(drift_history.normative_ruleset, "kmee-pint-ae-1.0.4-ubl-2.1")
+        self.assertEqual(
+            drift_history.normative_manifest_hash,
+            manifest_hashes["kmee-pint-ae-1.0.4-ubl-2.1"],
+        )
+        self.assertFalse(drift_history.validation_report)
+
+        with patch.dict(
+            os.environ,
+            {
+                "KMEE_UAE_NORMATIVE_RULESET": "kmee-pint-ae-1.0.3-ubl-2.1",
+                "KMEE_UAE_NORMATIVE_DIR": "/opt/uae-addons/.runtime/normative-1.0.3",
+            },
+        ):
+            self.assertTrue(inbox.action_process(), inbox.diagnostic)
+
+        self.assertEqual(inbox.move_id.move_type, "in_invoice")
+        self.assertEqual(inbox.move_id.state, "draft")
+        self.assertEqual(
+            (
+                inbox.move_id.amount_untaxed,
+                inbox.move_id.amount_tax,
+                inbox.move_id.amount_total,
+            ),
+            (100, 5, 105),
+        )
+        successful_history = inbox.processing_history_ids.sorted("id")[-1]
+        self.assertEqual(
+            successful_history.normative_ruleset, "kmee-pint-ae-1.0.3-ubl-2.1"
+        )
+        self.assertEqual(
+            successful_history.normative_manifest_hash,
+            manifest_hashes["kmee-pint-ae-1.0.3-ubl-2.1"],
+        )
+        successful_report = json.loads(successful_history.validation_report)
+        self.assertTrue(successful_report["valid"], successful_report)
+        self.assertEqual(successful_report["ruleset"], "kmee-pint-ae-1.0.3-ubl-2.1")
+        self.assertEqual(
+            successful_report["resources"]["manifest_sha256"],
+            manifest_hashes["kmee-pint-ae-1.0.3-ubl-2.1"],
+        )
+        self.assertEqual(first_history.read(history_fields), first_history_before)
+        history_after_success = inbox.processing_history_ids.read(history_fields)
+        move_after_success = inbox.move_id.read(
+            ["state", "amount_untaxed", "amount_tax", "amount_total", "write_date"]
+        )
+        ledger_after_success = inbox.move_id.line_ids.read(
+            [
+                "account_id",
+                "partner_id",
+                "currency_id",
+                "debit",
+                "credit",
+                "balance",
+                "amount_currency",
+                "amount_residual",
+                "amount_residual_currency",
+                "reconciled",
+                "create_date",
+                "write_date",
+            ]
+        )
+
+        with patch.dict(
+            os.environ,
+            {
+                "KMEE_UAE_NORMATIVE_RULESET": "kmee-pint-ae-1.0.4-ubl-2.1",
+                "KMEE_UAE_NORMATIVE_DIR": "/opt/uae-addons/.runtime/normative",
+            },
+        ):
+            self.assertTrue(inbox.action_process(), inbox.diagnostic)
+
+        self.assertEqual(
+            inbox.processing_history_ids.read(history_fields), history_after_success
+        )
+        self.assertEqual(
+            inbox.move_id.read(
+                ["state", "amount_untaxed", "amount_tax", "amount_total", "write_date"]
+            ),
+            move_after_success,
+        )
+        self.assertEqual(
+            inbox.move_id.line_ids.read(
+                [
+                    "account_id",
+                    "partner_id",
+                    "currency_id",
+                    "debit",
+                    "credit",
+                    "balance",
+                    "amount_currency",
+                    "amount_residual",
+                    "amount_residual_currency",
+                    "reconciled",
+                    "create_date",
+                    "write_date",
+                ]
+            ),
+            ledger_after_success,
+        )
+        self.assertEqual(inbox.original_xml.content, content)
+        self.assertEqual(inbox.xml_hash, original_xml_hash)
 
     def test_received_processing_retains_the_administrative_package_report(self):
         source = self.init_invoice(

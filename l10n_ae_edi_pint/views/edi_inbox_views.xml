@@ -217,6 +217,7 @@
                                 <field name="occurred_at" />
                                 <field name="operator_id" options="{'no_open': True}" />
                                 <field name="outcome" />
+                                <field name="normative_ruleset" optional="hide" />
                                 <field name="diagnostic" />
                                 <field name="xml_hash" optional="hide" />
                             </list>
@@ -233,6 +234,8 @@
                                         options="{'no_open': True}"
                                     />
                                     <field name="outcome" />
+                                    <field name="normative_ruleset" />
+                                    <field name="normative_manifest_hash" />
                                     <field
                                         name="xml_hash"
                                         class="text-wrap text-break"

@@ -30,6 +30,12 @@ class UaeEdiInboxReview(models.Model):
     )
     occurred_at = fields.Datetime(required=True, readonly=True)
     xml_hash = fields.Char(string="Retained XML SHA-256", required=True, readonly=True)
+    normative_ruleset = fields.Char(
+        string="Selected PINT Package", readonly=True, copy=False
+    )
+    normative_manifest_hash = fields.Char(
+        string="Selected Manifest SHA-256", size=64, readonly=True, copy=False
+    )
     outcome = fields.Selection(
         [("review", "Requires Review"), ("processed", "Processed")],
         required=True,
@@ -64,7 +70,13 @@ class UaeEdiInboxReview(models.Model):
         raise UserError(self.env._("Received processing history cannot be deleted."))
 
     def _record(
-        self, inbox, outcome, diagnostic=False, move=False, validation_report=False
+        self,
+        inbox,
+        outcome,
+        diagnostic=False,
+        move=False,
+        validation_report=False,
+        selected_package=False,
     ):
         inbox.ensure_one()
         inbox = self.env["l10n_ae.edi.inbox"].browse(inbox.id)
@@ -95,6 +107,10 @@ class UaeEdiInboxReview(models.Model):
                     "operator_id": self.env.uid,
                     "occurred_at": fields.Datetime.now(),
                     "xml_hash": inbox.xml_hash,
+                    "normative_ruleset": (selected_package or {}).get("ruleset"),
+                    "normative_manifest_hash": (selected_package or {}).get(
+                        "manifest_sha256"
+                    ),
                     "outcome": outcome,
                     "diagnostic": diagnostic,
                     "validation_report": report_text,
