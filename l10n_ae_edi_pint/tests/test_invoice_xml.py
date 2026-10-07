@@ -6065,6 +6065,70 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
             }
         )
 
+    def test_check_refuses_missing_or_unknown_emirate_without_blocking_post(self):
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {
+                "name": "Synthetic emirate review",
+                "fiscal_uuid_policy": "controlled_local",
+            }
+        )
+        self.env.company.write(
+            {"l10n_ae_edi_auto_prepare": True, "l10n_ae_edi_binding_id": binding.id}
+        )
+        unknown = self.env["res.country.state"].create(
+            {
+                "name": "Synthetic unrecognized emirate",
+                "code": "ZZ",
+                "country_id": self.env.ref("base.ae").id,
+            }
+        )
+        for role, state in (
+            ("buyer", self.env["res.country.state"]),
+            ("supplier", self.env["res.country.state"]),
+            ("buyer", unknown),
+        ):
+            with self.subTest(role=role, state=state.code):
+                party = (
+                    self.partner_a if role == "buyer" else self.env.company.partner_id
+                )
+                party.state_id = state
+                invoice = self.init_invoice(
+                    "out_invoice", amounts=[100], taxes=self.tax_sale_a
+                ).with_user(self.simple_accountman)
+                self.assertFalse(invoice.env.su)
+                with self.assertRaisesRegex(UserError, "IBR-128-AE"):
+                    invoice.action_l10n_ae_validate()
+                self.assertFalse(invoice.l10n_ae_transmission_id)
+                self.assertFalse(invoice.l10n_ae_fiscal_uuid)
+                invoice.action_post()
+                self.assertEqual(invoice.state, "posted")
+                self.assertEqual(invoice.l10n_ae_preparation_state, "requires_review")
+                self.assertIn("IBR-128-AE", invoice.l10n_ae_preparation_error)
+                self.assertFalse(invoice.l10n_ae_transmission_id)
+                self.assertFalse(invoice.l10n_ae_fiscal_uuid)
+                ledger_fields = [
+                    "account_id",
+                    "debit",
+                    "credit",
+                    "amount_currency",
+                    "tax_ids",
+                    "write_date",
+                ]
+                ledger = invoice.line_ids.sorted("id").read(ledger_fields)
+                with self.assertRaisesRegex(UserError, "IBR-128-AE"):
+                    invoice.action_l10n_ae_prepare()
+                party.state_id = self.env.ref("base.state_ae_du")
+                invoice.action_l10n_ae_validate()
+                invoice.action_l10n_ae_prepare()
+                self.assertEqual(invoice.l10n_ae_preparation_state, "prepared")
+                self.assertEqual(invoice.amount_total, 105)
+                self.assertEqual(invoice.amount_tax, 5)
+                self.assertEqual(
+                    invoice.line_ids.sorted("id").read(ledger_fields), ledger
+                )
+                self.assertFalse(invoice.l10n_ae_transmission_id.attempt_ids)
+                self.assertFalse(invoice.l10n_ae_transmission_id.event_ids)
+
     def test_native_uae_states_emit_and_freeze_pint_emirate_codes(
         self,
     ):
