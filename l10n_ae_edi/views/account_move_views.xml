@@ -186,6 +186,36 @@
                         />
                     </group>
                     <group
+                        string="Effective AED Conversion"
+                        invisible="l10n_ae_received_document or l10n_ae_effective_tax_exchange_origin == 'not_applicable'"
+                    >
+                        <field
+                            name="l10n_ae_effective_tax_exchange_rate"
+                            readonly="True"
+                        />
+                        <field
+                            name="l10n_ae_effective_tax_exchange_date"
+                            readonly="True"
+                        />
+                        <field
+                            name="l10n_ae_effective_tax_exchange_conversion_date"
+                            readonly="True"
+                        />
+                        <field
+                            name="l10n_ae_effective_tax_exchange_source"
+                            readonly="True"
+                        />
+                        <field
+                            name="l10n_ae_effective_tax_exchange_origin"
+                            readonly="True"
+                        />
+                        <field
+                            name="l10n_ae_effective_tax_exchange_diagnostic"
+                            readonly="True"
+                            invisible="not l10n_ae_effective_tax_exchange_diagnostic"
+                        />
+                    </group>
+                    <group
                         string="Reviewed Fiscal Exchange Rate to AED"
                         invisible="l10n_ae_received_document"
                     >
@@ -204,6 +234,10 @@
                         <label
                             for="l10n_ae_tax_exchange_rate"
                             string="For foreign currency: AED per one unit; preserve the reviewed source value."
+                        />
+                        <label
+                            for="l10n_ae_tax_exchange_source"
+                            string="Leave all three override fields empty to use the dated Odoo conversion. A manual reference does not verify CBUAE origin."
                         />
                     </group>
                     <group

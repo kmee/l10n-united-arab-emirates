@@ -20,6 +20,15 @@ UAE_TRANSACTION_FLAG_FIELDS = (
     "l10n_ae_exports",
 )
 
+UAE_EFFECTIVE_EXCHANGE_FIELDS = (
+    "l10n_ae_effective_tax_exchange_rate",
+    "l10n_ae_effective_tax_exchange_date",
+    "l10n_ae_effective_tax_exchange_conversion_date",
+    "l10n_ae_effective_tax_exchange_source",
+    "l10n_ae_effective_tax_exchange_origin",
+    "l10n_ae_effective_tax_exchange_diagnostic",
+)
+
 
 class AccountMove(models.Model):
     _inherit = "account.move"
@@ -106,9 +115,115 @@ class AccountMove(models.Model):
     l10n_ae_tax_exchange_source = fields.Char(
         string="AED Exchange Rate Source", copy=False
     )
+    l10n_ae_effective_tax_exchange_rate = fields.Char(
+        string="Effective AED Rate",
+        compute="_compute_l10n_ae_effective_tax_exchange",
+        compute_sudo=False,
+    )
+    l10n_ae_effective_tax_exchange_date = fields.Date(
+        string="AED Quote Source Date",
+        compute="_compute_l10n_ae_effective_tax_exchange",
+        compute_sudo=False,
+    )
+    l10n_ae_effective_tax_exchange_conversion_date = fields.Date(
+        string="AED Conversion Date",
+        compute="_compute_l10n_ae_effective_tax_exchange",
+        compute_sudo=False,
+    )
+    l10n_ae_effective_tax_exchange_source = fields.Char(
+        string="Effective AED Rate Source",
+        compute="_compute_l10n_ae_effective_tax_exchange",
+        compute_sudo=False,
+    )
+    l10n_ae_effective_tax_exchange_origin = fields.Selection(
+        [
+            ("not_applicable", "No Outbound AED Conversion"),
+            ("native_unverified", "Odoo Rate: CBUAE Origin Not Verified"),
+            ("manual_unverified", "Manual Reference: Source Origin Not Verified"),
+            ("review", "Requires Exchange Rate Review"),
+        ],
+        string="AED Rate Source Review",
+        compute="_compute_l10n_ae_effective_tax_exchange",
+        compute_sudo=False,
+    )
+    l10n_ae_effective_tax_exchange_diagnostic = fields.Text(
+        string="AED Rate Review Diagnostic",
+        compute="_compute_l10n_ae_effective_tax_exchange",
+        compute_sudo=False,
+    )
+
+    @api.depends(
+        "currency_id",
+        "company_id",
+        "company_currency_id",
+        "invoice_date",
+        "taxable_supply_date",
+        "invoice_currency_rate",
+        "l10n_ae_received_document",
+        "l10n_ae_tax_exchange_rate",
+        "l10n_ae_tax_exchange_date",
+        "l10n_ae_tax_exchange_source",
+        "l10n_ae_transmission_id.payload",
+        "currency_id.rate_ids.rate",
+        "currency_id.rate_ids.name",
+        "currency_id.rate_ids.company_id",
+        "company_currency_id.rate_ids.rate",
+        "company_currency_id.rate_ids.name",
+        "company_currency_id.rate_ids.company_id",
+    )
+    @api.depends_context("uid", "company")
+    def _compute_l10n_ae_effective_tax_exchange(self):
+        for move in self:
+            values = dict.fromkeys(UAE_EFFECTIVE_EXCHANGE_FIELDS, False)
+            values["l10n_ae_effective_tax_exchange_origin"] = "not_applicable"
+            if not move.l10n_ae_received_document:
+                try:
+                    exchange = move._l10n_ae_tax_exchange()
+                except AccessError:
+                    raise
+                except UserError as error:
+                    values["l10n_ae_effective_tax_exchange_origin"] = "review"
+                    values["l10n_ae_effective_tax_exchange_diagnostic"] = str(error)
+                else:
+                    if exchange:
+                        evidence = exchange.get("evidence") or {}
+                        values.update(
+                            {
+                                "l10n_ae_effective_tax_exchange_rate": exchange["rate"],
+                                "l10n_ae_effective_tax_exchange_date": exchange["date"],
+                                "l10n_ae_effective_tax_exchange_conversion_date": (
+                                    evidence.get("conversion_date")
+                                ),
+                                "l10n_ae_effective_tax_exchange_source": exchange[
+                                    "source"
+                                ],
+                                "l10n_ae_effective_tax_exchange_origin": (
+                                    "native_unverified"
+                                    if evidence.get("kind") == "odoo_currency_table"
+                                    else "manual_unverified"
+                                ),
+                            }
+                        )
+                        if not all(exchange[key] for key in ("rate", "date", "source")):
+                            values["l10n_ae_effective_tax_exchange_origin"] = "review"
+                            values["l10n_ae_effective_tax_exchange_diagnostic"] = (
+                                self.env._(
+                                    "Complete the reviewed AED override rate, date and "
+                                    "source, or clear all three fields to use the "
+                                    "native conversion."
+                                )
+                            )
+            for name, value in values.items():
+                move[name] = value
 
     @api.model_create_multi
     def create(self, vals_list):
+        if any(
+            set(vals).intersection(UAE_EFFECTIVE_EXCHANGE_FIELDS) for vals in vals_list
+        ):
+            raise UserError(
+                self.env._("The effective AED conversion review is protected.")
+            )
         history_fields = {
             "l10n_ae_preparation_state",
             "l10n_ae_preparation_error",
@@ -340,6 +455,10 @@ class AccountMove(models.Model):
         return posted
 
     def write(self, vals):
+        if set(vals).intersection(UAE_EFFECTIVE_EXCHANGE_FIELDS):
+            raise UserError(
+                self.env._("The effective AED conversion review is protected.")
+            )
         protected = {
             "l10n_ae_preparation_state",
             "l10n_ae_preparation_error",
