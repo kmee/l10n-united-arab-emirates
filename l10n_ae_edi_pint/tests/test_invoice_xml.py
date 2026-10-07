@@ -5206,6 +5206,224 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         report = invoice.validate_l10n_ae_pint()
         self.assertTrue(report["valid"], report)
 
+    def test_usd_line_discount_preserves_eur_ledger_and_reviewed_aed_quote(self):
+        # Independent worksheet: USD100 less10% gives USD90 net, USD4.50 VAT
+        # and USD94.50 gross. The accounting quote USD1=EUR0.90 gives EUR81,
+        # EUR4.05 and EUR85.05. The separately reviewed AED3.672500/USD quote
+        # gives AED330.525 net, AED16.52625 VAT and AED347.05125 gross.
+        eur = self.env.ref("base.EUR")
+        usd = self.env.ref("base.USD")
+        eur.active = usd.active = True
+        data = self.setup_other_company(
+            name="Synthetic EUR discount ledger company",
+            currency_id=eur.id,
+        )
+        company = data["company"]
+        company.write({"l10n_ae_tin": "1000000008", "l10n_ae_tin_confirmed": True})
+        company.partner_id.write(
+            {
+                "vat": "100000000800003",
+                "street": "Synthetic EUR discount company street",
+                "city": "Dubai",
+                "state_id": self.env.ref("base.state_ae_du").id,
+                "routing_scheme": "0235",
+                "routing_endpoint": "1000000008",
+                "l10n_ae_registration_type": "TL",
+                "l10n_ae_registration_authority": ("Synthetic EUR Discount Authority"),
+                "additional_identifiers": {"AE_TL": "SYNTH-EUR-DISCOUNT-8"},
+            }
+        )
+        self.simple_accountman.write({"company_ids": [(4, company.id)]})
+        self.env["res.currency.rate"].create(
+            {
+                "currency_id": usd.id,
+                "company_id": company.id,
+                "name": "2019-01-01",
+                "rate": 1 / 0.90,
+            }
+        )
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {
+                "name": "Synthetic EUR discount ledger binding",
+                "company_id": company.id,
+            }
+        )
+        manager_moves = (
+            self.env["account.move"]
+            .with_user(self.simple_accountman)
+            .with_company(company)
+            .with_context(allowed_company_ids=[company.id])
+        )
+        invoice = manager_moves.create(
+            {
+                "move_type": "out_invoice",
+                "partner_id": self.partner_a.id,
+                "journal_id": data["default_journal_sale"].id,
+                "currency_id": usd.id,
+                "invoice_date": "2019-01-01",
+                "l10n_ae_binding_id": binding.id,
+                "l10n_ae_fiscal_uuid": "eeeeeeee-4444-4444-8444-444444444444",
+                "l10n_ae_tax_exchange_rate": "3.672500",
+                "l10n_ae_tax_exchange_date": "2019-01-01",
+                "l10n_ae_tax_exchange_source": "SYNTH-SEPARATE-FISCAL-QUOTE",
+                "invoice_line_ids": [
+                    (
+                        0,
+                        0,
+                        {
+                            "name": "Synthetic EUR-ledger discounted service",
+                            "quantity": 1,
+                            "price_unit": 100,
+                            "discount": 10,
+                            "account_id": data["default_account_revenue"].id,
+                            "tax_ids": [(6, 0, company.account_sale_tax_id.ids)],
+                        },
+                    )
+                ],
+            }
+        )
+        self.assertFalse(invoice.env.su)
+        invoice.action_post()
+        self.assertEqual(
+            (invoice.amount_untaxed, invoice.amount_tax, invoice.amount_total),
+            (90, 4.50, 94.50),
+        )
+        self.assertEqual(
+            (
+                invoice.amount_untaxed_signed,
+                invoice.amount_tax_signed,
+                invoice.amount_total_signed,
+            ),
+            (81, 4.05, 85.05),
+        )
+        ledger_fields = [
+            "account_id",
+            "date",
+            "debit",
+            "credit",
+            "balance",
+            "amount_currency",
+            "currency_id",
+            "amount_residual",
+            "amount_residual_currency",
+            "reconciled",
+            "create_date",
+            "write_date",
+        ]
+        ledger = invoice.line_ids.read(ledger_fields)
+
+        invoice.action_l10n_ae_prepare()
+        # First preparation assigns the native transmission link. Preserve the
+        # posted ledger through it, then freeze move metadata for validation/replay.
+        self.assertEqual(invoice.line_ids.read(ledger_fields), ledger)
+        move_write_date = invoice.write_date
+        issue = invoice.l10n_ae_transmission_id
+        evidence_fields = [
+            "revision",
+            "payload",
+            "payload_hash",
+            "xml_content",
+            "xml_hash",
+            "idempotency_key",
+            "create_date",
+            "write_date",
+        ]
+        evidence = issue.read(evidence_fields)
+        self.assertEqual(
+            json.loads(issue.payload)["tax_exchange"],
+            {
+                "source_currency": "USD",
+                "target_currency": "AED",
+                "rate": "3.672500",
+                "date": "2019-01-01",
+                "source": "SYNTH-SEPARATE-FISCAL-QUOTE",
+            },
+        )
+        report = invoice.validate_l10n_ae_pint()
+        self.assertTrue(report["valid"], report)
+        self.assertTrue(report["xsd_valid"], report)
+        self.assertEqual(report["ruleset"], "kmee-pint-ae-1.0.4-ubl-2.1")
+        self.assertEqual(issue.read(evidence_fields), evidence)
+        self.assertEqual(invoice.line_ids.read(ledger_fields), ledger)
+        self.assertEqual(invoice.write_date, move_write_date)
+
+        xml = etree.fromstring(issue.xml_content.encode())
+        self.assertEqual(xml.findtext("cbc:DocumentCurrencyCode", namespaces=NS), "USD")
+        self.assertEqual(xml.findtext("cbc:TaxCurrencyCode", namespaces=NS), "AED")
+        self.assertIsNone(xml.find("cac:TaxTotal/cbc:TaxAmount[@currencyID='EUR']", NS))
+        self.assertEqual(
+            xml.findtext("cac:TaxExchangeRate/cbc:CalculationRate", namespaces=NS),
+            "3.672500",
+        )
+        line = xml.find("cac:InvoiceLine", NS)
+        self.assertEqual(len(line.findall("cac:AllowanceCharge", NS)), 1)
+        allowance = line.find("cac:AllowanceCharge", NS)
+        self.assertEqual(
+            allowance.findtext("cbc:ChargeIndicator", namespaces=NS), "false"
+        )
+        self.assertEqual(
+            allowance.findtext("cbc:AllowanceChargeReasonCode", namespaces=NS), "95"
+        )
+        self.assertEqual(
+            Decimal(line.findtext("cac:Price/cbc:PriceAmount", namespaces=NS)),
+            Decimal(100),
+        )
+        self.assertEqual(
+            Decimal(allowance.findtext("cbc:BaseAmount", namespaces=NS)),
+            Decimal(100),
+        )
+        self.assertEqual(
+            Decimal(allowance.findtext("cbc:Amount", namespaces=NS)), Decimal(10)
+        )
+        self.assertEqual(allowance.find("cbc:Amount", NS).get("currencyID"), "USD")
+        for path, expected in [
+            ("cbc:LineExtensionAmount", "90"),
+            ("cac:ItemPriceExtension/cbc:Amount", "347.05125"),
+            (
+                "cac:ItemPriceExtension/cac:TaxTotal/cbc:TaxAmount",
+                "16.52625",
+            ),
+        ]:
+            self.assertEqual(
+                Decimal(line.findtext(path, namespaces=NS)), Decimal(expected)
+            )
+            self.assertEqual(
+                line.find(path, NS).get("currencyID"),
+                "USD" if path == "cbc:LineExtensionAmount" else "AED",
+            )
+        for path, expected, currency in [
+            ("cac:TaxTotal/cbc:TaxAmount[@currencyID='USD']", "4.50", "USD"),
+            ("cac:TaxTotal/cbc:TaxAmount[@currencyID='AED']", "16.53", "AED"),
+            (
+                (
+                    "cac:AdditionalDocumentReference[cbc:DocumentTypeCode='aedtotal-incl-vat']"
+                    "/cbc:DocumentDescription"
+                ),
+                "347.05",
+                None,
+            ),
+            ("cac:LegalMonetaryTotal/cbc:TaxExclusiveAmount", "90", "USD"),
+            ("cac:LegalMonetaryTotal/cbc:TaxInclusiveAmount", "94.50", "USD"),
+            ("cac:LegalMonetaryTotal/cbc:PayableAmount", "94.50", "USD"),
+        ]:
+            node = xml.find(path, NS)
+            self.assertIsNotNone(node, path)
+            self.assertEqual(Decimal(node.text), Decimal(expected))
+            if currency:
+                self.assertEqual(node.get("currencyID"), currency)
+
+        invoice.action_l10n_ae_prepare()
+        self.assertEqual(invoice.preview_l10n_ae_pint(), issue.xml_content)
+        self.assertEqual(issue.read(evidence_fields), evidence)
+        self.assertEqual(invoice.line_ids.read(ledger_fields), ledger)
+        self.assertEqual(invoice.write_date, move_write_date)
+        self.assertFalse(
+            issue.attempt_ids
+            or issue.event_ids
+            or issue.remote_id
+            or issue.validation_receipt
+        )
+
     def test_settled_usd_credit_preserves_aed_gross_and_original_reference(self):
         usd = self.env.ref("base.USD")
         usd.active = True
