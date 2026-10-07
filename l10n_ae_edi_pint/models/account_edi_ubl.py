@@ -250,6 +250,15 @@ class AccountEdiUblUae(models.AbstractModel):
             return nodes
         classification = product._l10n_ae_item_classification()
         nodes.append({"cbc:CommodityCode": {"_text": classification["type"]}})
+        if classification["hs_code"]:
+            nodes.append(
+                {
+                    "cbc:ItemClassificationCode": {
+                        "_text": classification["hs_code"],
+                        "listID": "HS",
+                    }
+                }
+            )
         if classification["sac_code"]:
             vals["item_node"]["cac:AdditionalItemIdentification"] = {
                 "cbc:ID": {
