@@ -259,10 +259,10 @@ class TestUaeInvoicePreparation(AccountTestInvoicingCommon):
         self.assertEqual(
             batch.mapped("l10n_ae_preparation_state"), ["pending", "pending"]
         )
-        self.assertFalse(batch.mapped("l10n_ae_preparation_error"))
-        self.assertFalse(batch.mapped("l10n_ae_preparation_review_at"))
+        self.assertEqual(batch.mapped("l10n_ae_preparation_error"), [False, False])
+        self.assertEqual(batch.mapped("l10n_ae_preparation_review_at"), [False, False])
         self.assertFalse(batch.mapped("l10n_ae_transmission_ids"))
-        self.assertFalse(batch.mapped("l10n_ae_fiscal_uuid"))
+        self.assertEqual(batch.mapped("l10n_ae_fiscal_uuid"), [False, False])
         self.assertEqual((valid.amount_total, empty.amount_total), (105, 0))
 
     def test_public_orm_cannot_spoof_or_clear_uae_preparation_review(self):
