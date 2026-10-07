@@ -1585,6 +1585,13 @@ class AccountMove(models.Model):
                             "supplier and invoice date."
                         )
                     )
+                if not (agreement.scope or "").strip():
+                    raise UserError(
+                        self.env._(
+                            "Record a reviewed scope for the self-billing agreement "
+                            "before preparing the UAE e-invoice."
+                        )
+                    )
                 parties = (
                     move.company_id.partner_id | move.partner_id.commercial_partner_id
                 )
