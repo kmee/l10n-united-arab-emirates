@@ -243,6 +243,63 @@ class TestUaeInvoicePreparation(AccountTestInvoicingCommon):
             ledger,
         )
 
+    def test_native_accounting_failure_is_not_converted_to_uae_review(self):
+        self.env.company.write(
+            {
+                "l10n_ae_edi_auto_prepare": True,
+                "l10n_ae_edi_binding_id": self.binding.id,
+            }
+        )
+        valid = self.init_invoice("out_invoice", amounts=[100], taxes=self.tax_sale_a)
+        empty = self.init_invoice("out_invoice", amounts=[])
+        batch = (valid | empty).with_user(self.simple_accountman)
+        with self.assertRaisesRegex(UserError, "magicians"):
+            batch.action_post()
+        self.assertEqual(batch.mapped("state"), ["draft", "draft"])
+        self.assertEqual(
+            batch.mapped("l10n_ae_preparation_state"), ["pending", "pending"]
+        )
+        self.assertFalse(batch.mapped("l10n_ae_preparation_error"))
+        self.assertFalse(batch.mapped("l10n_ae_preparation_review_at"))
+        self.assertFalse(batch.mapped("l10n_ae_transmission_ids"))
+        self.assertFalse(batch.mapped("l10n_ae_fiscal_uuid"))
+        self.assertEqual((valid.amount_total, empty.amount_total), (105, 0))
+
+    def test_public_orm_cannot_spoof_or_clear_uae_preparation_review(self):
+        self.env.company.l10n_ae_edi_auto_prepare = True
+        invoice = self.init_invoice("out_invoice", amounts=[100], taxes=self.tax_sale_a)
+        invoice.l10n_ae_free_zone = True
+        actor = invoice.with_user(self.simple_accountman)
+        actor.action_post()
+        fields = [
+            "state",
+            "amount_total",
+            "l10n_ae_preparation_state",
+            "l10n_ae_preparation_error",
+            "l10n_ae_preparation_review_at",
+            "l10n_ae_transmission_ids",
+            "write_date",
+        ]
+        original = actor.read(fields)
+        self.assertEqual(actor.l10n_ae_preparation_state, "review")
+        for values in (
+            {"l10n_ae_preparation_state": "ready"},
+            {"l10n_ae_preparation_error": False},
+            {"l10n_ae_preparation_error": "Invented acceptance"},
+            {"l10n_ae_preparation_review_at": False},
+        ):
+            with self.subTest(values=values), self.assertRaises(UserError):
+                actor.write(values)
+            self.assertEqual(actor.read(fields), original)
+        for values in (
+            {"l10n_ae_preparation_state": "ready"},
+            {"l10n_ae_preparation_error": "Invented acceptance"},
+            {"l10n_ae_preparation_review_at": "2026-01-01 00:00:00"},
+        ):
+            with self.subTest(values=values), self.assertRaises(UserError):
+                actor.copy(values)
+            self.assertEqual(actor.read(fields), original)
+
     def test_posting_with_automatic_queue_creates_one_frozen_intent(self):
         invoice = self.init_invoice("out_invoice", amounts=[100], taxes=self.tax_sale_a)
         invoice.l10n_ae_binding_id = self.binding
