@@ -278,6 +278,37 @@ class AccountEdiUblUae(models.AbstractModel):
             }
         return nodes
 
+    def _ubl_add_line_item_classified_tax_category_nodes(
+        self, vals, in_foreign_currency=True
+    ):
+        result = super()._ubl_add_line_item_classified_tax_category_nodes(
+            vals, in_foreign_currency=in_foreign_currency
+        )
+        item = vals["item_node"]
+        if not any(
+            category["cbc:ID"]["_text"] == "AE"
+            for category in item["cac:ClassifiedTaxCategory"]
+        ):
+            return result
+        product = vals["line_vals"]["base_line"]["product_id"]
+        nature = product.l10n_ae_edi_rcm_nature_code if product else False
+        if not nature:
+            raise UserError(
+                self.env._(
+                    "IBR-166-AE: select the reviewed UAE reverse-charge nature "
+                    "before preparing this AE item."
+                )
+            )
+        # Inspect the category already computed by the core; no second tax
+        # calculation, tax-name inference or NatureCode per tax-category row.
+        classification = next(
+            node
+            for node in item["cac:CommodityClassification"]
+            if "cbc:CommodityCode" in node
+        )
+        classification["cbc:NatureCode"] = {"_text": nature}
+        return result
+
     def _ubl_add_line_price_node(self, vals, in_foreign_currency=True):
         # The pinned core infers the price from the rounded accounting base.
         # Keep its tax-inclusive/discount logic, using raw fiscal details only
@@ -511,7 +542,11 @@ class AccountEdiUblUae(models.AbstractModel):
                         item_template["cac:AdditionalItemIdentification"] = {
                             "cbc:ID": {}
                         }
-                        node = {"cbc:CommodityCode": {}, **node}
+                        node = {
+                            "cbc:NatureCode": {},
+                            "cbc:CommodityCode": {},
+                            **node,
+                        }
                     item_template[tag] = node
                 template[name] = {
                     **template[name],
