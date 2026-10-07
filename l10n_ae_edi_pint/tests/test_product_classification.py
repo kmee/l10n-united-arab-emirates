@@ -368,6 +368,9 @@ class TestUaeProductClassification(AccountTestInvoicingCommon):
         self.assertFalse(issue.attempt_ids)
 
     def test_native_product_form_configures_service_variant_for_emission(self):
+        self.simple_accountman.group_ids |= self.env.ref(
+            "product.group_product_manager"
+        )
         products = self.env["product.template"].with_user(self.simple_accountman)
         with Form(products, view="product.product_template_only_form_view") as form:
             form.name = "Synthetic service configured through native Form"
