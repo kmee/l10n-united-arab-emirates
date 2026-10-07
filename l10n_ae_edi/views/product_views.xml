@@ -14,15 +14,26 @@
                     invisible="'AE' not in fiscal_country_codes"
                 >
                     <p
-                    >Use the reviewed service accounting code and its scheme version. No code is supplied automatically.</p>
+                    >Use reviewed classification codes. Goods require HS; services require SAC and its scheme version. Mixed items require both. No code is supplied automatically.</p>
                     <p
                         invisible="not id or is_product_variant or product_variant_count == 1"
                     >Configure classification on each individual variant.</p>
                     <group
                         invisible="not is_product_variant and id and product_variant_count != 1"
                     >
-                        <field name="l10n_ae_service_accounting_code" />
-                        <field name="l10n_ae_service_accounting_version" />
+                        <field name="l10n_ae_is_good_and_service" />
+                        <field
+                            name="l10n_ae_classification_code"
+                            invisible="type == 'service' and not l10n_ae_is_good_and_service"
+                        />
+                        <field
+                            name="l10n_ae_service_accounting_code"
+                            invisible="type != 'service' and not l10n_ae_is_good_and_service"
+                        />
+                        <field
+                            name="l10n_ae_service_accounting_version"
+                            invisible="type != 'service' and not l10n_ae_is_good_and_service"
+                        />
                     </group>
                 </page>
             </xpath>

@@ -6,6 +6,20 @@ from odoo import api, fields, models
 class ProductTemplate(models.Model):
     _inherit = "product.template"
 
+    l10n_ae_is_good_and_service = fields.Boolean(
+        string="UAE Goods and Services",
+        compute="_compute_l10n_ae_is_good_and_service",
+        inverse="_inverse_l10n_ae_is_good_and_service",
+        copy=False,
+        help="Reviewed mixed item; requires separate HS and SAC identifiers.",
+    )
+    l10n_ae_classification_code = fields.Char(
+        string="UAE HS Code",
+        compute="_compute_l10n_ae_classification_code",
+        inverse="_inverse_l10n_ae_classification_code",
+        copy=False,
+        help="Reviewed HS for a unique variant; configure other variants separately.",
+    )
     l10n_ae_service_accounting_code = fields.Char(
         string="UAE Service Accounting Code",
         compute="_compute_l10n_ae_service_accounting_code",
@@ -39,10 +53,26 @@ class ProductTemplate(models.Model):
     def _inverse_l10n_ae_service_accounting_version(self):
         self._set_product_variant_field("l10n_ae_service_accounting_version")
 
+    @api.depends("product_variant_ids.l10n_ae_is_good_and_service")
+    def _compute_l10n_ae_is_good_and_service(self):
+        self._compute_template_field_from_variant_field("l10n_ae_is_good_and_service")
+
+    def _inverse_l10n_ae_is_good_and_service(self):
+        self._set_product_variant_field("l10n_ae_is_good_and_service")
+
+    @api.depends("product_variant_ids.l10n_ae_classification_code")
+    def _compute_l10n_ae_classification_code(self):
+        self._compute_template_field_from_variant_field("l10n_ae_classification_code")
+
+    def _inverse_l10n_ae_classification_code(self):
+        self._set_product_variant_field("l10n_ae_classification_code")
+
     def _get_related_fields_variant_template(self):
         # Native create reapplies these proxy values after creating the variant.
         # Without this hook an inverse runs too early and loses new Form input.
         return super()._get_related_fields_variant_template() + [
+            "l10n_ae_is_good_and_service",
+            "l10n_ae_classification_code",
             "l10n_ae_service_accounting_code",
             "l10n_ae_service_accounting_version",
         ]
