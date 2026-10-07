@@ -9,6 +9,7 @@ from odoo import fields
 from odoo.exceptions import AccessError, UserError, ValidationError
 from odoo.tests import Form, tagged
 from odoo.tests.common import new_test_user
+from odoo.tools.binary import BinaryBytes
 
 from odoo.addons.account.tests.common import AccountTestInvoicingCommon
 
@@ -268,6 +269,100 @@ class TestUaeIncident(AccountTestInvoicingCommon):
             ),
             basis,
         )
+        self.assertEqual(incident.activity_ids.ids, activity_ids)
+
+    @freeze_time("2026-12-08 12:00:00")
+    def test_registration_notice_is_recorded_through_native_forms(self):
+        manager = new_test_user(
+            self.env,
+            login="synthetic-registration-form-manager",
+            groups="account.group_account_manager",
+            company_ids=self.env.company.ids,
+            company_id=self.env.company.id,
+        )
+        view = "l10n_ae_edi.edi_incident_form"
+        with Form(
+            self.env["l10n_ae.edi.incident"].with_user(manager), view=view
+        ) as form:
+            form.name = "Synthetic registration notice from the native form"
+            form.incident_kind = "registration_change"
+            with self.assertRaises(AssertionError):
+                form.occurrence_at = fields.Datetime.to_datetime("2026-11-30 21:30:00")
+            form.fta_confirmation_received_at = fields.Datetime.to_datetime(
+                "2026-11-30 21:30:00"
+            )
+            form.fta_confirmation_reference = "Synthetic FTA registration receipt B"
+            form.reason = "Synthetic confirmed business address amendment"
+            form.responsible_id = manager
+            form.calendar_start = date(2026, 12, 1)
+            form.calendar_end = date(2026, 12, 10)
+            form.calendar_holiday_dates = "2026-12-02\n2026-12-03"
+            form.calendar_source = "Reviewed synthetic federal holidays"
+            form.calendar_version = "synthetic-federal-2026"
+            form.source_reference = "MD243 Art5.3; reviewed Art49 day exclusion"
+            form.review_note = "Dubai Dec1 receipt; Dec4,7,8,9,10 are days1-5"
+        incident = form.record
+        incident.action_open()
+        self.assertEqual(incident.notification_due_date, date(2026, 12, 10))
+        self.assertFalse(incident.occurrence_at)
+        self.assertFalse(incident.detected_at)
+        activity_ids = incident.activity_ids.ids
+        action = incident.action_record_notice()
+        content = b"Controlled taxpayer issuer and recipient notice\n"
+        dialog_model = (
+            self.env[action["res_model"]]
+            .with_user(manager)
+            .with_context(**action["context"])
+        )
+        with Form(dialog_model, view=action["view_id"]) as dialog:
+            dialog.evidence_origin = "simulated"
+            dialog.sender_role = "taxpayer"
+            dialog.sender_name = "Controlled UAE taxpayer"
+            dialog.taxpayer_roles = "both"
+            dialog.recipient_role = "fta"
+            dialog.recipient_name = "Controlled appointed ASP"
+            dialog.recipient_address = "asp-recipient@example.invalid"
+            dialog.channel = "email"
+            dialog.sent_at = fields.Datetime.to_datetime("2026-12-04 08:00:00")
+            dialog.external_reference = "synthetic-written-registration-notice-1"
+            dialog.review_note = "Controlled written notice; no actual transmission"
+            dialog.document_filename = "synthetic-registration-notice.txt"
+            dialog.document = BinaryBytes(content)
+        wizard = dialog.record
+        with self.cr.savepoint(), self.assertRaises(ValidationError):
+            wizard.action_confirm()
+        self.assertFalse(incident.notice_ids)
+        wizard.write({"recipient_role": "asp", "sent_at": "2026-11-30 20:30:00"})
+        with self.cr.savepoint(), self.assertRaises(ValidationError):
+            wizard.action_confirm()
+        self.assertFalse(incident.notice_ids)
+        wizard.sent_at = "2026-12-04 08:00:00"
+        self.assertEqual(
+            wizard.action_confirm(), {"type": "ir.actions.act_window_close"}
+        )
+        notice = incident.notice_ids
+        self.assertEqual(len(notice), 1)
+        self.assertEqual(notice.notice_purpose, "taxpayer_registration")
+        self.assertEqual(notice.sender_role, "taxpayer")
+        self.assertEqual(notice.recipient_role, "asp")
+        self.assertEqual(notice.taxpayer_roles, "both")
+        self.assertEqual(notice.document.content, content)
+        self.assertEqual(
+            notice.document_sha256,
+            "0f31a00f2ba51212cd9edf0a806bacae1b466cc13b2bf2fbb3bb71e2d3b07e49",
+        )
+        self.assertEqual(
+            wizard.action_confirm(), {"type": "ir.actions.act_window_close"}
+        )
+        self.assertEqual(incident.notice_ids.ids, notice.ids)
+        reviewed = Form(incident, view=view)
+        self.assertEqual(len(reviewed.notice_ids), 1)
+        with self.assertRaises(AssertionError):
+            reviewed.fta_confirmation_received_at = fields.Datetime.to_datetime(
+                "2026-12-08 10:00:00"
+            )
+        self.assertEqual(incident.notification_due_date, date(2026, 12, 10))
+        self.assertEqual(incident.state, "open")
         self.assertEqual(incident.activity_ids.ids, activity_ids)
 
     @freeze_time("2026-12-01 12:00:00")
