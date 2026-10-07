@@ -1099,7 +1099,11 @@ class AccountMove(models.Model):
                 )
             with self.env.cr.savepoint():
                 if not self.l10n_ae_binding_id:
-                    self.l10n_ae_binding_id = binding
+                    # Internal provider selection is metadata. Preserve the
+                    # posted ledger, including its accounting-line timestamps.
+                    self.with_context(
+                        skip_invoice_sync=True, skip_is_manually_modified=True
+                    ).l10n_ae_binding_id = binding
                 correction = self.l10n_ae_correction_id
                 source = correction.source_transmission_id
                 if correction and (
