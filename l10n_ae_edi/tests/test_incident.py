@@ -469,3 +469,168 @@ class TestUaeIncident(AccountTestInvoicingCommon):
             {model: self.env[model].search([], order="id").ids for model in models},
             baseline,
         )
+
+    @freeze_time("2026-12-08 12:00:00")
+    def test_notice_dialog_rechecks_actor_and_company_after_public_orm_edits(self):
+        company_a = self.env.company
+        company_b = self.setup_other_company(name="Synthetic incident company B")[
+            "company"
+        ]
+        company_b.country_id = self.env.ref("base.ae")
+        manager = new_test_user(
+            self.env,
+            login="synthetic-dialog-two-company-manager",
+            groups="account.group_account_manager",
+            company_ids=[company_a.id, company_b.id],
+            company_id=company_a.id,
+        )
+        reader = new_test_user(
+            self.env,
+            login="synthetic-dialog-company-a-reader",
+            groups="account.group_account_readonly",
+            company_ids=company_a.ids,
+            company_id=company_a.id,
+        )
+        cases = []
+        for company in (company_a, company_b):
+            incident = (
+                self.env["l10n_ae.edi.incident"]
+                .with_user(manager)
+                .with_context(allowed_company_ids=company.ids)
+                .create(
+                    {
+                        "name": "Synthetic registration case " + company.name,
+                        "company_id": company.id,
+                        "incident_kind": "registration_change",
+                        "fta_confirmation_received_at": "2026-11-30 21:30:00",
+                        "fta_confirmation_reference": "Synthetic FTA receipt",
+                        "reason": "Synthetic confirmed registration amendment",
+                        "responsible_id": manager.id,
+                        "calendar_start": "2026-12-01",
+                        "calendar_end": "2026-12-10",
+                        "calendar_holidays": ["2026-12-02", "2026-12-03"],
+                        "calendar_source": "Reviewed synthetic federal holidays",
+                        "calendar_version": "synthetic-federal-2026",
+                        "source_reference": "MD243 Art5.3; reviewed Art49",
+                        "review_note": "Dubai Dec1 receipt; Dec10 fifth business day",
+                    }
+                )
+            )
+            with self.cr.savepoint(), self.assertRaises(UserError):
+                incident.action_record_notice()
+            incident.action_open()
+            cases.append(incident)
+        case_a, case_b = cases
+        facts = [
+            case.read(["state", "notification_due_date", "write_date", "opened_at"])
+            for case in cases
+        ]
+        activities = [case.activity_ids.ids for case in cases]
+        values = {
+            "evidence_origin": "simulated",
+            "sender_role": "taxpayer",
+            "sender_name": "Controlled UAE taxpayer",
+            "taxpayer_roles": "both",
+            "recipient_role": "asp",
+            "recipient_name": "Controlled appointed ASP",
+            "recipient_address": "asp-recipient@example.invalid",
+            "channel": "email",
+            "sent_at": "2026-12-04 08:00:00",
+            "external_reference": "synthetic-dialog-company-review",
+            "review_note": "Controlled artifact; no notice sent",
+            "document_filename": "synthetic-notice.txt",
+            "document": BinaryBytes(
+                b"Controlled taxpayer issuer and recipient notice\n"
+            ),
+        }
+        action = case_a.action_record_notice()
+        wizard = (
+            self.env[action["res_model"]]
+            .with_user(manager)
+            .with_context(allowed_company_ids=company_a.ids, **action["context"])
+            .create(values)
+        )
+        for elevated in (False, True):
+            for target in (case_a, case_b):
+                with (
+                    self.subTest(launch=target.id, elevated=elevated),
+                    self.cr.savepoint(),
+                    self.assertRaises(AccessError),
+                ):
+                    target.with_user(reader).sudo(elevated).with_context(
+                        allowed_company_ids=company_a.ids
+                    ).action_record_notice()
+            with (
+                self.subTest(confirm_reader=elevated),
+                self.cr.savepoint(),
+                self.assertRaises(AccessError),
+            ):
+                wizard.with_user(reader).sudo(elevated).action_confirm()
+        draft = (
+            self.env["l10n_ae.edi.incident"]
+            .with_user(manager)
+            .with_context(allowed_company_ids=company_a.ids)
+            .create({"name": "Synthetic unreviewed case", "company_id": company_a.id})
+        )
+        wizard.write({"incident_id": draft.id})
+        with self.cr.savepoint(), self.assertRaises(UserError):
+            wizard.action_confirm()
+        self.assertFalse(draft.notice_ids)
+        # Readonly widgets do not prevent public ORM writes; the parent must recheck.
+        wizard.write({"incident_id": case_b.id})
+        for elevated in (False, True):
+            with (
+                self.subTest(inactive_company=elevated),
+                self.cr.savepoint(),
+                self.assertRaises(AccessError),
+            ):
+                wizard.sudo(elevated).action_confirm()
+        self.assertFalse(case_a.notice_ids)
+        self.assertFalse(case_b.notice_ids)
+        wizard.write({"incident_id": case_a.id, "recipient_role": "fta"})
+        with self.cr.savepoint(), self.assertRaises(ValidationError):
+            wizard.action_confirm()
+        wizard.write({"recipient_role": "asp", "taxpayer_roles": False})
+        with self.cr.savepoint(), self.assertRaises(ValidationError):
+            wizard.action_confirm()
+        self.assertFalse(case_a.notice_ids)
+        wizard.taxpayer_roles = "both"
+        wizard.action_confirm()
+        own_notice = case_a.notice_ids
+        self.assertEqual(len(own_notice), 1)
+        self.assertEqual(own_notice.company_id, company_a)
+        self.assertEqual(
+            own_notice.with_user(reader).document_sha256,
+            "0f31a00f2ba51212cd9edf0a806bacae1b466cc13b2bf2fbb3bb71e2d3b07e49",
+        )
+        # Forged defaults are still checked after normal native wizard creation.
+        foreign_wizard = (
+            wizard.env[wizard._name]
+            .with_context(
+                allowed_company_ids=company_a.ids,
+                default_incident_id=case_b.id,
+                default_recipient_role="fta",
+                default_taxpayer_roles="issuer",
+            )
+            .create({k: v for k, v in values.items() if k != "recipient_role"})
+        )
+        with self.cr.savepoint(), self.assertRaises(AccessError):
+            foreign_wizard.action_confirm()
+        foreign_wizard.write({"recipient_role": "asp"})
+        foreign_wizard.with_context(allowed_company_ids=company_b.ids).action_confirm()
+        foreign_notice = case_b.notice_ids
+        self.assertEqual(len(foreign_notice), 1)
+        self.assertNotEqual(own_notice, foreign_notice)
+        self.assertEqual(foreign_notice.company_id, company_b)
+        with self.cr.savepoint(), self.assertRaises(AccessError):
+            foreign_notice.with_user(reader).with_context(
+                allowed_company_ids=company_a.ids
+            ).read(["document", "external_reference"])
+        self.assertEqual(
+            [
+                case.read(["state", "notification_due_date", "write_date", "opened_at"])
+                for case in cases
+            ],
+            facts,
+        )
+        self.assertEqual([case.activity_ids.ids for case in cases], activities)
