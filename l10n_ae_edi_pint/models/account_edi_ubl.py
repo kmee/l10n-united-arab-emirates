@@ -482,8 +482,20 @@ class AccountEdiUblUae(models.AbstractModel):
         template = dict(vals["document_node"]["_template"])
         for name in ("cac:InvoiceLine", "cac:CreditNoteLine"):
             if name in template:
+                # The public core template has generic classifications, but not
+                # the UAE commodity type or SAC. Extend only this document's
+                # item template in UBL schema order; never mutate core globals.
+                item_template = {}
+                for tag, node in template[name]["cac:Item"].items():
+                    if tag == "cac:CommodityClassification":
+                        item_template["cac:AdditionalItemIdentification"] = {
+                            "cbc:ID": {}
+                        }
+                        node = {"cbc:CommodityCode": {}, **node}
+                    item_template[tag] = node
                 template[name] = {
                     **template[name],
+                    "cac:Item": item_template,
                     "cac:ItemPriceExtension": {
                         "cbc:Amount": {},
                         "cac:TaxTotal": TaxTotal,
