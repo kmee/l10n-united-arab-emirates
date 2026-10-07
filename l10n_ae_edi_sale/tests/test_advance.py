@@ -54,7 +54,14 @@ class TestUaeSalesAdvance(AccountTestInvoicingCommon):
             }
         )
         cls.env.company.downpayment_account_id = cls.advance_account
-        cls.product_a.write({"type": "service", "invoice_policy": "order"})
+        cls.product_a.write(
+            {
+                "type": "service",
+                "invoice_policy": "order",
+                "l10n_ae_service_accounting_code": "SYNTHETIC-ADVANCE-SAC",
+                "l10n_ae_service_accounting_version": "SYNTHETIC-SAC-2026",
+            }
+        )
         cls.binding = cls.env["l10n_ae.edi.binding"].create(
             {
                 "name": "Sales advance simulation",
