@@ -59,6 +59,31 @@ class AccountEdiUblUae(models.AbstractModel):
         }
         return result
 
+    def _ubl_add_invoice_period_nodes(self, vals):
+        result = super()._ubl_add_invoice_period_nodes(vals)
+        invoice = vals["invoice"]
+        if (
+            invoice.l10n_ae_invoicing_period_start
+            or invoice.l10n_ae_invoicing_period_end
+        ):
+            vals["document_node"]["cac:InvoicePeriod"].update(
+                {
+                    "cbc:StartDate": {
+                        "_text": fields.Date.to_string(
+                            invoice.l10n_ae_invoicing_period_start
+                        )
+                        or None
+                    },
+                    "cbc:EndDate": {
+                        "_text": fields.Date.to_string(
+                            invoice.l10n_ae_invoicing_period_end
+                        )
+                        or None
+                    },
+                }
+            )
+        return result
+
     def _ubl_get_line_item_node_classified_tax_category_node(self, vals, tax_category):
         node = super()._ubl_get_line_item_node_classified_tax_category_node(
             vals, tax_category

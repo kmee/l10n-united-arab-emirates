@@ -7327,7 +7327,9 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         )
         self.assertEqual(
             [
-                line.findtext("cac:TaxTotal/cbc:TaxAmount", namespaces=NS)
+                line.findtext(
+                    "cac:ItemPriceExtension/cac:TaxTotal/cbc:TaxAmount", namespaces=NS
+                )
                 for line in invoice_lines
             ],
             ["2.00", "3.00"],
