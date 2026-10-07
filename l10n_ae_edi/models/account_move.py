@@ -1069,6 +1069,16 @@ class AccountMove(models.Model):
 
     def _check_l10n_ae_invoicing_period(self):
         self.ensure_one()
+        if (
+            self.l10n_ae_invoicing_period_start
+            and self.l10n_ae_invoicing_period_end
+            and self.l10n_ae_invoicing_period_end < self.l10n_ae_invoicing_period_start
+        ):
+            raise UserError(
+                self.env._(
+                    "IBR-029: the invoicing period end must be on or after its start."
+                )
+            )
         if self.l10n_ae_summary and not (
             self.l10n_ae_invoicing_period_start or self.l10n_ae_invoicing_period_end
         ):
