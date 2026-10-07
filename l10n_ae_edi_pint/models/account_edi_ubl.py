@@ -242,6 +242,24 @@ class AccountEdiUblUae(models.AbstractModel):
             }
         return result
 
+    def _ubl_add_line_item_commodity_classification_nodes(self, vals):
+        # Extend the public Odoo20 hook, as the LGPL-3 Odoo PR262200 does.
+        nodes = super()._ubl_add_line_item_commodity_classification_nodes(vals)
+        product = vals["line_vals"]["base_line"]["product_id"]
+        if not product:
+            return nodes
+        classification = product._l10n_ae_item_classification()
+        nodes.append({"cbc:CommodityCode": {"_text": classification["type"]}})
+        if classification["sac_code"]:
+            vals["item_node"]["cac:AdditionalItemIdentification"] = {
+                "cbc:ID": {
+                    "_text": classification["sac_code"],
+                    "schemeID": "SAC",
+                    "schemeVersionID": classification["sac_scheme_version"],
+                }
+            }
+        return nodes
+
     def _ubl_add_line_price_node(self, vals, in_foreign_currency=True):
         # The pinned core infers the price from the rounded accounting base.
         # Keep its tax-inclusive/discount logic, using raw fiscal details only
