@@ -45,6 +45,56 @@ class TestUaeFiscalCategoryMatrix(AccountTestInvoicingCommon):
                 }
             )
 
+    def test_native_zero_rate_sales_tax_prepares_z_without_an_exemption_reason(self):
+        company = self.env.company
+        tax = self.env.ref(f"account.{company.id}_uae_sale_tax_0")
+        tax_fields = [
+            "amount", "amount_type", "type_tax_use", "invoice_repartition_line_ids",
+            "refund_repartition_line_ids", "tax_group_id", "price_include_override",
+        ]
+        tax_definition = tax.read(tax_fields)
+        self.assertEqual(tax.amount, 0)
+        self.assertFalse(tax.ubl_cii_tax_exemption_reason_code)
+        binding = self.env["l10n_ae.edi.binding"].create({"name": "Native zero tax"})
+        invoice = self.env["account.move"].with_user(self.simple_accountman).create({
+            "move_type": "out_invoice",
+            "partner_id": self.partner_a.id,
+            "journal_id": self.company_data["default_journal_sale"].id,
+            "currency_id": self.env.ref("base.AED").id,
+            "invoice_date": "2019-01-01",
+            "l10n_ae_binding_id": binding.id,
+            "l10n_ae_fiscal_uuid": "cececece-4444-4444-8444-444444444444",
+            "invoice_line_ids": [Command.create({
+                "name": "Native zero-rated supply",
+                "price_unit": 100,
+                "account_id": self.company_data["default_account_revenue"].id,
+                "tax_ids": [Command.set(tax.ids)],
+            })],
+        })
+        self.assertFalse(invoice.env.su)
+        invoice.action_post()
+        self.assertEqual((invoice.amount_untaxed, invoice.amount_tax, invoice.amount_total), (100, 0, 100))
+        ledger_fields = ["account_id", "debit", "credit", "amount_currency", "currency_id", "create_date", "write_date"]
+        ledger = invoice.line_ids.read(ledger_fields)
+        invoice.action_l10n_ae_prepare()
+        issue = invoice.l10n_ae_transmission_id
+        self.assertTrue(issue)
+        root = etree.fromstring(issue.xml_content.encode())
+        self.assertEqual(root.findtext("cac:InvoiceLine/cac:Item/cac:ClassifiedTaxCategory/cbc:ID", namespaces=NS), "Z")
+        self.assertEqual(root.findtext("cac:TaxTotal/cac:TaxSubtotal/cac:TaxCategory/cbc:ID", namespaces=NS), "Z")
+        self.assertEqual(Decimal(root.findtext("cac:InvoiceLine/cac:Item/cac:ClassifiedTaxCategory/cbc:Percent", namespaces=NS)), Decimal("0"))
+        self.assertEqual(Decimal(root.findtext("cac:LegalMonetaryTotal/cbc:PayableAmount", namespaces=NS)), Decimal("100"))
+        report = invoice.validate_l10n_ae_pint()
+        self.assertTrue(report["valid"], report)
+        self.assertEqual(invoice.line_ids.read(ledger_fields), ledger)
+        self.assertEqual(tax.read(tax_fields), tax_definition)
+        original = issue.read(["xml_content", "xml_hash", "payload", "payload_hash", "idempotency_key", "create_date", "write_date"])
+        tax.ubl_cii_tax_category_code = "O"
+        invoice.action_l10n_ae_prepare()
+        self.assertEqual(issue.read(list(original[0])), original)
+        self.assertEqual(invoice.line_ids.read(ledger_fields), ledger)
+        self.assertFalse(issue.attempt_ids or issue.event_ids)
+
     def test_tax_inclusive_discount_preserves_net_allowance_and_original_ledger(self):
         # Independent AED example: gross unit price105 includes5% VAT.
         # Before discount the net basis is100. A10% discount therefore means
