@@ -70,13 +70,21 @@ class AccountMove(models.Model):
             sources.flush_recordset(["write_uid", "write_date"])
 
     def _post(self, soft=True):
-        self.filtered(
+        candidates = self.filtered(
             lambda move: (
                 not soft
                 or not move.date
                 or move.date <= fields.Date.context_today(move)
             )
-        )._l10n_ae_lock_advance_sources()
+        )
+        candidates._l10n_ae_lock_advance_sources()
+        # Keep the existing advance-consumption accounting guard. Unlike missing
+        # fiscal metadata, an unposted/over-consumed advance invalidates the
+        # deduction itself; automatic preparation must not swallow this refusal.
+        for move in candidates.filtered(
+            lambda move: move.company_id.l10n_ae_edi_auto_prepare
+        ):
+            move._l10n_ae_advance_references()
         return super()._post(soft=soft)
 
     def action_l10n_ae_prepare(self):

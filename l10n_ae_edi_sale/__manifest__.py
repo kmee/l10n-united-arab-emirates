@@ -3,7 +3,7 @@
 {
     "name": "UAE Electronic Invoicing Sales",
     "summary": "Preserve taxed advance references on final sales invoices",
-    "version": "20.0.1.1.0",
+    "version": "20.0.1.2.0",
     "development_status": "Alpha",
     "category": "Accounting/Localizations",
     "author": "KMEE",
