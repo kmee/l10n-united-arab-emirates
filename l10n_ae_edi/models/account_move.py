@@ -476,6 +476,26 @@ class AccountMove(models.Model):
             # roll back the appended correction and cleared active reference.
             return super().button_draft()
 
+    def button_cancel(self):
+        self.check_access("write")
+        # Native Cancel calls Reset internally. Preserve its existing UAE guard
+        # rather than treating cancellation as an explicit local correction.
+        with self.env.cr.savepoint():
+            self.flush_recordset()
+            self.env.cr.execute(
+                "SELECT id FROM account_move WHERE id = ANY(%s) ORDER BY id FOR UPDATE",
+                [self.ids],
+            )
+            self.invalidate_recordset()
+            if self.filtered("l10n_ae_transmission_id"):
+                raise UserError(
+                    self.env._(
+                        "Reconcile the frozen UAE transmission before "
+                        "cancelling this invoice."
+                    )
+                )
+            return super().button_cancel()
+
     def write(self, vals):
         if set(vals).intersection(UAE_EFFECTIVE_EXCHANGE_FIELDS):
             raise UserError(
