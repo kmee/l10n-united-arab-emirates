@@ -321,8 +321,6 @@ class AccountMove(models.Model):
                 # Accounting has already posted. Roll back only this local fiscal
                 # preparation if its data/configuration requires correction.
                 with self.env.cr.savepoint():
-                    if not move.l10n_ae_binding_id:
-                        move.l10n_ae_binding_id = move.company_id.l10n_ae_edi_binding_id
                     move.with_company(move.company_id).action_l10n_ae_prepare()
             except AccessError:
                 # Do not turn missing authorization into a successful action.
@@ -912,7 +910,7 @@ class AccountMove(models.Model):
                         "Post the invoice before preparing its UAE transmission."
                     )
                 )
-            binding = self.l10n_ae_binding_id
+            binding = self.l10n_ae_binding_id or self.company_id.l10n_ae_edi_binding_id
             if (
                 not binding
                 or not binding.active
@@ -931,6 +929,8 @@ class AccountMove(models.Model):
                     )
                 )
             with self.env.cr.savepoint():
+                if not self.l10n_ae_binding_id:
+                    self.l10n_ae_binding_id = binding
                 correction = self.l10n_ae_correction_id
                 source = correction.source_transmission_id
                 if correction and (
