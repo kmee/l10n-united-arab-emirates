@@ -1571,6 +1571,7 @@ class AccountMove(models.Model):
                 if (
                     not agreement
                     or not agreement.active
+                    or not (agreement.scope or "").strip()
                     or agreement.local_role != "buyer"
                     or agreement.company_id != move.company_id
                     or agreement.partner_id != move.partner_id.commercial_partner_id
@@ -1582,14 +1583,7 @@ class AccountMove(models.Model):
                     raise UserError(
                         self.env._(
                             "Select an active self-billing agreement for this company, "
-                            "supplier and invoice date."
-                        )
-                    )
-                if not (agreement.scope or "").strip():
-                    raise UserError(
-                        self.env._(
-                            "Record a reviewed scope for the self-billing agreement "
-                            "before preparing the UAE e-invoice."
+                            "supplier and invoice date, with a reviewed scope."
                         )
                     )
                 parties = (
