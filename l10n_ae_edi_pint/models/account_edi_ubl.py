@@ -2,6 +2,8 @@
 # License AGPL-3.0 or later (https://www.gnu.org/licenses/agpl).
 from decimal import ROUND_HALF_UP, Decimal
 
+from lxml import etree
+
 from odoo import fields, models
 from odoo.exceptions import UserError
 
@@ -25,8 +27,31 @@ class AccountEdiUblUae(models.AbstractModel):
             self._validate_taxes(invoice.invoice_line_ids.tax_ids)
             content = self._etree_to_string(self._vals_to_etree(result))
             errors = {value for value in result["constraints"].values() if value}
-            return content, errors
-        return result
+        else:
+            content, errors = result
+        # Apply the published predicate to the actual core-generated item
+        # categories. Fixed/withholding taxes and header charges must not be
+        # mistaken for a qualifying ClassifiedTaxCategory on an invoice line.
+        document = etree.fromstring(content)
+        document_type = document.findtext("{*}InvoiceTypeCode") or document.findtext(
+            "{*}CreditNoteTypeCode"
+        )
+        categories = document.findall(
+            "{*}InvoiceLine/{*}Item/{*}ClassifiedTaxCategory"
+        ) + document.findall("{*}CreditNoteLine/{*}Item/{*}ClassifiedTaxCategory")
+        if document_type in {"380", "381"} and not any(
+            (category.findtext("{*}ID") or "").strip() not in {"E", "O"}
+            for category in categories
+        ):
+            raise UserError(
+                self.env._(
+                    "IBR-151-AE: a tax invoice (380) or tax credit note (381) "
+                    "requires at least one line VAT category other than E or O. "
+                    "Review the document category before preparation; "
+                    "it will not be changed automatically."
+                )
+            )
+        return content, errors
 
     def _init_invoice_export_values(self, invoice):
         vals = super()._init_invoice_export_values(invoice)
