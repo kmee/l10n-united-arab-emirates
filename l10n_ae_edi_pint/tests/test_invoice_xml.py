@@ -38,8 +38,9 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         )
         invoice = self.init_invoice(
             "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
-        ).with_user(self.simple_accountman)
+        )
         invoice.partner_id.invoice_sending_method = "manual"
+        invoice = invoice.with_user(self.simple_accountman)
         invoice.l10n_ae_binding_id = binding
         self.assertFalse(invoice.env.su)
         invoice.action_l10n_ae_prepare()
