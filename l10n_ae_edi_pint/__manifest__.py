@@ -30,4 +30,5 @@
         "python": ["packaging", "lxml>=5.2,<7", "saxonche>=13.0,<14"]
     },
     "installable": True,
+    "post_init_hook": "post_init_hook",
 }
