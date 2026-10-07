@@ -289,6 +289,444 @@ class TestUaeIncident(AccountTestInvoicingCommon):
             review.unlink()
 
     @freeze_time("2026-12-08 12:00:00")
+    def test_recovery_dialogs_recheck_actual_actor_company_and_readonly_overview(self):
+        company_a = self.env.company
+        company_b = self.setup_other_company(name="Synthetic recovery company B")[
+            "company"
+        ]
+        company_b.country_id = self.env.ref("base.ae")
+        manager = new_test_user(
+            self.env,
+            login="synthetic-recovery-access-manager",
+            groups="account.group_account_manager",
+            company_ids=[company_a.id, company_b.id],
+            company_id=company_a.id,
+        )
+        reader = new_test_user(
+            self.env,
+            login="synthetic-recovery-access-reader",
+            groups="account.group_account_readonly",
+            company_ids=company_a.ids,
+            company_id=company_a.id,
+        )
+
+        def create_incident(company, name, kind="system_failure", open_record=True):
+            values = {
+                "name": name,
+                "company_id": company.id,
+                "incident_kind": kind,
+                "affected_roles": "issuer" if kind == "system_failure" else False,
+                "occurrence_at": (
+                    "2026-12-01 09:00:00" if kind == "system_failure" else False
+                ),
+                "detected_at": (
+                    "2026-12-01 10:00:00" if kind == "system_failure" else False
+                ),
+                "fta_confirmation_received_at": (
+                    "2026-12-01 09:00:00" if kind == "registration_change" else False
+                ),
+                "fta_confirmation_reference": (
+                    "Synthetic FTA confirmation"
+                    if kind == "registration_change"
+                    else False
+                ),
+                "reason": "Synthetic reviewed outage or registration change",
+                "responsible_id": manager.id,
+                "calendar_start": "2026-12-01",
+                "calendar_end": "2026-12-10",
+                "calendar_holidays": [],
+                "calendar_source": "Reviewed synthetic calendar",
+                "calendar_version": "synthetic-recovery-access-1",
+                "source_reference": "Synthetic reviewed source reference",
+                "review_note": "Synthetic local review; no external action",
+            }
+            incident = (
+                self.env["l10n_ae.edi.incident"]
+                .with_user(manager)
+                .with_context(allowed_company_ids=company.ids)
+                .create(values)
+            )
+            if open_record:
+                incident.action_open()
+            return incident
+
+        system_a = create_incident(company_a, "Synthetic open system incident A")
+        draft_a = create_incident(
+            company_a, "Synthetic draft system incident A", open_record=False
+        )
+        registration_a = create_incident(
+            company_a,
+            "Synthetic open registration incident A",
+            kind="registration_change",
+        )
+        system_b = create_incident(company_b, "Synthetic open system incident B")
+
+        company_a.write({"l10n_ae_tin": "1000000001", "l10n_ae_tin_confirmed": True})
+        self.partner_a.country_id = self.env.ref("base.ae")
+        if "routing_scheme" in self.env["res.partner"]._fields:
+            company_a.partner_id.write(
+                {"routing_scheme": "0235", "routing_endpoint": "1000000001"}
+            )
+            self.partner_a.write(
+                {"routing_scheme": "0235", "routing_endpoint": "1000000002"}
+            )
+
+        binding = (
+            self.env["l10n_ae.edi.binding"]
+            .with_user(manager)
+            .with_context(allowed_company_ids=company_a.ids)
+            .create({"name": "Synthetic recovery access binding"})
+        )
+        invoice = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
+        ).with_user(manager)
+        invoice.l10n_ae_binding_id = binding
+        invoice.action_l10n_ae_prepare()
+        issue = invoice.l10n_ae_transmission_id
+
+        def new_impact_wizard(incident=system_a, context=None):
+            action = incident.with_user(manager).action_review_impact()
+            dialog_context = {
+                **action["context"],
+                **(context or {}),
+                "allowed_company_ids": company_a.ids,
+            }
+            return (
+                self.env[action["res_model"]]
+                .with_user(manager)
+                .with_context(**dialog_context)
+                .create(
+                    {
+                        "transmission_ids": [(6, 0, issue.ids)],
+                        "source_reference": "Synthetic affected-document inventory",
+                        "review_note": "Original issue remains queued for review",
+                    }
+                )
+            )
+
+        def new_restoration_wizard(incident=system_a, context=None):
+            action = incident.with_user(manager).action_review_restoration()
+            dialog_context = {
+                **action["context"],
+                **(context or {}),
+                "allowed_company_ids": company_a.ids,
+            }
+            return (
+                self.env[action["res_model"]]
+                .with_user(manager)
+                .with_context(**dialog_context)
+                .create(
+                    {
+                        "evidence_origin": "simulated",
+                        "restored_at": "2026-12-08 10:00:00",
+                        "source_reference": "Synthetic local service-health review",
+                        "review_note": "Restoration leaves fiscal obligations pending",
+                    }
+                )
+            )
+
+        impact_wizard = new_impact_wizard()
+        restoration_wizard = new_restoration_wizard()
+        incidents = (system_a, draft_a, registration_a, system_b)
+        history_before = {
+            model: self.env[model].search([], order="id").ids
+            for model in (
+                "l10n_ae.edi.incident.impact",
+                "l10n_ae.edi.incident.restoration",
+                "l10n_ae.edi.attempt",
+                "l10n_ae.edi.event",
+            )
+        }
+        incident_before = [
+            row.read(["state", "write_date", "opened_at", "notification_due_date"])
+            for row in incidents
+        ]
+        activity_before = [row.activity_ids.ids for row in incidents]
+        invoice_before = invoice.read(
+            ["state", "amount_total", "line_ids", "write_date"]
+        )
+        issue_before = issue.read(
+            [
+                "submission_state",
+                "confirmation_state",
+                "idempotency_key",
+                "payload_hash",
+                "xml_hash",
+                "attempt_ids",
+                "remote_id",
+                "write_date",
+            ]
+        )
+
+        # Readonly users cannot launch or confirm, including sudoed recordsets.
+        for elevated in (False, True):
+            with (
+                self.subTest(readonly_launch=elevated),
+                self.cr.savepoint(),
+                self.assertRaises(AccessError),
+            ):
+                system_a.with_user(reader).sudo(elevated).action_review_impact()
+            with (
+                self.subTest(readonly_restoration_launch=elevated),
+                self.cr.savepoint(),
+                self.assertRaises(AccessError),
+            ):
+                system_a.with_user(reader).sudo(elevated).action_review_restoration()
+            with (
+                self.subTest(readonly_impact_confirm=elevated),
+                self.cr.savepoint(),
+                self.assertRaises(AccessError),
+            ):
+                impact_wizard.with_user(reader).sudo(elevated).action_confirm()
+            with (
+                self.subTest(readonly_restoration_confirm=elevated),
+                self.cr.savepoint(),
+                self.assertRaises(AccessError),
+            ):
+                restoration_wizard.with_user(reader).sudo(elevated).action_confirm()
+
+        # Public ORM retargets still require an open system-failure incident.
+        for wizard, targets in (
+            (impact_wizard, (draft_a, registration_a)),
+            (restoration_wizard, (draft_a, registration_a)),
+        ):
+            for target in targets:
+                wizard.write({"incident_id": target.id})
+                with (
+                    self.subTest(wizard=wizard._name, target=target.id),
+                    self.cr.savepoint(),
+                    self.assertRaises(UserError),
+                ):
+                    wizard.action_confirm()
+            wizard.write({"incident_id": system_a.id})
+
+        # Company B must be active even for a two-company manager using sudo.
+        for elevated in (False, True):
+            for action_name in ("action_review_impact", "action_review_restoration"):
+                with (
+                    self.subTest(foreign_launch=action_name, elevated=elevated),
+                    self.cr.savepoint(),
+                    self.assertRaises(AccessError),
+                ):
+                    getattr(
+                        system_b.with_user(manager)
+                        .with_context(allowed_company_ids=company_a.ids)
+                        .sudo(elevated),
+                        action_name,
+                    )()
+            for wizard in (impact_wizard, restoration_wizard):
+                with (
+                    self.subTest(foreign_retarget=wizard._name, elevated=elevated),
+                    self.cr.savepoint(),
+                    self.assertRaises((AccessError, UserError)),
+                ):
+                    wizard.with_user(manager).with_context(
+                        allowed_company_ids=company_a.ids
+                    ).write({"incident_id": system_b.id})
+                    wizard.with_user(manager).with_context(
+                        allowed_company_ids=company_a.ids
+                    ).sudo(elevated).action_confirm()
+                wizard.with_user(manager).with_context(
+                    allowed_company_ids=company_a.ids
+                ).write({"incident_id": system_a.id})
+
+        # Forged defaults cannot authorize a foreign restoration parent.
+        for elevated in (False, True):
+            action = system_a.action_review_restoration()
+            forged_context = {
+                **action["context"],
+                "default_incident_id": system_b.id,
+                "allowed_company_ids": company_a.ids,
+            }
+            forged_default = (
+                self.env[action["res_model"]]
+                .with_user(manager)
+                .with_context(**forged_context)
+                .sudo(elevated)
+            )
+            with (
+                self.subTest(foreign_default=elevated),
+                self.cr.savepoint(),
+                self.assertRaises(AccessError),
+            ):
+                forged_default.create(
+                    {
+                        "evidence_origin": "simulated",
+                        "restored_at": "2026-12-08 10:00:00",
+                        "source_reference": "Synthetic forged-parent attempt",
+                        "review_note": "Must fail at the public persistence boundary",
+                    }
+                ).action_confirm()
+
+        # Computed overview fields are protected at both ORM write boundaries.
+        for elevated in (False, True):
+            with (
+                self.subTest(computed_create=elevated),
+                self.cr.savepoint(),
+                self.assertRaises(UserError),
+            ):
+                self.env["l10n_ae.edi.incident"].with_user(manager).sudo(
+                    elevated
+                ).create(
+                    {
+                        "name": "Synthetic forged overview",
+                        "company_id": company_a.id,
+                        "affected_document_count": 99,
+                    }
+                )
+            with (
+                self.subTest(computed_write=elevated),
+                self.cr.savepoint(),
+                self.assertRaises(UserError),
+            ):
+                system_a.with_user(manager).sudo(elevated).write(
+                    {"pending_confirmation_count": 0}
+                )
+
+        # Neutralized copies reject both launching a dialog and confirming a previously
+        # opened dialog. Restore the database flag even if an assertion fails.
+        parameters = self.env["ir.config_parameter"].sudo()
+        neutralized_before = parameters.get_bool("database.is_neutralized")
+        self.assertFalse(neutralized_before)
+        parameters.set_bool("database.is_neutralized", True)
+        try:
+            for elevated in (False, True):
+                for action_name in (
+                    "action_review_impact",
+                    "action_review_restoration",
+                ):
+                    with (
+                        self.subTest(neutralized_launch=action_name, elevated=elevated),
+                        self.cr.savepoint(),
+                        self.assertRaises(UserError),
+                    ):
+                        getattr(system_a.sudo(elevated), action_name)()
+                with (
+                    self.subTest(neutralized_confirm="impact", elevated=elevated),
+                    self.cr.savepoint(),
+                    self.assertRaises(UserError),
+                ):
+                    impact_wizard.sudo(elevated).action_confirm()
+                with (
+                    self.subTest(neutralized_confirm="restoration", elevated=elevated),
+                    self.cr.savepoint(),
+                    self.assertRaises(UserError),
+                ):
+                    restoration_wizard.sudo(elevated).action_confirm()
+        finally:
+            parameters.set_bool("database.is_neutralized", neutralized_before)
+
+        self.assertEqual(
+            {
+                model: self.env[model].search([], order="id").ids
+                for model in history_before
+            },
+            history_before,
+        )
+        self.assertEqual(
+            [
+                row.read(["state", "write_date", "opened_at", "notification_due_date"])
+                for row in incidents
+            ],
+            incident_before,
+        )
+        self.assertEqual([row.activity_ids.ids for row in incidents], activity_before)
+        self.assertEqual(
+            invoice.read(["state", "amount_total", "line_ids", "write_date"]),
+            invoice_before,
+        )
+        self.assertEqual(
+            issue.read(
+                [
+                    "submission_state",
+                    "confirmation_state",
+                    "idempotency_key",
+                    "payload_hash",
+                    "xml_hash",
+                    "attempt_ids",
+                    "remote_id",
+                    "write_date",
+                ]
+            ),
+            issue_before,
+        )
+
+        # Same-company actions succeed and replay each stable dialog key.
+        self.assertEqual(
+            impact_wizard.with_user(manager).action_confirm()["type"],
+            "ir.actions.act_window_close",
+        )
+        impact_ids = system_a.impact_ids.ids
+        self.assertEqual(
+            impact_wizard.with_user(manager).action_confirm()["type"],
+            "ir.actions.act_window_close",
+        )
+        self.assertEqual(system_a.impact_ids.ids, impact_ids)
+        self.assertEqual(len(system_a.impact_ids), 1)
+
+        self.assertEqual(
+            restoration_wizard.with_user(manager).action_confirm()["type"],
+            "ir.actions.act_window_close",
+        )
+        restoration_ids = system_a.restoration_ids.ids
+        self.assertEqual(
+            restoration_wizard.with_user(manager).action_confirm()["type"],
+            "ir.actions.act_window_close",
+        )
+        self.assertEqual(system_a.restoration_ids.ids, restoration_ids)
+        self.assertEqual(len(system_a.restoration_ids), 1)
+        self.assertEqual(system_a.impact_ids.recorded_by_id, manager)
+        self.assertEqual(system_a.restoration_ids.recorded_by_id, manager)
+        self.assertEqual(
+            {
+                model: self.env[model].search([], order="id").ids
+                for model in ("l10n_ae.edi.attempt", "l10n_ae.edi.event")
+            },
+            {
+                model: history_before[model]
+                for model in ("l10n_ae.edi.attempt", "l10n_ae.edi.event")
+            },
+        )
+        self.assertEqual(
+            invoice.read(["state", "amount_total", "line_ids", "write_date"]),
+            invoice_before,
+        )
+        self.assertEqual(
+            issue.read(
+                [
+                    "submission_state",
+                    "confirmation_state",
+                    "idempotency_key",
+                    "payload_hash",
+                    "xml_hash",
+                    "attempt_ids",
+                    "remote_id",
+                    "write_date",
+                ]
+            ),
+            issue_before,
+        )
+
+        overview = (
+            system_a.with_user(reader)
+            .with_context(allowed_company_ids=company_a.ids)
+            .read(
+                [
+                    "affected_transmission_ids",
+                    "affected_document_count",
+                    "pending_submission_count",
+                    "pending_confirmation_count",
+                    "restoration_reviewed",
+                ]
+            )[0]
+        )
+        self.assertEqual(overview["affected_document_count"], 1)
+        self.assertEqual(overview["affected_transmission_ids"], issue.ids)
+        self.assertEqual(overview["pending_submission_count"], 1)
+        self.assertEqual(overview["pending_confirmation_count"], 1)
+        self.assertTrue(overview["restoration_reviewed"])
+
+    @freeze_time("2026-12-08 12:00:00")
     def test_manager_reviews_impact_and_restoration_in_native_dialogs(self):
         manager = new_test_user(
             self.env,
