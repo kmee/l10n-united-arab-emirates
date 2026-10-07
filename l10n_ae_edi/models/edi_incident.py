@@ -493,6 +493,10 @@ class UaeEdiIncident(models.Model):
                     self.env._("The incident conflicts with its reviewed calendar.")
                 )
         due = self._reviewed_notification_due_date()
+        if not self.calendar_version_id:
+            raise ValidationError(
+                self.env._("Select a reviewed calendar version before opening.")
+            )
         owner = self.responsible_id.with_user(self.env.uid)
         if (
             not owner

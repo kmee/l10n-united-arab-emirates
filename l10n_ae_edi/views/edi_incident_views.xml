@@ -103,6 +103,15 @@
                     >
                         This case was already open without a retained original before the intake upgrade. Its reviewed deadline and history are preserved. The upgrade does not fabricate or verify an FTA confirmation.
                     </p>
+                    <p class="text-muted" invisible="state != 'draft'">
+                        Select a reviewed calendar version before opening. Typed calendar details alone do not approve a version.
+                    </p>
+                    <p
+                        class="text-muted"
+                        invisible="state != 'open' or calendar_version_id"
+                    >
+                        This historical incident retains its reviewed inline calendar. Its deadline and opening history are preserved; no calendar version was assigned retroactively.
+                    </p>
                     <group string="Reviewed UAE Calendar">
                         <field
                             name="calendar_version_id"

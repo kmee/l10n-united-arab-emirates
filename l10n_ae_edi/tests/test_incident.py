@@ -58,7 +58,7 @@ class TestUaeIncident(AccountTestInvoicingCommon):
             .with_user(manager)
             .create(
                 {
-                    "name": "Synthetic complete inline calendar without approved version",
+                    "name": "Synthetic inline calendar without reviewed version",
                     "affected_roles": "issuer",
                     "occurrence_at": "2026-11-30 21:30:00",
                     "detected_at": "2026-12-01 08:00:00",
@@ -117,7 +117,7 @@ class TestUaeIncident(AccountTestInvoicingCommon):
                     "calendar_end": "2026-12-10",
                     "calendar_holidays": ["2026-12-02", "2026-12-03"],
                     "source_reference": "Synthetic source; no official holiday claim",
-                    "source_snapshot": "Synthetic Dec2/3 exclusions; Saturday/Sunday weekend.",
+                    "source_snapshot": "Synthetic Dec2/3 exclusions; weekend Sat/Sun.",
                     "review_note": "Arithmetic fixture only",
                 }
             )
