@@ -8425,6 +8425,24 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
             (100, 5, 105),
         )
 
+    def test_native_cancel_does_not_implicitly_correct_a_prepared_queued_issue(self):
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {"name": "Synthetic native Cancel sandbox"}
+        )
+        invoice = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
+        ).with_user(self.simple_accountman)
+        invoice.l10n_ae_binding_id = binding
+        invoice.action_l10n_ae_prepare()
+        original = invoice.l10n_ae_transmission_id
+        with self.assertRaisesRegex(UserError, "Reconcile the frozen UAE"):
+            invoice.button_cancel()
+        self.assertEqual(invoice.state, "posted")
+        self.assertEqual(invoice.l10n_ae_transmission_id, original)
+        self.assertFalse(invoice.l10n_ae_correction_id)
+        self.assertFalse(original.local_correction_id)
+        self.assertFalse(original.attempt_ids)
+
     def test_native_reset_rolls_back_queued_history_when_accounting_refuses_batch(self):
         binding = self.env["l10n_ae.edi.binding"].create(
             {"name": "Synthetic native Reset accounting lock sandbox"}
