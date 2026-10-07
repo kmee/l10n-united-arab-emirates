@@ -15,6 +15,40 @@ from odoo.tools.binary import BinaryBytes
 from odoo.addons.account.tests.common import AccountTestInvoicingCommon
 
 
+def select_reviewed_calendar_fixture(incident):
+    """Explicitly review the synthetic fixture through the public manager action."""
+    if incident.calendar_version_id:
+        return incident.calendar_version_id
+    assert incident.state == "draft"
+    manager = incident.env.user
+    assert manager.active and manager.has_group("account.group_account_manager")
+    calendar = incident.env["l10n_ae.edi.calendar"].create(
+        {
+            "name": "Synthetic calendar fixture for incident " + str(incident.id),
+            "company_id": incident.company_id.id,
+            "version": f"{incident.calendar_version}-fixture-{incident.id}",
+            "calendar_start": incident.calendar_start,
+            "calendar_end": incident.calendar_end,
+            "calendar_holidays": incident.calendar_holidays or [],
+            "source_reference": incident.calendar_source,
+            "source_snapshot": json.dumps(
+                {
+                    "scope": "Synthetic fixture only; no official holiday assertion",
+                    "source": incident.calendar_source,
+                    "inline_version": incident.calendar_version,
+                    "holidays": incident.calendar_holidays or [],
+                },
+                sort_keys=True,
+            ),
+            "review_note": incident.review_note,
+        }
+    )
+    assert calendar.action_approve()
+    assert calendar.approved_by_id == manager and calendar.approved_at
+    incident.write({"calendar_version_id": calendar.id})
+    return calendar
+
+
 def open_recovery_fixture(incident):
     if incident.incident_kind == "registration_change":
         incident.record_fta_confirmation(
@@ -34,6 +68,7 @@ def open_recovery_fixture(incident):
                 ).decode(),
             }
         )
+    select_reviewed_calendar_fixture(incident)
     incident.action_open()
 
 
@@ -303,6 +338,7 @@ class TestUaeIncident(AccountTestInvoicingCommon):
                 }
             )
         )
+        select_reviewed_calendar_fixture(incident)
         before = incident.read(
             [
                 "state",
@@ -667,6 +703,7 @@ class TestUaeIncident(AccountTestInvoicingCommon):
             confirmation.write({"external_reference": "Changed"})
         with self.cr.savepoint(), self.assertRaises((AccessError, UserError)):
             confirmation.unlink()
+        select_reviewed_calendar_fixture(incident)
         self.assertTrue(incident.action_open())
         self.assertEqual(incident.notification_due_date, date(2026, 12, 10))
         self.assertEqual(incident.activity_ids.date_deadline, date(2026, 12, 10))
@@ -739,6 +776,7 @@ class TestUaeIncident(AccountTestInvoicingCommon):
                 }
             )
         )
+        select_reviewed_calendar_fixture(incident)
         incident.action_open()
         basis = incident.read(
             ["state", "opened_at", "notification_due_date", "write_date"]
@@ -871,6 +909,7 @@ class TestUaeIncident(AccountTestInvoicingCommon):
                 }
             )
         )
+        select_reviewed_calendar_fixture(incident)
         incident.action_open()
         incident.record_affected_transmissions(
             {
@@ -1443,6 +1482,7 @@ class TestUaeIncident(AccountTestInvoicingCommon):
                 }
             )
         )
+        select_reviewed_calendar_fixture(incident)
         incident.action_open()
         invoice_before = invoice.read(
             ["state", "amount_total", "line_ids", "write_date"]
@@ -1590,6 +1630,7 @@ class TestUaeIncident(AccountTestInvoicingCommon):
             incident.detected_at, fields.Datetime.to_datetime("2026-12-01 08:00:00")
         )
         self.assertFalse(incident.notification_due_date)
+        select_reviewed_calendar_fixture(incident)
         self.assertTrue(incident.action_open())
         self.assertEqual(incident.notification_due_date, date(2026, 12, 7))
         self.assertEqual(len(incident.activity_ids), 1)
@@ -1631,6 +1672,7 @@ class TestUaeIncident(AccountTestInvoicingCommon):
                 }
             )
         )
+        select_reviewed_calendar_fixture(incident)
         with self.cr.savepoint(), self.assertRaises(ValidationError):
             incident.action_open()
         self.assertEqual(incident.state, "draft")
@@ -1713,6 +1755,7 @@ class TestUaeIncident(AccountTestInvoicingCommon):
                 }
             )
         )
+        select_reviewed_calendar_fixture(incident)
         incident.action_open()
         basis = incident.read(
             [
@@ -1893,6 +1936,7 @@ class TestUaeIncident(AccountTestInvoicingCommon):
             captured.fta_confirmation_received_at = fields.Datetime.to_datetime(
                 "2026-12-08 10:00:00"
             )
+        select_reviewed_calendar_fixture(incident)
         incident.action_open()
         self.assertEqual(incident.notification_due_date, date(2026, 12, 10))
         self.assertFalse(incident.occurrence_at)
@@ -2021,6 +2065,7 @@ class TestUaeIncident(AccountTestInvoicingCommon):
                 self.assertRaises(AccessError),
             ):
                 incident.with_user(reader).sudo(elevated).action_open()
+        select_reviewed_calendar_fixture(incident)
         self.assertTrue(incident.action_open())
         self.assertEqual(incident.state, "open")
         self.assertEqual(incident.notification_due_date, date(2026, 12, 7))
@@ -2125,6 +2170,7 @@ class TestUaeIncident(AccountTestInvoicingCommon):
                     ).decode(),
                 }
             )
+            select_reviewed_calendar_fixture(incident)
             incident.action_open()
             cases.append(incident)
         case_a, case_b = cases
