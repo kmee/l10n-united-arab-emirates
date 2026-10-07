@@ -5365,6 +5365,180 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
             {model: self.env[model].search_count([]) for model in move_counts},
             move_counts,
         )
+        return content, receiver, binding
+
+    def test_received_free_zone_summary_rejects_invalid_required_facts(self):
+        credit_content, receiver, binding = self._assert_received_summary_credit(
+            expected_flags="10010000",
+            free_zone=True,
+            beneficiary_id="1000000003",
+        )
+        source = self.init_invoice(
+            "out_invoice", amounts=[40, 60], taxes=self.tax_sale_a, post=True
+        )
+        source.write(
+            {
+                "l10n_ae_summary": True,
+                "l10n_ae_free_zone": True,
+                "l10n_ae_beneficiary_id": "1000000003",
+                "l10n_ae_invoicing_period_start": "2019-01-01",
+                "l10n_ae_invoicing_period_end": "2019-01-31",
+                "l10n_ae_fiscal_uuid": "cccccccf-3333-4333-8333-333333333333",
+            }
+        )
+        invoice_content = etree.tostring(self._received_test_xml(source))
+        content_by_type = {
+            "CreditNote381": credit_content,
+            "Invoice380": invoice_content,
+        }
+        expected_flags = {
+            "missing-beneficiary": "ibr-007-ae",
+            "missing-period": "ibr-138-ae",
+            "reversed-period": "ibr-029",
+        }
+        model_names = (
+            "account.move",
+            "account.move.line",
+            "l10n_ae.edi.transmission",
+            "l10n_ae.edi.attempt",
+            "l10n_ae.edi.event",
+        )
+        baseline_ids = {
+            model: self.env[model].search([], order="id").ids for model in model_names
+        }
+        ledger_fields = [
+            "account_id",
+            "partner_id",
+            "currency_id",
+            "date",
+            "debit",
+            "credit",
+            "balance",
+            "amount_currency",
+            "tax_ids",
+            "write_date",
+        ]
+        baseline_ledger = (
+            self.env["account.move.line"].search([], order="id").read(ledger_fields)
+        )
+        baseline_move_timestamps = (
+            self.env["account.move"]
+            .search([], order="id")
+            .read(["create_date", "write_date"])
+        )
+        validator = OfflinePintValidator(
+            "/opt/uae-addons/.runtime/normative",
+            ruleset="kmee-pint-ae-1.0.4-ubl-2.1",
+        )
+        for document_type, valid_content in content_by_type.items():
+            control_tree = etree.fromstring(valid_content)
+            self.assertEqual(
+                control_tree.findtext("cbc:ProfileExecutionID", namespaces=NS),
+                "10010000",
+            )
+            expected_type = "380" if document_type == "Invoice380" else "381"
+            type_path = (
+                "cbc:InvoiceTypeCode"
+                if document_type == "Invoice380"
+                else "cbc:CreditNoteTypeCode"
+            )
+            self.assertEqual(
+                control_tree.findtext(type_path, namespaces=NS), expected_type
+            )
+            valid_control_report = validator.validate(valid_content)
+            self.assertTrue(valid_control_report["valid"], valid_control_report)
+            self.assertEqual(
+                valid_control_report["ruleset"], "kmee-pint-ae-1.0.4-ubl-2.1"
+            )
+            for vector_index, (vector, expected_rule) in enumerate(
+                expected_flags.items(), start=1
+            ):
+                variant_index = (
+                    0 if document_type == "CreditNote381" else 3
+                ) + vector_index
+                tree = etree.fromstring(valid_content)
+                variant_uuid = f"eeeeee{variant_index:02d}-6666-4666-8666-666666666666"
+                uuid_node = tree.find("cbc:UUID", NS)
+                self.assertIsNotNone(uuid_node)
+                uuid_node.text = variant_uuid
+                if vector == "missing-beneficiary":
+                    beneficiary = tree.find("cac:BuyerCustomerParty", NS)
+                    self.assertIsNotNone(beneficiary)
+                    tree.remove(beneficiary)
+                elif vector == "missing-period":
+                    period = tree.find("cac:InvoicePeriod", NS)
+                    self.assertIsNotNone(period)
+                    tree.remove(period)
+                else:
+                    period = tree.find("cac:InvoicePeriod", NS)
+                    self.assertIsNotNone(period)
+                    period.find("cbc:StartDate", NS).text = "2019-01-31"
+                    period.find("cbc:EndDate", NS).text = "2019-01-01"
+                content = etree.tostring(tree, encoding="UTF-8", xml_declaration=True)
+                original_hash = hashlib.sha256(content).hexdigest()
+                formal_report = validator.validate(content)
+                self.assertTrue(formal_report["xsd_valid"], formal_report)
+                self.assertFalse(formal_report["valid"], formal_report)
+                self.assertEqual(formal_report["ruleset"], "kmee-pint-ae-1.0.4-ubl-2.1")
+                failures = {
+                    failure["code"]
+                    for layer in formal_report["layers"]
+                    for failure in layer["failures"]
+                }
+                self.assertEqual(failures, {expected_rule}, formal_report)
+                inbox = receiver.receive_controlled_document(
+                    binding.id,
+                    f"invalid-{document_type}-{vector}",
+                    content,
+                )
+                for _attempt in range(2):
+                    self.assertFalse(inbox.action_process())
+                    self.assertEqual(inbox.state, "review")
+                    self.assertFalse(inbox.move_id)
+                    self.assertEqual(inbox.original_xml.content, content)
+                    self.assertEqual(inbox.xml_hash, original_hash)
+                history = inbox.processing_history_ids.sorted("id")
+                self.assertEqual(len(history), 2)
+                report_texts = [row.validation_report for row in history]
+                report_hashes = [row.validation_report_hash for row in history]
+                self.assertTrue(all(report_texts))
+                for index, report_text in enumerate(report_texts):
+                    self.assertEqual(
+                        report_hashes[index],
+                        hashlib.sha256(report_text.encode("utf-8")).hexdigest(),
+                    )
+                    retained_report = json.loads(report_text)
+                    self.assertEqual(
+                        retained_report["ruleset"],
+                        "kmee-pint-ae-1.0.4-ubl-2.1",
+                    )
+                    self.assertTrue(retained_report["xsd_valid"])
+                    self.assertFalse(retained_report["valid"])
+                    retained_failures = {
+                        failure["code"]
+                        for layer in retained_report["layers"]
+                        for failure in layer["failures"]
+                    }
+                    self.assertEqual(retained_failures, {expected_rule})
+                self.assertEqual(
+                    {
+                        model: self.env[model].search([], order="id").ids
+                        for model in model_names
+                    },
+                    baseline_ids,
+                )
+                self.assertEqual(
+                    self.env["account.move.line"]
+                    .search([], order="id")
+                    .read(ledger_fields),
+                    baseline_ledger,
+                )
+                self.assertEqual(
+                    self.env["account.move"]
+                    .search([], order="id")
+                    .read(["create_date", "write_date"]),
+                    baseline_move_timestamps,
+                )
 
     def test_received_supplier_endpoint_must_match_the_known_vat_partner(self):
         tree = self._received_test_xml()
