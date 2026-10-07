@@ -1,6 +1,7 @@
 # Copyright 2026 KMEE
 # License AGPL-3.0 or later (https://www.gnu.org/licenses/agpl).
 import json
+from decimal import Decimal
 
 from lxml import etree
 
@@ -43,6 +44,142 @@ class TestUaeProductClassification(AccountTestInvoicingCommon):
                     "additional_identifiers": {"AE_TL": "SYNTH-PRODUCT-" + label},
                 }
             )
+
+    def test_native_product_form_preserves_reviewed_rcm_nature_in_frozen_ae_invoice(
+        self,
+    ):
+        # Declared synthetic AE supply: net AED100, offset 5% VAT effects,
+        # VAT due0, payable100. No legal RCM eligibility is inferred.
+        self.simple_accountman.group_ids |= self.env.ref(
+            "product.group_product_manager"
+        )
+        products = self.env["product.template"].with_user(self.simple_accountman)
+        form = Form(products)
+        form.name = "Synthetic reviewed electronic goods"
+        form.type = "consu"
+        form.list_price = 100
+        form.barcode = "6291041500213"
+        form.l10n_ae_classification_code = "999999"
+        form.l10n_ae_edi_rcm_nature_code = "DL8.48.8.2"
+        template = form.save()
+        product = template.product_variant_id
+        self.assertEqual(product.l10n_ae_edi_rcm_nature_code, "DL8.48.8.2")
+        # Native tax repartition: the two 5% effects offset each other.
+        tax = self.tax_sale_a.copy(
+            {
+                "name": "Synthetic declared AE category",
+                "amount": 5,
+                "ubl_cii_tax_category_code": "AE",
+                "invoice_repartition_line_ids": [
+                    Command.clear(),
+                    Command.create({"repartition_type": "base", "factor_percent": 100}),
+                    Command.create({"repartition_type": "tax", "factor_percent": 100}),
+                    Command.create({"repartition_type": "tax", "factor_percent": -100}),
+                ],
+                "refund_repartition_line_ids": [
+                    Command.clear(),
+                    Command.create({"repartition_type": "base", "factor_percent": 100}),
+                    Command.create({"repartition_type": "tax", "factor_percent": 100}),
+                    Command.create({"repartition_type": "tax", "factor_percent": -100}),
+                ],
+            }
+        )
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {
+                "name": "Synthetic reverse-charge sandbox",
+                "fiscal_uuid_policy": "controlled_local",
+            }
+        )
+        invoice = self.init_invoice("out_invoice", amounts=[100], taxes=tax)
+        invoice.invoice_line_ids.product_id = product
+        invoice.l10n_ae_binding_id = binding
+        invoice = invoice.with_user(self.simple_accountman)
+        self.assertFalse(invoice.env.su)
+        invoice.action_post()
+        self.assertEqual(
+            (invoice.amount_untaxed, invoice.amount_tax, invoice.amount_total),
+            (100, 0, 100),
+        )
+        ledger = invoice.line_ids.read(
+            [
+                "account_id",
+                "currency_id",
+                "debit",
+                "credit",
+                "balance",
+                "tax_ids",
+                "write_date",
+            ]
+        )
+        invoice.action_l10n_ae_prepare()
+        issue = invoice.l10n_ae_transmission_id
+        tree = etree.fromstring(issue.xml_content.encode())
+        item = tree.find("cac:InvoiceLine/cac:Item", NS)
+        self.assertEqual(
+            item.xpath("cac:ClassifiedTaxCategory/cbc:ID/text()", namespaces=NS), ["AE"]
+        )
+        self.assertEqual(
+            item.xpath(
+                "cac:CommodityClassification/cbc:NatureCode/text()", namespaces=NS
+            ),
+            ["DL8.48.8.2"],
+        )
+        standard_id = item.find("cac:StandardItemIdentification/cbc:ID", NS)
+        self.assertEqual(
+            (standard_id.text, standard_id.attrib),
+            ("6291041500213", {"schemeID": "0160"}),
+        )
+        self.assertEqual(
+            json.loads(issue.payload)["lines"][0]["item_classification"][
+                "rcm_nature_code"
+            ],
+            "DL8.48.8.2",
+        )
+        self.assertEqual(
+            Decimal(
+                tree.findtext(
+                    "cac:InvoiceLine/cac:ItemPriceExtension/cac:TaxTotal/cbc:TaxAmount",
+                    namespaces=NS,
+                )
+            ),
+            Decimal(0),
+        )
+        report = invoice.validate_l10n_ae_pint()
+        self.assertTrue(report["valid"], report)
+        original = issue.read(
+            ["payload", "payload_hash", "xml_content", "xml_hash", "idempotency_key"]
+        )
+        product.l10n_ae_edi_rcm_nature_code = "DL8.48.3.1"
+        invoice.action_l10n_ae_prepare()
+        self.assertEqual(invoice.preview_l10n_ae_pint(), original[0]["xml_content"])
+        self.assertEqual(
+            issue.read(
+                [
+                    "payload",
+                    "payload_hash",
+                    "xml_content",
+                    "xml_hash",
+                    "idempotency_key",
+                ]
+            ),
+            original,
+        )
+        self.assertEqual(
+            invoice.line_ids.read(
+                [
+                    "account_id",
+                    "currency_id",
+                    "debit",
+                    "credit",
+                    "balance",
+                    "tax_ids",
+                    "write_date",
+                ]
+            ),
+            ledger,
+        )
+        self.assertFalse(issue.attempt_ids)
+        self.assertFalse(issue.event_ids)
 
     def test_service_product_preserves_reviewed_sac_in_frozen_xml_and_snapshot(self):
         # BTAE-13/17, IBR-185/189: S requires a separate SAC identifier.
