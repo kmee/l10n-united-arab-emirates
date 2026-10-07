@@ -4,10 +4,31 @@
 import hashlib
 
 from odoo import api, models
+from odoo.exceptions import UserError
 
 
 class AccountMoveSend(models.AbstractModel):
     _inherit = "account.move.send"
+
+    @api.model
+    def _get_default_sending_settings(self, move, from_cron=False, **custom_settings):
+        settings = super()._get_default_sending_settings(
+            move, from_cron=from_cron, **custom_settings
+        )
+        # Check effective explicit/default/cron settings before generation starts.
+        # An already frozen fiscal issue cannot silently change Send's format.
+        if move.l10n_ae_transmission_id and settings.get("invoice_edi_format") not in (
+            None,
+            False,
+            "kmee_ae_pint",
+        ):
+            raise UserError(
+                self.env._(
+                    "The selected eInvoice format conflicts with "
+                    "the frozen UAE PINT-AE issue."
+                )
+            )
+        return settings
 
     @api.model
     def _get_default_invoice_edi_format(self, move, **kwargs):
