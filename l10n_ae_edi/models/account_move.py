@@ -1572,6 +1572,8 @@ class AccountMove(models.Model):
                     not agreement
                     or not agreement.active
                     or not (agreement.scope or "").strip()
+                    or not (agreement.name or "").strip()
+                    or not (agreement.onboarding_reference or "").strip()
                     or agreement.local_role != "buyer"
                     or agreement.company_id != move.company_id
                     or agreement.partner_id != move.partner_id.commercial_partner_id
@@ -1583,7 +1585,8 @@ class AccountMove(models.Model):
                     raise UserError(
                         self.env._(
                             "Select an active self-billing agreement for this company, "
-                            "supplier and invoice date, with a reviewed scope."
+                            "supplier and invoice date, with a reviewed scope, "
+                            "agreement reference and onboarding evidence."
                         )
                     )
                 parties = (
