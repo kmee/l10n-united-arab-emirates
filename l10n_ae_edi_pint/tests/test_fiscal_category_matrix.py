@@ -1220,12 +1220,12 @@ class TestUaeFiscalCategoryMatrix(AccountTestInvoicingCommon):
         self.assertFalse(invoice.l10n_ae_transmission_ids)
         self.assertFalse(tax.ubl_cii_tax_exemption_reason_code)
         self.env.company.l10n_ae_edi_auto_prepare = True
-        with self.assertRaisesRegex(UserError, "IBR-167-AE"):
-            invoice.action_post()
-        self.assertEqual(invoice.state, "draft")
-        self.assertFalse(invoice.l10n_ae_transmission_ids)
-        self.env.company.l10n_ae_edi_auto_prepare = False
         invoice.action_post()
+        self.assertEqual(invoice.state, "posted")
+        self.assertEqual(invoice.l10n_ae_preparation_state, "review")
+        self.assertIn("IBR-167-AE", invoice.l10n_ae_preparation_error)
+        self.assertFalse(invoice.l10n_ae_transmission_ids)
+        self.assertFalse(invoice.l10n_ae_fiscal_uuid)
         ledger = invoice.line_ids.read(
             ["debit", "credit", "amount_currency", "create_date", "write_date"]
         )

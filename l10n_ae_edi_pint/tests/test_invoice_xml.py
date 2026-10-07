@@ -7574,11 +7574,16 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         )
         self.assertEqual(credit.l10n_ae_credit_reason, "DL8.61.1.C")
         self.assertFalse(credit.l10n_ae_selfbilling_agreement_id)
-        with self.assertRaisesRegex(UserError, "self-billing agreement"):
-            credit.action_post()
-        self.assertEqual(credit.state, "draft")
+        credit.action_post()
+        self.assertEqual(credit.state, "posted")
+        self.assertEqual(credit.l10n_ae_preparation_state, "review")
+        self.assertIn("self-billing agreement", credit.l10n_ae_preparation_error)
         self.assertFalse(credit.l10n_ae_fiscal_uuid)
         self.assertFalse(credit.l10n_ae_transmission_id)
+        with self.assertRaisesRegex(UserError, "self-billing agreement"):
+            credit.action_l10n_ae_prepare()
+        credit.button_draft()
+        self.assertEqual(credit.state, "draft")
         credit.l10n_ae_selfbilling_agreement_id = agreement
         credit.invoice_line_ids.price_unit = 40
         credit.action_post()
