@@ -1164,6 +1164,42 @@ class AccountMove(models.Model):
                 )
             )
 
+    def _check_l10n_ae_product_classification(self):
+        self.ensure_one()
+        for line in self.invoice_line_ids.filtered(
+            lambda item: item.display_type in (False, "product") and item.product_id
+        ):
+            classification = line.product_id._l10n_ae_item_classification()
+            item_type = classification["type"]
+            required = (
+                (item_type in ("G", "B"), "hs_code", "HS", "IBR-184-AE"),
+                (item_type in ("S", "B"), "sac_code", "SAC", "IBR-185-AE"),
+            )
+            for applies, key, label, rule in required:
+                if applies and not (classification[key] or "").strip():
+                    raise UserError(
+                        self.env._(
+                            "%(rule)s: review the %(label)s identifier for product "
+                            "%(product)s before preparing the UAE e-invoice.",
+                            rule="IBR-186-AE" if item_type == "B" else rule,
+                            label=label,
+                            product=line.product_id.display_name,
+                        )
+                    )
+            if (
+                item_type in ("S", "B")
+                and not (classification["sac_scheme_version"] or "").strip()
+            ):
+                # Reviewed master-data policy follows the BTAE-17 syntax. The
+                # pinned 1.0.4 Schematron does not enforce this version attribute.
+                raise UserError(
+                    self.env._(
+                        "Review the SAC scheme version for product %(product)s "
+                        "before preparing the UAE e-invoice.",
+                        product=line.product_id.display_name,
+                    )
+                )
+
     def action_l10n_ae_validate(self):
         for move in self:
             if move.l10n_ae_received_document:
@@ -1220,6 +1256,7 @@ class AccountMove(models.Model):
             move._check_l10n_ae_principal_id()
             move._l10n_ae_destination_override()
             move._check_l10n_ae_credit_references()
+            move._check_l10n_ae_product_classification()
             if move.currency_id.name != "AED" and not (
                 move.l10n_ae_tax_exchange_rate
                 and move.l10n_ae_tax_exchange_date
