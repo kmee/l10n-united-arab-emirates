@@ -1067,6 +1067,18 @@ class AccountMove(models.Model):
                     )
                 )
 
+    def _check_l10n_ae_invoicing_period(self):
+        self.ensure_one()
+        if self.l10n_ae_summary and not (
+            self.l10n_ae_invoicing_period_start or self.l10n_ae_invoicing_period_end
+        ):
+            raise UserError(
+                self.env._(
+                    "IBR-138-AE: a Summary invoice requires a reviewed "
+                    "invoicing period before preparation."
+                )
+            )
+
     def action_l10n_ae_validate(self):
         for move in self:
             if move.l10n_ae_received_document:
@@ -1112,6 +1124,7 @@ class AccountMove(models.Model):
                         "the e-invoice. Free text does not replace the fiscal code."
                     )
                 )
+            move._check_l10n_ae_invoicing_period()
             if move.l10n_ae_free_zone and not move.l10n_ae_beneficiary_id:
                 raise UserError(
                     self.env._(
