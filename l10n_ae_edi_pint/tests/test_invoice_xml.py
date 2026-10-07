@@ -7205,6 +7205,67 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         self.assertFalse(transmission.event_ids)
         self.assertEqual((invoice.amount_tax, invoice.amount_total), (5, 105))
 
+    def test_summary_without_period_is_refused_before_an_issue_is_frozen(self):
+        invoice = (
+            self.init_invoice(
+                "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
+            )
+            .with_user(self.simple_accountman)
+            .with_context(allowed_company_ids=[self.env.company.id])
+        )
+        self.assertFalse(invoice.env.su)
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {"name": "Synthetic Summary missing-period review"}
+        )
+        invoice.write(
+            {
+                "l10n_ae_summary": True,
+                "l10n_ae_binding_id": binding.id,
+                "l10n_ae_fiscal_uuid": "cccccccb-1111-4111-8111-111111111111",
+            }
+        )
+        self.assertFalse(invoice.l10n_ae_invoicing_period_start)
+        self.assertFalse(invoice.l10n_ae_invoicing_period_end)
+        invoice_fields = ["state", "l10n_ae_fiscal_uuid", "write_date"]
+        ledger_fields = [
+            "account_id",
+            "partner_id",
+            "currency_id",
+            "date",
+            "debit",
+            "credit",
+            "balance",
+            "amount_currency",
+            "tax_ids",
+            "write_date",
+        ]
+        before = invoice.read(invoice_fields)
+        ledger = invoice.line_ids.sorted("id").read(ledger_fields)
+        with self.assertRaisesRegex(UserError, "IBR-138-AE.*invoicing period"):
+            invoice.action_l10n_ae_prepare()
+        self.assertFalse(invoice.l10n_ae_transmission_id)
+        self.assertFalse(invoice.l10n_ae_transmission_ids)
+        self.assertEqual(invoice.read(invoice_fields), before)
+        self.assertEqual(invoice.line_ids.sorted("id").read(ledger_fields), ledger)
+        invoice.write(
+            {
+                "l10n_ae_invoicing_period_start": "2019-01-01",
+                "l10n_ae_invoicing_period_end": "2019-01-31",
+            }
+        )
+        invoice.action_l10n_ae_prepare()
+        issue = invoice.l10n_ae_transmission_id
+        self.assertEqual(len(invoice.l10n_ae_transmission_ids), 1)
+        self.assertEqual(issue.submission_state, "queued")
+        self.assertFalse(issue.attempt_ids)
+        self.assertFalse(issue.event_ids)
+        report = invoice.validate_l10n_ae_pint()
+        self.assertTrue(report["valid"], report)
+        self.assertEqual(
+            (invoice.amount_untaxed, invoice.amount_tax, invoice.amount_total),
+            (100, 5, 105),
+        )
+
     def test_summary_tax_invoice_serializes_reviewed_invoice_period(self):
         company = self.env.company
         self.assertEqual((company.currency_id.name, self.tax_sale_a.amount), ("AED", 5))
