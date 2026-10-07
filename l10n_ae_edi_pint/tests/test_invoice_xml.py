@@ -7837,6 +7837,20 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         )
         return bill, agreement
 
+    def test_selfbilling_requires_nonblank_agreement_reference_and_onboarding(self):
+        bill, agreement = self._selfbilling_bill_with_agreement()
+        bill = bill.with_user(self.simple_accountman)
+        self.assertFalse(bill.env.su)
+        for name in ("name", "onboarding_reference"):
+            with self.subTest(field=name):
+                original = agreement[name]
+                agreement.with_user(self.simple_accountman).write({name: " \t\n "})
+                with self.assertRaisesRegex(UserError, "self-billing agreement"):
+                    bill.action_l10n_ae_validate()
+                self.assertFalse(bill.l10n_ae_transmission_ids)
+                agreement.with_user(self.simple_accountman).write({name: original})
+                bill.action_l10n_ae_validate()
+
     def test_self_billed_purchase_freezes_buyer_issuer_and_supplier_roles(self):
         bill, agreement = self._selfbilling_bill_with_agreement()
         bill.action_post()
