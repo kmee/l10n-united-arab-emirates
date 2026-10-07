@@ -1296,6 +1296,46 @@ class TestUaeIncident(AccountTestInvoicingCommon):
             form.source_reference = "MD243 Art5.3; reviewed Art49 day exclusion"
             form.review_note = "Dubai Dec1 receipt; Dec4,7,8,9,10 are days1-5"
         incident = form.record
+        confirmation_action = incident.action_record_fta_confirmation()
+        confirmation_model = (
+            self.env[confirmation_action["res_model"]]
+            .with_user(manager)
+            .with_context(**confirmation_action["context"])
+        )
+        original = b"Synthetic FTA registration confirmation\n"
+        with Form(confirmation_model, view=confirmation_action["view_id"]) as capture:
+            capture.evidence_origin = "simulated"
+            capture.received_at = fields.Datetime.to_datetime("2026-11-30 21:30:00")
+            capture.external_reference = "Synthetic FTA registration receipt B"
+            capture.source_reference = "Supplied synthetic FTA original"
+            capture.review_note = "Reviewed receipt; no verified authorship or delivery"
+            capture.document_filename = "synthetic-fta-confirmation.txt"
+            capture.document = BinaryBytes(original)
+        confirmation_wizard = capture.record
+        self.assertEqual(
+            confirmation_wizard.action_confirm(),
+            {"type": "ir.actions.act_window_close"},
+        )
+        confirmation = incident.fta_confirmation_ids
+        self.assertEqual(len(confirmation), 1)
+        self.assertEqual(confirmation.document.content, original)
+        self.assertEqual(
+            confirmation.document_sha256,
+            "203b34111aa50c86b0fafe85c264901e9d46c29363082ed659e584822730b639",
+        )
+        self.assertEqual(confirmation.recorded_by_id, manager)
+        self.assertEqual(
+            confirmation_wizard.action_confirm(),
+            {"type": "ir.actions.act_window_close"},
+        )
+        self.assertEqual(incident.fta_confirmation_ids, confirmation)
+        self.assertFalse(incident.notice_ids)
+        captured = Form(incident, view=view)
+        self.assertEqual(len(captured.fta_confirmation_ids), 1)
+        with self.assertRaises(AssertionError):
+            captured.fta_confirmation_received_at = fields.Datetime.to_datetime(
+                "2026-12-08 10:00:00"
+            )
         incident.action_open()
         self.assertEqual(incident.notification_due_date, date(2026, 12, 10))
         self.assertFalse(incident.occurrence_at)
