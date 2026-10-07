@@ -1,6 +1,7 @@
 # Copyright 2026 KMEE
 # License AGPL-3.0 or later (https://www.gnu.org/licenses/agpl).
 import base64
+import json
 from datetime import date
 
 from freezegun import freeze_time
@@ -20,6 +21,142 @@ class TestUaeIncident(AccountTestInvoicingCommon):
     @AccountTestInvoicingCommon.setup_country("ae")
     def setUpClass(cls):
         super().setUpClass()
+
+    @freeze_time("2026-12-08 12:00:00")
+    def test_manager_retains_reviewed_outage_impacts_without_new_submissions(self):
+        manager = new_test_user(
+            self.env,
+            login="synthetic-outage-impact-manager",
+            groups="account.group_account_manager",
+            company_ids=self.env.company.ids,
+            company_id=self.env.company.id,
+        )
+        self.env.company.write(
+            {"l10n_ae_tin": "1000000001", "l10n_ae_tin_confirmed": True}
+        )
+        self.partner_a.country_id = self.env.ref("base.ae")
+        if "routing_scheme" in self.env["res.partner"]._fields:
+            self.env.company.partner_id.write(
+                {"routing_scheme": "0235", "routing_endpoint": "1000000001"}
+            )
+            self.partner_a.write(
+                {"routing_scheme": "0235", "routing_endpoint": "1000000002"}
+            )
+        binding = (
+            self.env["l10n_ae.edi.binding"]
+            .with_user(manager)
+            .create({"name": "Synthetic outage binding"})
+        )
+        invoices = self.env["account.move"]
+        for amount in (100, 200):
+            invoice = self.init_invoice(
+                "out_invoice", amounts=[amount], taxes=self.tax_sale_a, post=True
+            ).with_user(manager)
+            invoice.l10n_ae_binding_id = binding
+            invoice.action_l10n_ae_prepare()
+            invoices |= invoice
+        issues = invoices.mapped("l10n_ae_transmission_id").with_user(manager)
+        self.assertEqual(invoices.mapped("amount_total"), [105, 210])
+        incident = (
+            self.env["l10n_ae.edi.incident"]
+            .with_user(manager)
+            .create(
+                {
+                    "name": "Synthetic outage with later affected documents",
+                    "affected_roles": "issuer",
+                    "occurrence_at": "2026-12-01 09:00:00",
+                    "detected_at": "2026-12-01 10:00:00",
+                    "reason": "Controlled service unavailable",
+                    "responsible_id": manager.id,
+                    "calendar_start": "2026-12-01",
+                    "calendar_end": "2026-12-10",
+                    "calendar_holidays": [],
+                    "calendar_source": "Reviewed synthetic calendar",
+                    "calendar_version": "synthetic-2026",
+                    "source_reference": "Reviewed MD243 Art12",
+                    "review_note": "Local outage review; no recovery inferred",
+                }
+            )
+        )
+        incident.action_open()
+        basis = incident.read(
+            ["state", "opened_at", "notification_due_date", "write_date"]
+        )
+        activity = incident.activity_ids.read(["user_id", "date_deadline", "summary"])
+        accounting = invoices.read(["state", "amount_total", "write_date", "line_ids"])
+        issue_fields = [
+            "idempotency_key",
+            "payload_hash",
+            "xml_hash",
+            "submission_state",
+            "confirmation_state",
+            "attempt_ids",
+            "remote_id",
+            "write_date",
+        ]
+        issue_facts = issues.read(issue_fields)
+        evidence = {
+            "evidence_key": "outage-impact-first",
+            "transmission_ids": issues[:1].ids,
+            "source_reference": "Controlled outage affected-document inventory A",
+            "review_note": "First reviewed affected invoice; no HTTP action",
+        }
+        result = incident.record_affected_transmissions(evidence)
+        batch = incident.impact_ids
+        self.assertEqual(result["id"], batch.id)
+        self.assertEqual(batch.transmission_ids, issues[:1])
+        self.assertEqual(batch.recorded_by_id, manager)
+        self.assertEqual(batch.recorded_at, fields.Datetime.now())
+        self.assertEqual(
+            batch.identity_snapshot,
+            [
+                {
+                    "transmission_id": issues[0].id,
+                    "move_id": invoices[0].id,
+                    "binding_id": binding.id,
+                    "process": "billing",
+                    "revision": 1,
+                    "idempotency_key": issue_facts[0]["idempotency_key"],
+                    "payload_hash": issue_facts[0]["payload_hash"],
+                    "xml_hash": issue_facts[0]["xml_hash"],
+                }
+            ],
+        )
+        self.assertEqual(incident.record_affected_transmissions(evidence), result)
+        self.assertEqual(incident.impact_ids, batch)
+        changed = dict(evidence, review_note="Conflicting review under original key")
+        with self.cr.savepoint(), self.assertRaises(ValidationError):
+            incident.record_affected_transmissions(changed)
+        incident.record_affected_transmissions(
+            dict(
+                evidence,
+                evidence_key="outage-impact-later",
+                transmission_ids=issues[1:].ids,
+                source_reference="Controlled outage affected-document inventory B",
+            )
+        )
+        self.assertEqual(len(incident.impact_ids), 2)
+        self.assertEqual(incident.impact_ids.mapped("transmission_ids"), issues)
+        self.assertEqual(
+            incident.read(
+                ["state", "opened_at", "notification_due_date", "write_date"]
+            ),
+            basis,
+        )
+        self.assertEqual(
+            incident.activity_ids.read(["user_id", "date_deadline", "summary"]),
+            activity,
+        )
+        self.assertEqual(
+            invoices.read(["state", "amount_total", "write_date", "line_ids"]),
+            accounting,
+        )
+        self.assertEqual(issues.read(issue_fields), issue_facts)
+        self.assertEqual(json.loads(issues[0].payload)["process"], "billing")
+        with self.cr.savepoint(), self.assertRaises(UserError):
+            batch.write({"review_note": "Rewritten review"})
+        with self.cr.savepoint(), self.assertRaises(UserError):
+            batch.unlink()
 
     @freeze_time("2026-12-01 12:00:00")
     def test_manager_enters_reviewed_holidays_in_native_incident_form(self):
