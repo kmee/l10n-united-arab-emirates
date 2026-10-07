@@ -6,6 +6,11 @@ from odoo import fields, models
 class ProductProduct(models.Model):
     _inherit = "product.product"
 
+    l10n_ae_is_good_and_service = fields.Boolean(
+        string="UAE Goods and Services",
+        copy=False,
+        help="Reviewed mixed item; requires separate HS and SAC identifiers.",
+    )
     l10n_ae_classification_code = fields.Char(
         string="UAE HS Code",
         copy=False,
@@ -25,20 +30,26 @@ class ProductProduct(models.Model):
     def _l10n_ae_item_classification(self):
         """Effective variant facts retained when the invoice is prepared.
 
-        G/S derivation follows Odoo's public LGPL-3 draft PR262200; identifier
+        G/S/B derivation follows Odoo's public LGPL-3 draft PR262200; identifier
         retention and the explicit reviewed SAC version are KMEE extensions.
         """
         self.ensure_one()
-        item_type = "S" if self.type == "service" else "G"
+        item_type = (
+            "B"
+            if self.l10n_ae_is_good_and_service
+            else "S"
+            if self.type == "service"
+            else "G"
+        )
         return {
             "type": item_type,
             "hs_code": self.l10n_ae_classification_code or None
-            if item_type == "G"
+            if item_type in ("G", "B")
             else None,
             "sac_code": self.l10n_ae_service_accounting_code or None
-            if item_type == "S"
+            if item_type in ("S", "B")
             else None,
             "sac_scheme_version": self.l10n_ae_service_accounting_version or None
-            if item_type == "S"
+            if item_type in ("S", "B")
             else None,
         }
