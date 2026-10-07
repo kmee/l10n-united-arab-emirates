@@ -158,6 +158,136 @@ class TestUaeIncident(AccountTestInvoicingCommon):
         with self.cr.savepoint(), self.assertRaises(UserError):
             batch.unlink()
 
+    @freeze_time("2026-12-08 12:00:00")
+    def test_reviewed_restoration_keeps_submission_and_confirmation_backlog_visible(
+        self,
+    ):
+        manager = new_test_user(
+            self.env,
+            login="synthetic-restoration-manager",
+            groups="account.group_account_manager",
+            company_ids=self.env.company.ids,
+            company_id=self.env.company.id,
+        )
+        self.env.company.write(
+            {"l10n_ae_tin": "1000000001", "l10n_ae_tin_confirmed": True}
+        )
+        self.partner_a.country_id = self.env.ref("base.ae")
+        if "routing_scheme" in self.env["res.partner"]._fields:
+            self.env.company.partner_id.write(
+                {"routing_scheme": "0235", "routing_endpoint": "1000000001"}
+            )
+            self.partner_a.write(
+                {"routing_scheme": "0235", "routing_endpoint": "1000000002"}
+            )
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {"name": "Synthetic restoration binding"}
+        )
+        invoice = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
+        ).with_user(manager)
+        invoice.l10n_ae_binding_id = binding
+        invoice.action_l10n_ae_prepare()
+        issue = invoice.l10n_ae_transmission_id
+        incident = (
+            self.env["l10n_ae.edi.incident"]
+            .with_user(manager)
+            .create(
+                {
+                    "name": "Synthetic restored service with pending obligations",
+                    "affected_roles": "issuer",
+                    "occurrence_at": "2026-12-01 09:00:00",
+                    "detected_at": "2026-12-01 10:00:00",
+                    "reason": "Controlled outage",
+                    "responsible_id": manager.id,
+                    "calendar_start": "2026-12-01",
+                    "calendar_end": "2026-12-10",
+                    "calendar_holidays": [],
+                    "calendar_source": "Reviewed synthetic calendar",
+                    "calendar_version": "synthetic-2026",
+                    "source_reference": "Reviewed MD243 Art12",
+                    "review_note": "Service restoration is not fiscal confirmation",
+                }
+            )
+        )
+        incident.action_open()
+        incident.record_affected_transmissions(
+            {
+                "evidence_key": "restoration-impact-one",
+                "transmission_ids": issue.ids,
+                "source_reference": "Reviewed controlled affected-document inventory",
+                "review_note": "Queued original still requires processing",
+            }
+        )
+        before = incident.get_recovery_backlog()
+        self.assertEqual(before["affected_count"], 1)
+        self.assertEqual(before["submission_pending_count"], 1)
+        self.assertEqual(before["confirmation_pending_count"], 1)
+        self.assertFalse(before["restoration_reviewed"])
+        invoice_before = invoice.read(
+            ["state", "amount_total", "line_ids", "write_date"]
+        )
+        activity_before = incident.activity_ids.read(
+            ["user_id", "date_deadline", "summary"]
+        )
+        basis_before = incident.read(
+            ["state", "opened_at", "notification_due_date", "write_date"]
+        )
+        declaration = {
+            "evidence_key": "restoration-review-one",
+            "evidence_origin": "simulated",
+            "restored_at": "2026-12-08 10:00:00",
+            "source_reference": "Controlled service health check reference A",
+            "review_note": "Local review only; all confirmations remain pending",
+        }
+        for timestamp in ("2026-12-01 08:59:59", "2026-12-08 12:00:01"):
+            with self.cr.savepoint(), self.assertRaises(ValidationError):
+                incident.record_restoration(dict(declaration, restored_at=timestamp))
+        result = incident.record_restoration(declaration)
+        self.assertEqual(incident.record_restoration(declaration), result)
+        with self.cr.savepoint(), self.assertRaises(ValidationError):
+            incident.record_restoration(dict(declaration, evidence_origin="external"))
+        review = incident.restoration_ids
+        self.assertEqual(len(review), 1)
+        self.assertEqual(review.recorded_by_id, manager)
+        self.assertEqual(review.recorded_at, fields.Datetime.now())
+        self.assertEqual(
+            review.restored_at, fields.Datetime.to_datetime("2026-12-08 10:00:00")
+        )
+        after = incident.get_recovery_backlog()
+        self.assertTrue(after["restoration_reviewed"])
+        self.assertEqual(after["transmissions"], before["transmissions"])
+        self.assertEqual(after["submission_pending_count"], 1)
+        self.assertEqual(after["confirmation_pending_count"], 1)
+        row = after["transmissions"][0]
+        self.assertEqual(row["submission_state"], "queued")
+        self.assertEqual(row["confirmation_state"], "pending")
+        self.assertEqual(row["validation_c2_state"], "unknown")
+        self.assertEqual(row["delivery_c3_state"], "unknown")
+        self.assertEqual(row["reporting_c2_state"], "unknown")
+        self.assertEqual(row["reporting_c3_state"], "unknown")
+        self.assertEqual(row["idempotency_key"], issue.idempotency_key)
+        self.assertFalse(issue.attempt_ids)
+        self.assertFalse(issue.remote_id)
+        self.assertEqual(
+            invoice.read(["state", "amount_total", "line_ids", "write_date"]),
+            invoice_before,
+        )
+        self.assertEqual(
+            incident.activity_ids.read(["user_id", "date_deadline", "summary"]),
+            activity_before,
+        )
+        self.assertEqual(
+            incident.read(
+                ["state", "opened_at", "notification_due_date", "write_date"]
+            ),
+            basis_before,
+        )
+        with self.cr.savepoint(), self.assertRaises(UserError):
+            review.write({"restored_at": "2026-12-08 11:00:00"})
+        with self.cr.savepoint(), self.assertRaises(UserError):
+            review.unlink()
+
     @freeze_time("2026-12-01 12:00:00")
     def test_manager_enters_reviewed_holidays_in_native_incident_form(self):
         manager = new_test_user(
