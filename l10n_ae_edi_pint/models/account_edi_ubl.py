@@ -52,6 +52,12 @@ class AccountEdiUblUae(models.AbstractModel):
         vals["document_node"]["cbc:ProfileID"]["_text"] = f"urn:peppol:bis:{process}"
         return result
 
+    def _ubl_get_partner_address_node(self, vals, partner):
+        node = super()._ubl_get_partner_address_node(vals, partner)
+        if partner.country_code == "AE":
+            node["cbc:CountrySubentity"]["_text"] = partner._l10n_ae_country_subentity()
+        return node
+
     def _ubl_add_tax_currency_code_node(self, vals):
         result = super()._ubl_add_tax_currency_code_node(vals)
         vals["document_node"]["cbc:TaxCurrencyCode"] = {
