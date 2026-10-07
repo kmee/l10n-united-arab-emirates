@@ -4,6 +4,7 @@ import json
 
 from lxml import etree
 
+from odoo import Command
 from odoo.exceptions import UserError
 from odoo.tests import Form, tagged
 
@@ -467,3 +468,107 @@ class TestUaeProductClassification(AccountTestInvoicingCommon):
         )
         report = invoice.validate_l10n_ae_pint()
         self.assertTrue(report["valid"], report)
+
+    def test_variant_forms_keep_distinct_sac_and_refuse_ambiguous_template_updates(
+        self,
+    ):
+        self.simple_accountman.group_ids |= self.env.ref(
+            "product.group_product_manager"
+        )
+        attribute = self.env["product.attribute"].create(
+            {
+                "name": "Synthetic service option",
+                "value_ids": [
+                    Command.create({"name": "A"}),
+                    Command.create({"name": "B"}),
+                ],
+            }
+        )
+        template = (
+            self.env["product.template"]
+            .create(
+                {
+                    "name": "Synthetic service variants",
+                    "type": "service",
+                    "list_price": 100,
+                    "attribute_line_ids": [
+                        Command.create(
+                            {
+                                "attribute_id": attribute.id,
+                                "value_ids": [Command.set(attribute.value_ids.ids)],
+                            }
+                        )
+                    ],
+                }
+            )
+            .with_user(self.simple_accountman)
+        )
+        variants = template.product_variant_ids.sorted("id")
+        self.assertEqual(len(variants), 2)
+        for product, sac in zip(
+            variants, ["SYNTHETIC-SAC-A", "SYNTHETIC-SAC-B"], strict=True
+        ):
+            with Form(product, view="product.product_normal_form_view") as form:
+                form.l10n_ae_service_accounting_code = sac
+                form.l10n_ae_service_accounting_version = "SYNTHETIC-SAC-2026"
+        self.assertFalse(template.l10n_ae_service_accounting_code)
+        self.assertFalse(template.l10n_ae_service_accounting_version)
+        with Form(template, view="product.product_template_only_form_view") as form:
+            form.name = "Reviewed synthetic service variants"
+        with (
+            self.cr.savepoint(),
+            self.assertRaisesRegex(UserError, "individual variant"),
+        ):
+            template.write({"l10n_ae_service_accounting_code": "SYNTHETIC-AMBIGUOUS"})
+        self.assertEqual(
+            variants.mapped("l10n_ae_service_accounting_code"),
+            ["SYNTHETIC-SAC-A", "SYNTHETIC-SAC-B"],
+        )
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {
+                "name": "Synthetic distinct variants",
+                "fiscal_uuid_policy": "controlled_local",
+            }
+        )
+        invoice = self.init_invoice(
+            "out_invoice", amounts=[100, 100], taxes=self.tax_sale_a
+        )
+        invoice.invoice_line_ids[0].product_id = variants[0]
+        invoice.invoice_line_ids[1].product_id = variants[1]
+        invoice.l10n_ae_binding_id = binding
+        invoice = invoice.with_user(self.simple_accountman)
+        invoice.action_post()
+        ledger = invoice.line_ids.read(["debit", "credit", "balance", "tax_ids"])
+        invoice.action_l10n_ae_prepare()
+        issue = invoice.l10n_ae_transmission_id
+        tree = etree.fromstring(issue.xml_content.encode())
+        self.assertEqual(
+            tree.xpath(
+                "cac:InvoiceLine/cac:Item/cac:AdditionalItemIdentification/cbc:ID/text()",
+                namespaces=NS,
+            ),
+            ["SYNTHETIC-SAC-A", "SYNTHETIC-SAC-B"],
+        )
+        self.assertEqual(
+            [
+                line["item_classification"]["sac_code"]
+                for line in json.loads(issue.payload)["lines"]
+            ],
+            ["SYNTHETIC-SAC-A", "SYNTHETIC-SAC-B"],
+        )
+        self.assertEqual(
+            (invoice.amount_untaxed, invoice.amount_tax, invoice.amount_total),
+            (200, 10, 210),
+        )
+        report = invoice.validate_l10n_ae_pint()
+        self.assertTrue(report["valid"], report)
+        original = issue.read(["payload", "payload_hash", "xml_content", "xml_hash"])
+        with Form(variants[1], view="product.product_normal_form_view") as form:
+            form.l10n_ae_service_accounting_code = "SYNTHETIC-VARIANT-LATER"
+        invoice.action_l10n_ae_prepare()
+        self.assertEqual(
+            issue.read(["payload", "payload_hash", "xml_content", "xml_hash"]), original
+        )
+        self.assertEqual(
+            invoice.line_ids.read(["debit", "credit", "balance", "tax_ids"]), ledger
+        )
