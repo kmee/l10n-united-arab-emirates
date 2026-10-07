@@ -454,6 +454,28 @@ class AccountMove(models.Model):
                 )
         return posted
 
+    def button_draft(self):
+        self.check_access("write")
+        # Preparation also locks the invoice first. Take the same locks before
+        # reading active issues so cached references cannot race with dispatch.
+        with self.env.cr.savepoint():
+            self.flush_recordset()
+            self.env.cr.execute(
+                "SELECT id FROM account_move WHERE id = ANY(%s) ORDER BY id FOR UPDATE",
+                [self.ids],
+            )
+            self.invalidate_recordset()
+            for move in self.sorted("id"):
+                source = move.l10n_ae_transmission_id
+                if source:
+                    move._l10n_ae_begin_local_correction(
+                        source,
+                        self.env._("Native Reset to Draft before the first sending."),
+                    )
+            # Keep accounting/EDI reset checks authoritative. Their refusal must
+            # roll back the appended correction and cleared active reference.
+            return super().button_draft()
+
     def write(self, vals):
         if set(vals).intersection(UAE_EFFECTIVE_EXCHANGE_FIELDS):
             raise UserError(
@@ -946,6 +968,21 @@ class AccountMove(models.Model):
             raise AccessError(
                 self.env._("Only accounting managers can correct UAE issues.")
             )
+        with self.env.cr.savepoint():
+            if self._l10n_ae_begin_local_correction(source, reason):
+                self.button_draft()
+        return {
+            "type": "ir.actions.act_window",
+            "res_model": "account.move",
+            "res_id": self.id,
+            "view_mode": "form",
+            "target": "current",
+        }
+
+    def _l10n_ae_begin_local_correction(self, source, reason):
+        """Append trusted history after checking the native invoice operator."""
+        self.ensure_one()
+        self.check_access("write")
         source.ensure_one()
         source.check_access("read")
         if not reason or not reason.strip():
@@ -969,15 +1006,8 @@ class AccountMove(models.Model):
                     "The local correction source belongs to another invoice or company."
                 )
             )
-        action = {
-            "type": "ir.actions.act_window",
-            "res_model": "account.move",
-            "res_id": self.id,
-            "view_mode": "form",
-            "target": "current",
-        }
         if source.local_correction_id:
-            return action
+            return False
         if (
             self.l10n_ae_transmission_id != source
             or self.state != "posted"
@@ -1007,8 +1037,7 @@ class AccountMove(models.Model):
                     "l10n_ae_correction_id": correction.id,
                 }
             )
-            self.button_draft()
-        return action
+        return True
 
     def action_l10n_ae_prepare(self):
         self.ensure_one()
