@@ -4939,6 +4939,226 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         self.assertFalse(refund.l10n_ae_transmission_id)
         self.assertEqual(bill.state, "draft")
 
+    def test_received_summary_credit_preserves_period_and_links_supplier_bill(self):
+        # Independently worked credit: AED40 net, AED2 VAT, AED42 inclusive;
+        # the settled amount is fully prepaid, so payable is zero.
+        original = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
+        )
+        original.write({"l10n_ae_fiscal_uuid": "aaaaaaab-3333-4333-8333-333333333333"})
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {"name": "Incoming Summary supplier credit"}
+        )
+        receiver = (
+            self.env["l10n_ae.edi.inbox"]
+            .with_user(self.simple_accountman)
+            .with_context(allowed_company_ids=[self.env.company.id])
+        )
+        self.assertFalse(receiver.env.su)
+        received_bill = receiver.receive_controlled_document(
+            binding.id,
+            "summary-credit-original",
+            etree.tostring(self._received_test_xml(original)),
+        )
+        self.assertTrue(received_bill.action_process(), received_bill.diagnostic)
+        bill = received_bill.move_id
+        self.assertEqual((bill.move_type, bill.state), ("in_invoice", "draft"))
+        self.assertEqual(
+            (bill.amount_untaxed, bill.amount_tax, bill.amount_total), (100, 5, 105)
+        )
+
+        reversal = (
+            self.env["account.move.reversal"]
+            .with_context(active_model="account.move", active_ids=original.ids)
+            .create(
+                {
+                    "reason": "Synthetic consideration adjustment",
+                    "move_ids": [(6, 0, original.ids)],
+                    "journal_id": original.journal_id.id,
+                }
+            )
+        )
+        reversal.with_user(self.simple_accountman).refund_moves()
+        credit = reversal.new_move_ids.with_user(self.simple_accountman)
+        self.assertFalse(credit.env.su)
+        credit.invoice_line_ids.write({"price_unit": 40})
+        credit.write(
+            {
+                "l10n_ae_credit_reason": "DL8.61.1.C",
+                "l10n_ae_summary": True,
+                "l10n_ae_invoicing_period_start": "2019-01-01",
+                "l10n_ae_invoicing_period_end": "2019-01-31",
+                "l10n_ae_fiscal_uuid": "aaaaaaab-4444-4444-8444-444444444444",
+            }
+        )
+        credit.action_post()
+        content = etree.tostring(self._received_test_xml(credit))
+        report = OfflinePintValidator(
+            "/opt/uae-addons/.runtime/normative",
+            ruleset="kmee-pint-ae-1.0.4-ubl-2.1",
+        ).validate(content)
+        self.assertTrue(report["valid"], report)
+        self.assertEqual(report["profile"], "billing")
+        tree = etree.fromstring(content)
+        self.assertEqual(etree.QName(tree).localname, "CreditNote")
+        self.assertEqual(
+            etree.QName(tree).namespace,
+            "urn:oasis:names:specification:ubl:schema:xsd:CreditNote-2",
+        )
+        self.assertEqual(tree.findtext("cbc:CreditNoteTypeCode", namespaces=NS), "381")
+        self.assertEqual(
+            tree.findtext("cbc:ProfileExecutionID", namespaces=NS), "00010000"
+        )
+        self.assertEqual(
+            tree.findtext("cbc:CustomizationID", namespaces=NS),
+            "urn:peppol:pint:billing-1@ae-1",
+        )
+        self.assertEqual(
+            tree.findtext("cbc:ProfileID", namespaces=NS), "urn:peppol:bis:billing"
+        )
+        self.assertEqual(
+            tree.findtext("cbc:DocumentCurrencyCode", namespaces=NS), "AED"
+        )
+        self.assertEqual(
+            (
+                tree.findtext("cac:InvoicePeriod/cbc:StartDate", namespaces=NS),
+                tree.findtext("cac:InvoicePeriod/cbc:EndDate", namespaces=NS),
+            ),
+            ("2019-01-01", "2019-01-31"),
+        )
+        self.assertEqual(
+            (
+                tree.findtext(
+                    "cac:LegalMonetaryTotal/cbc:TaxExclusiveAmount", namespaces=NS
+                ),
+                tree.findtext("cac:TaxTotal/cbc:TaxAmount", namespaces=NS),
+                tree.findtext(
+                    "cac:LegalMonetaryTotal/cbc:TaxInclusiveAmount", namespaces=NS
+                ),
+                tree.findtext(
+                    "cac:LegalMonetaryTotal/cbc:PrepaidAmount", namespaces=NS
+                ),
+                tree.findtext(
+                    "cac:LegalMonetaryTotal/cbc:PayableAmount", namespaces=NS
+                ),
+            ),
+            ("40.00", "2.00", "42.00", "42.00", "0.00"),
+        )
+        self.assertEqual(
+            tree.findtext(
+                "cac:BillingReference/cac:InvoiceDocumentReference/cbc:ID",
+                namespaces=NS,
+            ),
+            original.name,
+        )
+        self.assertEqual(
+            tree.findtext(
+                "cac:BillingReference/cac:InvoiceDocumentReference/cbc:IssueDate",
+                namespaces=NS,
+            ),
+            str(original.invoice_date),
+        )
+
+        move_counts = {
+            model: self.env[model].search_count([])
+            for model in (
+                "l10n_ae.edi.transmission",
+                "l10n_ae.edi.attempt",
+                "l10n_ae.edi.event",
+            )
+        }
+        account_moves_before_import = self.env["account.move"].search([]).ids
+        bill_ledger = bill.line_ids.sorted("id").read(
+            ["account_id", "partner_id", "debit", "credit", "balance", "write_date"]
+        )
+        bill_timestamps = bill.read(["create_date", "write_date"])
+        inbox = receiver.receive_controlled_document(
+            binding.id, "summary-credit", content
+        )
+        self.assertTrue(inbox.action_process(), inbox.diagnostic)
+        refund = inbox.move_id
+        self.assertEqual((refund.move_type, refund.state), ("in_refund", "draft"))
+        self.assertEqual(refund.partner_id, self.partner_a)
+        self.assertEqual(refund.reversed_entry_id, bill)
+        self.assertTrue(refund.l10n_ae_summary)
+        self.assertEqual(refund.l10n_ae_credit_reason, "DL8.61.1.C")
+        self.assertEqual(
+            (
+                refund.l10n_ae_invoicing_period_start.isoformat(),
+                refund.l10n_ae_invoicing_period_end.isoformat(),
+            ),
+            ("2019-01-01", "2019-01-31"),
+        )
+        self.assertEqual(
+            (refund.amount_untaxed, refund.amount_tax, refund.amount_total), (40, 2, 42)
+        )
+        self.assertEqual(refund.l10n_ae_received_prepaid_amount, 42)
+        self.assertEqual(refund.l10n_ae_received_payable_amount, 0)
+        self.assertEqual(inbox.original_xml.content, content)
+        self.assertEqual(inbox.xml_hash, hashlib.sha256(content).hexdigest())
+        self.assertTrue(refund.l10n_ae_received_document)
+        self.assertFalse(refund.l10n_ae_transmission_id)
+        original_hash = inbox.xml_hash
+        history = inbox.processing_history_ids
+        self.assertEqual(len(history), 1)
+        history_row = history.read(["validation_report", "validation_report_hash"])
+        history_report = json.loads(history.validation_report)
+        self.assertTrue(history_report["valid"], history_report)
+        self.assertEqual(history_report["ruleset"], "kmee-pint-ae-1.0.4-ubl-2.1")
+        self.assertEqual(
+            history.validation_report_hash,
+            hashlib.sha256(history.validation_report.encode()).hexdigest(),
+        )
+        refund_ledger = refund.line_ids.sorted("id").read(
+            ["account_id", "partner_id", "debit", "credit", "balance", "write_date"]
+        )
+        refund_timestamps = refund.read(["create_date", "write_date"])
+        replay = receiver.receive_controlled_document(
+            binding.id, "summary-credit", content
+        )
+        self.assertEqual(replay, inbox)
+        self.assertEqual(
+            sorted(self.env["account.move"].search([]).ids),
+            sorted(account_moves_before_import + [refund.id]),
+        )
+        self.assertTrue(inbox.action_process(), inbox.diagnostic)
+        self.assertEqual(inbox.move_id, refund)
+        self.assertEqual(inbox.original_xml.content, content)
+        self.assertEqual(inbox.xml_hash, original_hash)
+        self.assertEqual(inbox.processing_history_ids, history)
+        self.assertEqual(
+            history.read(["validation_report", "validation_report_hash"]), history_row
+        )
+        self.assertEqual(
+            refund.line_ids.sorted("id").read(
+                ["account_id", "partner_id", "debit", "credit", "balance", "write_date"]
+            ),
+            refund_ledger,
+        )
+        self.assertEqual(refund.read(["create_date", "write_date"]), refund_timestamps)
+        self.assertEqual(
+            sorted(self.env["account.move"].search([]).ids),
+            sorted(account_moves_before_import + [refund.id]),
+        )
+        self.assertEqual(
+            bill.line_ids.sorted("id").read(
+                ["account_id", "partner_id", "debit", "credit", "balance", "write_date"]
+            ),
+            bill_ledger,
+        )
+        self.assertEqual(bill.read(["create_date", "write_date"]), bill_timestamps)
+        for values in (
+            {"l10n_ae_summary": False},
+            {"l10n_ae_invoicing_period_start": "2019-02-01"},
+            {"l10n_ae_invoicing_period_end": "2019-02-28"},
+        ):
+            with self.assertRaisesRegex(UserError, "received"):
+                refund.write(values)
+        self.assertEqual(
+            {model: self.env[model].search_count([]) for model in move_counts},
+            move_counts,
+        )
+
     def test_received_supplier_endpoint_must_match_the_known_vat_partner(self):
         tree = self._received_test_xml()
         tree.find(

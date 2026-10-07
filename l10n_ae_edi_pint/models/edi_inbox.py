@@ -496,16 +496,15 @@ class UaeEdiInbox(models.Model):
             and not is_credit
             and type_code == "380"
         )
-        summary_invoice = (
+        summary_document = (
             transaction_flags == "00010000"
             and not selfbilling
-            and not is_credit
-            and type_code == "380"
+            and type_code == ("381" if is_credit else "380")
         )
         if (
             not supported
             or transaction_flags not in ("00000000", "10000000", "00000100", "10000100")
-            and not (ecommerce_invoice or summary_invoice)
+            and not (ecommerce_invoice or summary_document)
             or not is_credit
             and float(tree.findtext("./{*}LegalMonetaryTotal/{*}PrepaidAmount") or 0)
             != 0
