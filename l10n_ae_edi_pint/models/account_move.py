@@ -148,6 +148,11 @@ class AccountMove(models.Model):
                         "are not eligible."
                     )
                 )
+        for move in self:
+            for party in (
+                move.company_id.partner_id | move.partner_id.commercial_partner_id
+            ):
+                party._l10n_ae_country_subentity()
         return result
 
     def preview_l10n_ae_pint(self):
