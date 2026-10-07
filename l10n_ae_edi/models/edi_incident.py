@@ -77,6 +77,9 @@ class UaeEdiIncident(models.Model):
     impact_ids = fields.One2many(
         "l10n_ae.edi.incident.impact", "incident_id", readonly=True, copy=False
     )
+    restoration_ids = fields.One2many(
+        "l10n_ae.edi.incident.restoration", "incident_id", readonly=True, copy=False
+    )
 
     _protected_fields: ClassVar[set[str]] = {
         "state",
@@ -86,6 +89,7 @@ class UaeEdiIncident(models.Model):
         "timezone",
         "notice_ids",
         "impact_ids",
+        "restoration_ids",
     }
 
     @api.depends("calendar_holidays")
@@ -153,6 +157,7 @@ class UaeEdiIncident(models.Model):
                 opened_at=False,
                 notice_ids=[],
                 impact_ids=[],
+                restoration_ids=[],
             )
             prepared.append(vals)
         return super().create(prepared)
@@ -374,6 +379,65 @@ class UaeEdiIncident(models.Model):
         batch.check_access("read")
         self.invalidate_recordset(["impact_ids"])
         return {"id": batch.id, "transmission_ids": batch.transmission_ids.ids}
+
+    def record_restoration(self, evidence):
+        self.ensure_one()
+        self._check_actor("write")
+        if self.env["ir.config_parameter"].sudo().get_bool("database.is_neutralized"):
+            raise UserError(
+                self.env._("Restoration review is disabled on a neutralized copy.")
+            )
+        self.env.cr.execute(
+            "SELECT id FROM l10n_ae_edi_incident WHERE id = %s FOR UPDATE", (self.id,)
+        )
+        self.invalidate_recordset()
+        review = self.env["l10n_ae.edi.incident.restoration"]._record(self, evidence)
+        review.check_access("read")
+        self.invalidate_recordset(["restoration_ids"])
+        return {"id": review.id}
+
+    def get_recovery_backlog(self):
+        """Readonly local facts; transport remains in the post-commit executor."""
+        self.ensure_one()
+        self._check_actor("read")
+        incident = self.with_user(self.env.uid)
+        issues = incident.impact_ids.mapped("transmission_ids").sorted("id")
+        issues.check_access("read")
+        rows = issues.read(
+            [
+                "move_id",
+                "binding_id",
+                "process",
+                "revision",
+                "idempotency_key",
+                "payload_hash",
+                "xml_hash",
+                "submission_state",
+                "confirmation_state",
+                "validation_c2_state",
+                "delivery_c3_state",
+                "reporting_c2_state",
+                "reporting_c3_state",
+                "next_attempt_at",
+                "dispatch_review_required",
+                "event_review_required",
+                "local_correction_id",
+                "attempt_ids",
+            ]
+        )
+        return {
+            "incident_id": incident.id,
+            "restoration_reviewed": bool(incident.restoration_ids),
+            "restoration_ids": incident.restoration_ids.ids,
+            "affected_count": len(rows),
+            "submission_pending_count": sum(
+                row["submission_state"] != "accepted" for row in rows
+            ),
+            "confirmation_pending_count": sum(
+                row["confirmation_state"] != "confirmed" for row in rows
+            ),
+            "transmissions": rows,
+        }
 
     @api.ondelete(at_uninstall=False)
     def _unlink_except_opened_incident(self):

@@ -1,4 +1,7 @@
 id,name,model_id,group_id/id,operation,domain
+access_uae_incident_restoration_manager,UAE service restoration manager reader,l10n_ae.edi.incident.restoration,account.group_account_manager,r,
+access_uae_incident_restoration_accountant,UAE service restoration accountant reader,l10n_ae.edi.incident.restoration,account.group_account_readonly,r,
+access_uae_incident_restoration_invoice,UAE service restoration invoice reader,l10n_ae.edi.incident.restoration,account.group_account_invoice,r,
 access_uae_incident_impact_manager,UAE incident impact manager reader,l10n_ae.edi.incident.impact,account.group_account_manager,r,
 access_uae_incident_impact_accountant,UAE incident impact accountant reader,l10n_ae.edi.incident.impact,account.group_account_readonly,r,
 access_uae_incident_impact_invoice,UAE incident impact invoice reader,l10n_ae.edi.incident.impact,account.group_account_invoice,r,
