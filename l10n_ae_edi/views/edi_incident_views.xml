@@ -104,16 +104,39 @@
                         This case was already open without a retained original before the intake upgrade. Its reviewed deadline and history are preserved. The upgrade does not fabricate or verify an FTA confirmation.
                     </p>
                     <group string="Reviewed UAE Calendar">
-                        <field name="calendar_start" readonly="state == 'open'" />
-                        <field name="calendar_end" readonly="state == 'open'" />
+                        <field
+                            name="calendar_version_id"
+                            readonly="state == 'open'"
+                            domain="[('company_id', '=', company_id), ('state', '=', 'approved')]"
+                            options="{'no_create': True}"
+                        />
+                        <field
+                            name="calendar_source_sha256"
+                            readonly="1"
+                            invisible="not calendar_version_id"
+                        />
+                        <field
+                            name="calendar_start"
+                            readonly="state == 'open' or calendar_version_id"
+                        />
+                        <field
+                            name="calendar_end"
+                            readonly="state == 'open' or calendar_version_id"
+                        />
                         <field
                             name="calendar_holiday_dates"
                             string="Federal Holiday Dates"
                             placeholder="One ISO date (YYYY-MM-DD) per line"
-                            readonly="state == 'open'"
+                            readonly="state == 'open' or calendar_version_id"
                         />
-                        <field name="calendar_source" readonly="state == 'open'" />
-                        <field name="calendar_version" readonly="state == 'open'" />
+                        <field
+                            name="calendar_source"
+                            readonly="state == 'open' or calendar_version_id"
+                        />
+                        <field
+                            name="calendar_version"
+                            readonly="state == 'open' or calendar_version_id"
+                        />
                         <field name="source_reference" readonly="state == 'open'" />
                         <field name="review_note" readonly="state == 'open'" />
                         <field

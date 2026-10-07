@@ -62,6 +62,13 @@ class UaeEdiIncident(models.Model):
     reason = fields.Text()
     responsible_id = fields.Many2one("res.users", ondelete="restrict")
     timezone = fields.Char(default="Asia/Dubai", required=True, readonly=True)
+    calendar_version_id = fields.Many2one(
+        "l10n_ae.edi.calendar",
+        string="Reviewed Calendar Version",
+        check_company=True,
+        ondelete="restrict",
+    )
+    calendar_source_sha256 = fields.Char(readonly=True, copy=False)
     calendar_start = fields.Date(string="Calendar Coverage Starts")
     calendar_end = fields.Date(string="Calendar Coverage Ends")
     calendar_holidays = fields.Json(default=list)
@@ -126,6 +133,7 @@ class UaeEdiIncident(models.Model):
     )
 
     _protected_fields: ClassVar[set[str]] = {
+        "calendar_source_sha256",
         "state",
         "notification_due_date",
         "opened_by_id",
@@ -142,6 +150,24 @@ class UaeEdiIncident(models.Model):
         "pending_confirmation_count",
         "restoration_reviewed",
     }
+
+    def _selected_calendar_snapshot(self, calendar_id, company):
+        if type(calendar_id) is not int:
+            raise ValidationError(self.env._("Select one reviewed calendar version."))
+        calendar = self.env["l10n_ae.edi.calendar"].browse(calendar_id).exists()
+        if len(calendar) != 1:
+            raise ValidationError(self.env._("Select one reviewed calendar version."))
+        return calendar._incident_snapshot(company)
+
+    @api.onchange("calendar_version_id")
+    def _onchange_calendar_version_id(self):
+        for record in self.filtered("calendar_version_id"):
+            record.update(
+                record._selected_calendar_snapshot(
+                    record.calendar_version_id.id,
+                    record.company_id,
+                )
+            )
 
     @api.depends("calendar_holidays")
     def _compute_calendar_holiday_dates(self):
@@ -277,6 +303,10 @@ class UaeEdiIncident(models.Model):
                 impact_ids=[],
                 restoration_ids=[],
             )
+            vals["calendar_source_sha256"] = False
+            calendar_id = vals.get("calendar_version_id")
+            if calendar_id:
+                vals.update(self._selected_calendar_snapshot(calendar_id, company))
             prepared.append(vals)
         return super().create(prepared)
 
@@ -300,6 +330,32 @@ class UaeEdiIncident(models.Model):
                     "The captured confirmation fixes the registration clock basis."
                 )
             )
+        snapshot_fields = {
+            "calendar_version_id",
+            "calendar_start",
+            "calendar_end",
+            "calendar_holidays",
+            "calendar_holiday_dates",
+            "calendar_source",
+            "calendar_version",
+        }
+        if snapshot_fields.intersection(vals):
+            for record in self:
+                values = dict(vals)
+                calendar_id = values.get(
+                    "calendar_version_id", record.calendar_version_id.id
+                )
+                if calendar_id:
+                    values.pop("calendar_holiday_dates", None)
+                    values.update(
+                        record._selected_calendar_snapshot(
+                            calendar_id, record.company_id
+                        )
+                    )
+                else:
+                    values["calendar_source_sha256"] = False
+                super(UaeEdiIncident, record).write(values)
+            return True
         return super().write(vals)
 
     def _registration_confirmation_anchor(self):
@@ -422,6 +478,16 @@ class UaeEdiIncident(models.Model):
         self.invalidate_recordset()
         if self.state == "open":
             return True
+        if self.calendar_version_id:
+            expected = self._selected_calendar_snapshot(
+                self.calendar_version_id.id, self.company_id
+            )
+            if any(
+                (self[name] or []) != (value or []) for name, value in expected.items()
+            ):
+                raise ValidationError(
+                    self.env._("The incident conflicts with its reviewed calendar.")
+                )
         due = self._reviewed_notification_due_date()
         owner = self.responsible_id.with_user(self.env.uid)
         if (
