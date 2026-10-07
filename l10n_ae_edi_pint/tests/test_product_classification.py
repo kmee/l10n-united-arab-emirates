@@ -146,6 +146,7 @@ class TestUaeProductClassification(AccountTestInvoicingCommon):
             {
                 "name": "Synthetic classified goods",
                 "type": "consu",
+                "list_price": 100,
                 "l10n_ae_classification_code": "999999",
                 "l10n_ae_service_accounting_code": "UNUSED-SYNTHETIC-SAC",
                 "l10n_ae_service_accounting_version": "UNUSED-SYNTHETIC-VERSION",
