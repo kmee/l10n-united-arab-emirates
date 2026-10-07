@@ -3,6 +3,8 @@
 from odoo import api, fields, models
 from odoo.exceptions import UserError
 
+from .product_product import UAE_RCM_NATURE_CODES
+
 
 class ProductTemplate(models.Model):
     _inherit = "product.template"
@@ -35,6 +37,22 @@ class ProductTemplate(models.Model):
         copy=False,
         help="Reviewed SAC scheme version; no version is supplied by default.",
     )
+    l10n_ae_edi_rcm_nature_code = fields.Selection(
+        selection=UAE_RCM_NATURE_CODES,
+        string="UAE Reverse-Charge Nature",
+        compute="_compute_l10n_ae_edi_rcm_nature_code",
+        inverse="_inverse_l10n_ae_edi_rcm_nature_code",
+        copy=False,
+        help="Reviewed BTAE-09 for a unique variant; "
+        "configure other variants separately.",
+    )
+
+    @api.depends("product_variant_ids.l10n_ae_edi_rcm_nature_code")
+    def _compute_l10n_ae_edi_rcm_nature_code(self):
+        self._compute_template_field_from_variant_field("l10n_ae_edi_rcm_nature_code")
+
+    def _inverse_l10n_ae_edi_rcm_nature_code(self):
+        self._set_product_variant_field("l10n_ae_edi_rcm_nature_code")
 
     @api.depends("product_variant_ids.l10n_ae_service_accounting_code")
     def _compute_l10n_ae_service_accounting_code(self):
@@ -76,6 +94,7 @@ class ProductTemplate(models.Model):
             "l10n_ae_classification_code",
             "l10n_ae_service_accounting_code",
             "l10n_ae_service_accounting_version",
+            "l10n_ae_edi_rcm_nature_code",
         ]
 
     def write(self, vals):
@@ -84,6 +103,7 @@ class ProductTemplate(models.Model):
             "l10n_ae_classification_code",
             "l10n_ae_service_accounting_code",
             "l10n_ae_service_accounting_version",
+            "l10n_ae_edi_rcm_nature_code",
         }.intersection(vals):
             for template in self:
                 variants = (

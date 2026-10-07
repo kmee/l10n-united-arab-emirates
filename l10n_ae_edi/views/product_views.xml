@@ -22,6 +22,7 @@
                         invisible="not is_product_variant and id and product_variant_count != 1"
                     >
                         <field name="l10n_ae_is_good_and_service" />
+                        <field name="l10n_ae_edi_rcm_nature_code" />
                         <field
                             name="l10n_ae_classification_code"
                             invisible="type == 'service' and not l10n_ae_is_good_and_service"

@@ -2,6 +2,14 @@
 # License AGPL-3.0 or later (https://www.gnu.org/licenses/agpl).
 from odoo import fields, models
 
+UAE_RCM_NATURE_CODES = [
+    ("DL8.48.8.2", "Electronic Devices"),
+    ("DL8.48.8.1", "Gold and Diamonds"),
+    ("DL8.48.3.1", "Crude or refined oil"),
+    ("DL8.48.3.2", "Unprocessed or processed natural gas"),
+    ("DL8.48.3.3", "Pure hydrocarbons"),
+]
+
 
 class ProductProduct(models.Model):
     _inherit = "product.product"
@@ -26,6 +34,13 @@ class ProductProduct(models.Model):
         copy=False,
         help="Version of the reviewed SAC scheme; no version is supplied by default.",
     )
+    l10n_ae_edi_rcm_nature_code = fields.Selection(
+        selection=UAE_RCM_NATURE_CODES,
+        string="UAE Reverse-Charge Nature",
+        copy=False,
+        help="Reviewed BTAE-09 classification, used when the line VAT category is AE. "
+        "No nature or tax treatment is inferred from the product name or HS/SAC.",
+    )
 
     def _l10n_ae_item_classification(self):
         """Effective variant facts retained when the invoice is prepared.
@@ -41,7 +56,7 @@ class ProductProduct(models.Model):
             if self.type == "service"
             else "G"
         )
-        return {
+        classification = {
             "type": item_type,
             "hs_code": self.l10n_ae_classification_code or None
             if item_type in ("G", "B")
@@ -53,3 +68,6 @@ class ProductProduct(models.Model):
             if item_type in ("S", "B")
             else None,
         }
+        if self.l10n_ae_edi_rcm_nature_code:
+            classification["rcm_nature_code"] = self.l10n_ae_edi_rcm_nature_code
+        return classification
