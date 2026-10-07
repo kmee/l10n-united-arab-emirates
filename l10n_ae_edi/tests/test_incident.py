@@ -793,6 +793,43 @@ class TestUaeIncident(AccountTestInvoicingCommon):
             ["user_id", "date_deadline", "summary"]
         )
         action = incident.action_review_impact()
+        selection = incident.env["l10n_ae.edi.transmission"].with_context(
+            **action["context"]
+        )
+        selection_domain = [("company_id", "=", incident.company_id.id)]
+        expected_selection = [(issue.id, f"{invoice.name} (Revision 1)")]
+        self.assertEqual(
+            selection.name_search(invoice.name, domain=selection_domain),
+            expected_selection,
+        )
+        self.assertEqual(
+            selection.name_search(issue.origin_document_id, domain=selection_domain),
+            expected_selection,
+        )
+        self.assertEqual(
+            selection.name_search(
+                invoice.name, domain=[("id", "=", issue.id)], operator="not ilike"
+            ),
+            [],
+        )
+        self.assertEqual(issue.display_name, issue.origin_document_id)
+        sender = new_test_user(
+            self.env,
+            login="synthetic-impact-selection-sender",
+            groups="l10n_ae_edi.group_controlled_sender",
+            company_ids=self.env.company.ids,
+            company_id=self.env.company.id,
+        )
+        self.assertEqual(issue.with_user(sender).display_name, issue.origin_document_id)
+        for elevated in (False, True):
+            with (
+                self.subTest(selection_sender_sudo=elevated),
+                self.cr.savepoint(),
+                self.assertRaises(AccessError),
+            ):
+                selection.with_user(sender).sudo(elevated).name_search(
+                    invoice.name, domain=selection_domain
+                )
         with Form(
             incident.env[action["res_model"]].with_context(**action["context"]),
             view=action["view_id"],
