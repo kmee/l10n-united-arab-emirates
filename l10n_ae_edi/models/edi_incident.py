@@ -286,6 +286,10 @@ class UaeEdiIncident(models.Model):
 
     def _registration_confirmation_anchor(self):
         self.ensure_one()
+        if not self.fta_confirmation_ids:
+            raise ValidationError(
+                self.env._("Record the original FTA confirmation before opening.")
+            )
         anchor_at = self.fta_confirmation_received_at
         if self.fta_confirmation_ids:
             confirmation = self.fta_confirmation_ids
