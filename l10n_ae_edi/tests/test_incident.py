@@ -44,6 +44,44 @@ class TestUaeIncident(AccountTestInvoicingCommon):
     def setUpClass(cls):
         super().setUpClass()
 
+    def test_calendar_rejects_non_list_holiday_inputs(self):
+        manager = new_test_user(
+            self.env,
+            login="synthetic-calendar-json-manager",
+            groups="account.group_account_manager",
+            company_ids=self.env.company.ids,
+            company_id=self.env.company.id,
+        )
+        calendars = self.env["l10n_ae.edi.calendar"].with_user(manager)
+        values = {
+            "name": "Synthetic invalid holiday input",
+            "version": "synthetic-invalid",
+            "calendar_start": "2026-12-01",
+            "calendar_end": "2026-12-10",
+            "source_reference": "Synthetic source",
+            "source_snapshot": "Synthetic snapshot",
+            "review_note": "Synthetic input qualification; no official dates",
+        }
+        for holidays in ({}, 0, "", {"dates": []}):
+            with (
+                self.subTest(holidays=holidays),
+                self.cr.savepoint(),
+                self.assertRaisesRegex(ValidationError, "list"),
+            ):
+                calendar = calendars.create(dict(values, calendar_holidays=holidays))
+                calendar.action_approve()
+        calendar = calendars.create(dict(values, calendar_holidays=[]))
+        for holidays in ({}, 0, "", {"dates": []}):
+            with (
+                self.subTest(write_holidays=holidays),
+                self.cr.savepoint(),
+                self.assertRaisesRegex(ValidationError, "list"),
+            ):
+                calendar.write({"calendar_holidays": holidays})
+                calendar.action_approve()
+        self.assertEqual(calendar.state, "draft")
+        self.assertTrue(calendar.action_approve())
+
     def test_calendar_context_default_cannot_select_unapproved_version(self):
         manager = new_test_user(
             self.env,
