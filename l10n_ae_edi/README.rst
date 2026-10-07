@@ -203,6 +203,17 @@ scenario28 in the PT/EN manuals. These internal reminders do not
 determine legal timeliness or notify the FTA; full incident/calendar and
 escalation requirements remain open.
 
+With native product-manager rights, use **Customers → Products → New**
+and open **UAE Classification**. A service requires a reviewed SAC and
+scheme version; goods require HS, and a reviewed mixed item requires
+both. No classification code or SAC version is supplied automatically.
+Single-variant template fields update that variant; multiple variants
+must be configured individually. Ambiguous template classification
+writes are refused. Select the actual product in invoice lines before
+preparation. Later product edits do not rewrite the prepared payload,
+XML or ledger. See scenario47 in the PT/EN manuals for the service
+journey and its controlled-provider limits.
+
 Known issues / Roadmap
 ======================
 
