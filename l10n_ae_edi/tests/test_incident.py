@@ -23,6 +23,212 @@ class TestUaeIncident(AccountTestInvoicingCommon):
         super().setUpClass()
 
     @freeze_time("2026-12-08 12:00:00")
+    def test_confirmation_capture_refuses_forged_facts_and_unauthorized_original_reads(
+        self,
+    ):
+        company_a = self.env.company
+        company_b = self.company_data_2["company"]
+        company_b.country_id = self.env.ref("base.ae")
+        manager = new_test_user(
+            self.env,
+            login="synthetic-confirmation-access-manager",
+            groups="account.group_account_manager",
+            company_ids=(company_a | company_b).ids,
+            company_id=company_a.id,
+        )
+        reader = new_test_user(
+            self.env,
+            login="synthetic-confirmation-access-reader",
+            groups="account.group_account_readonly",
+            company_ids=company_a.ids,
+            company_id=company_a.id,
+        )
+        model = self.env["l10n_ae.edi.incident"].with_user(manager)
+        case = model.with_context(allowed_company_ids=company_a.ids).create(
+            {
+                "name": "Synthetic original confirmation access qualification",
+                "incident_kind": "registration_change",
+            }
+        )
+        foreign = model.with_context(allowed_company_ids=company_b.ids).create(
+            {
+                "name": "Synthetic other-company original confirmation",
+                "incident_kind": "registration_change",
+            }
+        )
+        failure = model.with_context(allowed_company_ids=company_a.ids).create(
+            {
+                "name": "Synthetic wrong incident kind for FTA confirmation",
+            }
+        )
+        evidence = {
+            "evidence_key": "synthetic-confirmation-access-original",
+            "evidence_origin": "simulated",
+            "received_at": "2026-11-30 21:30:00",
+            "external_reference": "Synthetic FTA registration receipt",
+            "source_reference": "Supplied controlled original",
+            "review_note": "No real FTA authorship or receipt verified",
+            "document_filename": "synthetic-fta-confirmation.txt",
+            "document": base64.b64encode(
+                b"Synthetic FTA registration confirmation\n"
+            ).decode(),
+        }
+        before = case.read(
+            [
+                "state",
+                "write_date",
+                "fta_confirmation_received_at",
+                "fta_confirmation_reference",
+                "activity_ids",
+            ]
+        )
+        for changed in (
+            {"recorded_by_id": manager.id},
+            {"company_id": company_b.id},
+            {"document_sha256": "forged"},
+            {"received_at": "2026-12-09 08:00:00"},
+            {"received_at": "2026-12-08T08:00:00+00:00"},
+            {"document_filename": "../original.txt"},
+            {"document_filename": "bad\nname.txt"},
+            {"evidence_origin": "verified_fta"},
+            {"document": ""},
+            {"document": "not Base64!"},
+            {"document": "A" * 13981017},
+        ):
+            with (
+                self.subTest(changed=list(changed)),
+                self.cr.savepoint(),
+                self.assertRaises(ValidationError),
+            ):
+                case.record_fta_confirmation({**evidence, **changed})
+        for elevated in (False, True):
+            with (
+                self.subTest(reader=elevated),
+                self.cr.savepoint(),
+                self.assertRaises(AccessError),
+            ):
+                case.with_user(reader).sudo(elevated).record_fta_confirmation(evidence)
+            with (
+                self.subTest(foreign=elevated),
+                self.cr.savepoint(),
+                self.assertRaises(AccessError),
+            ):
+                foreign.with_context(allowed_company_ids=company_a.ids).sudo(
+                    elevated
+                ).record_fta_confirmation(evidence)
+            with (
+                self.subTest(wrong_kind=elevated),
+                self.cr.savepoint(),
+                self.assertRaises(UserError),
+            ):
+                failure.sudo(elevated).record_fta_confirmation(evidence)
+        self.assertFalse(case.fta_confirmation_ids)
+        self.assertFalse(foreign.fta_confirmation_ids)
+        self.assertEqual(
+            case.read(
+                [
+                    "state",
+                    "write_date",
+                    "fta_confirmation_received_at",
+                    "fta_confirmation_reference",
+                    "activity_ids",
+                ]
+            ),
+            before,
+        )
+        action = case.action_record_fta_confirmation()
+        wizard = (
+            self.env[action["res_model"]]
+            .with_user(manager)
+            .with_context(**action["context"])
+            .create(
+                {
+                    **{
+                        key: value
+                        for key, value in evidence.items()
+                        if key != "document"
+                    },
+                    "document": BinaryBytes(
+                        b"Synthetic FTA registration confirmation\n"
+                    ),
+                }
+            )
+        )
+        parameters = self.env["ir.config_parameter"].sudo()
+        self.assertFalse(parameters.get_bool("database.is_neutralized"))
+        parameters.set_bool("database.is_neutralized", True)
+        try:
+            for elevated in (False, True):
+                with (
+                    self.subTest(neutralized_launch=elevated),
+                    self.cr.savepoint(),
+                    self.assertRaises(UserError),
+                ):
+                    case.sudo(elevated).action_record_fta_confirmation()
+                with (
+                    self.subTest(neutralized_capture=elevated),
+                    self.cr.savepoint(),
+                    self.assertRaises(UserError),
+                ):
+                    wizard.sudo(elevated).action_confirm()
+        finally:
+            parameters.set_bool("database.is_neutralized", False)
+        self.assertFalse(case.fta_confirmation_ids)
+        wizard.action_confirm()
+        original = case.fta_confirmation_ids
+        foreign.record_fta_confirmation(evidence)
+        foreign_original = foreign.fta_confirmation_ids
+        for elevated in (False, True):
+            with (
+                self.subTest(foreign_download=elevated),
+                self.cr.savepoint(),
+                self.assertRaises(AccessError),
+            ):
+                _ = (
+                    foreign_original.with_context(allowed_company_ids=company_a.ids)
+                    .sudo(elevated)
+                    .document
+                )
+            with (
+                self.subTest(reader_replay=elevated),
+                self.cr.savepoint(),
+                self.assertRaises(AccessError),
+            ):
+                case.with_user(reader).sudo(elevated).record_fta_confirmation(evidence)
+            with (
+                self.subTest(raw_orm_create=elevated),
+                self.cr.savepoint(),
+                self.assertRaises(UserError),
+            ):
+                self.env[original._name].with_user(manager).sudo(elevated).create(
+                    {"incident_id": case.id}
+                )
+            with (
+                self.subTest(reparent=elevated),
+                self.cr.savepoint(),
+                self.assertRaises(UserError),
+            ):
+                original.sudo(elevated).write({"incident_id": foreign.id})
+        with self.cr.savepoint(), self.assertRaises(AccessError):
+            original.with_user(reader).read(["document_content"])
+        # Corrupt storage only as a fixture fault, then exercise the public binary read.
+        with self.cr.savepoint(), self.assertRaises(UserError):
+            self.cr.execute(
+                "UPDATE l10n_ae_edi_incident_confirmation "
+                "SET document_content = %s WHERE id = %s",
+                (b"Corrupt fixture original", original.id),
+            )
+            original.invalidate_recordset(["document_content", "document"])
+            _ = original.with_user(reader).document
+        self.assertEqual(
+            original.with_user(reader).document.content,
+            b"Synthetic FTA registration confirmation\n",
+        )
+        self.assertEqual(len(case.fta_confirmation_ids), 1)
+        self.assertFalse(case.activity_ids)
+        self.assertFalse(case.notice_ids)
+
+    @freeze_time("2026-12-08 12:00:00")
     def test_manager_retains_fta_confirmation_and_binds_registration_clock(self):
         manager = new_test_user(
             self.env,
