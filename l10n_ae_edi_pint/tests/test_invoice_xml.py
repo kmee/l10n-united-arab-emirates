@@ -6065,6 +6065,98 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
             }
         )
 
+    def test_native_uae_states_emit_and_freeze_pint_emirate_codes(
+        self,
+    ):
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {"name": "Synthetic reviewed emirate addresses"}
+        )
+        cases = (
+            ("base.state_ae_az", "AUH", "Abu Dhabi"),
+            ("base.state_ae_aj", "AJM", "Ajman"),
+            ("base.state_ae_du", "DXB", "Dubai"),
+            ("base.state_ae_fu", "FUJ", "Fujairah"),
+            ("base.state_ae_rk", "RAK", "Ras al-Khaimah"),
+            ("base.state_ae_sh", "SHJ", "Sharjah"),
+            ("base.state_ae_uq", "UAQ", "Umm al-Quwain"),
+        )
+        for state_ref, code, label in cases:
+            with self.subTest(emirate=code):
+                state = self.env.ref(state_ref)
+                self.partner_a.state_id = state
+                invoice = self.init_invoice(
+                    "out_invoice", amounts=[100], taxes=self.tax_sale_a
+                ).with_user(self.simple_accountman)
+                self.assertFalse(invoice.env.su)
+                invoice.l10n_ae_binding_id = binding
+                invoice.action_post()
+                ledger_fields = [
+                    "account_id",
+                    "partner_id",
+                    "currency_id",
+                    "debit",
+                    "credit",
+                    "balance",
+                    "amount_currency",
+                    "tax_ids",
+                    "write_date",
+                ]
+                ledger = invoice.line_ids.sorted("id").read(ledger_fields)
+                invoice.action_l10n_ae_prepare()
+                issue = invoice.l10n_ae_transmission_id
+                frozen = issue.read(
+                    [
+                        "payload",
+                        "payload_hash",
+                        "xml_content",
+                        "xml_hash",
+                        "idempotency_key",
+                    ]
+                )
+                tree = etree.fromstring(issue.xml_content.encode())
+                for role, expected in (("Supplier", "DXB"), ("Customer", code)):
+                    self.assertEqual(
+                        tree.findtext(
+                            f"cac:Accounting{role}Party/cac:Party/cac:PostalAddress/"
+                            "cbc:CountrySubentity",
+                            namespaces=NS,
+                        ),
+                        expected,
+                    )
+                snapshot = json.loads(issue.payload)
+                self.assertEqual(snapshot["supplier"]["subdivision"], "DXB")
+                self.assertEqual(snapshot["supplier"]["subdivision_name"], "Dubai")
+                self.assertEqual(snapshot["buyer"]["subdivision"], code)
+                self.assertEqual(snapshot["buyer"]["subdivision_name"], label)
+                self.assertEqual(invoice.amount_untaxed, 100)
+                self.assertEqual(invoice.amount_tax, 5)
+                self.assertEqual(invoice.amount_total, 105)
+                report = invoice.validate_l10n_ae_pint()
+                self.assertTrue(report["valid"], report)
+                self.partner_a.state_id = self.env.ref("base.state_ae_du")
+                invoice.action_l10n_ae_prepare()
+                self.assertEqual(
+                    invoice.preview_l10n_ae_pint(), frozen[0]["xml_content"]
+                )
+                self.assertEqual(
+                    issue.read(
+                        [
+                            "payload",
+                            "payload_hash",
+                            "xml_content",
+                            "xml_hash",
+                            "idempotency_key",
+                        ]
+                    ),
+                    frozen,
+                )
+                self.assertEqual(
+                    invoice.line_ids.sorted("id").read(ledger_fields), ledger
+                )
+                self.assertFalse(issue.attempt_ids)
+                self.assertFalse(issue.event_ids)
+                self.assertEqual(state.name, label)
+
     def test_native_form_shows_unverified_effective_aed_quote_and_frozen_source(self):
         usd = self.env.ref("base.USD")
         usd.active = True
