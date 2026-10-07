@@ -23,6 +23,129 @@ class TestUaeIncident(AccountTestInvoicingCommon):
         super().setUpClass()
 
     @freeze_time("2026-12-08 12:00:00")
+    def test_manager_retains_fta_confirmation_and_binds_registration_clock(self):
+        manager = new_test_user(
+            self.env,
+            login="synthetic-fta-confirmation-manager",
+            groups="account.group_account_manager",
+            company_ids=self.env.company.ids,
+            company_id=self.env.company.id,
+        )
+        reader = new_test_user(
+            self.env,
+            login="synthetic-fta-confirmation-reader",
+            groups="account.group_account_readonly",
+            company_ids=self.env.company.ids,
+            company_id=self.env.company.id,
+        )
+        incident = (
+            self.env["l10n_ae.edi.incident"]
+            .with_user(manager)
+            .create(
+                {
+                    "name": "Synthetic supplied FTA registration confirmation",
+                    "incident_kind": "registration_change",
+                    "reason": "Synthetic address amendment confirmation received",
+                    "responsible_id": manager.id,
+                    "calendar_start": "2026-12-01",
+                    "calendar_end": "2026-12-10",
+                    "calendar_holidays": ["2026-12-02", "2026-12-03"],
+                    "calendar_source": "Reviewed synthetic federal holidays",
+                    "calendar_version": "synthetic-federal-2026",
+                    "source_reference": "Reviewed MD243 Art5.3 and day exclusion",
+                    "review_note": "Dubai Dec1 receipt; Dec4,7,8,9,10 are days1-5",
+                }
+            )
+        )
+        content = b"Synthetic FTA registration confirmation\n"
+        digest = "203b34111aa50c86b0fafe85c264901e9d46c29363082ed659e584822730b639"
+        evidence = {
+            "evidence_key": "synthetic-fta-confirmation-A",
+            "evidence_origin": "simulated",
+            "received_at": "2026-11-30 21:30:00",
+            "external_reference": "Synthetic FTA confirmation A",
+            "source_reference": "Supplied synthetic confirmation file",
+            "review_note": "Receipt reviewed; no authorship or delivery verification",
+            "document_filename": "synthetic-fta-confirmation.txt",
+            "document": base64.b64encode(content).decode(),
+        }
+        result = incident.record_fta_confirmation(evidence)
+        confirmation = incident.fta_confirmation_ids
+        self.assertEqual(result["id"], confirmation.id)
+        self.assertEqual(result["document_sha256"], digest)
+        self.assertEqual(len(confirmation), 1)
+        self.assertEqual(confirmation.document.content, content)
+        self.assertEqual(confirmation.document_sha256, digest)
+        self.assertEqual(confirmation.evidence_origin, "simulated")
+        self.assertEqual(confirmation.recorded_by_id, manager)
+        self.assertEqual(confirmation.recorded_at, fields.Datetime.now())
+        self.assertEqual(
+            incident.fta_confirmation_received_at,
+            fields.Datetime.to_datetime("2026-11-30 21:30:00"),
+        )
+        self.assertEqual(
+            incident.fta_confirmation_reference, "Synthetic FTA confirmation A"
+        )
+        self.assertEqual(incident.state, "draft")
+        self.assertFalse(incident.notification_due_date)
+        self.assertFalse(incident.activity_ids)
+        self.assertFalse(incident.notice_ids)
+        recorded = incident.read(["write_date"])
+        self.assertEqual(incident.record_fta_confirmation(evidence), result)
+        self.assertEqual(incident.read(["write_date"]), recorded)
+        for field, value in (
+            ("fta_confirmation_received_at", "2026-12-08 08:00:00"),
+            ("fta_confirmation_reference", "Changed reference"),
+            ("incident_kind", "system_failure"),
+        ):
+            with (
+                self.subTest(field=field),
+                self.cr.savepoint(),
+                self.assertRaises(UserError),
+            ):
+                incident.write({field: value})
+        for changed in (
+            {"evidence_key": "different-key"},
+            {"document": base64.b64encode(b"Different original").decode()},
+            {"received_at": "2026-12-01 10:00:00"},
+        ):
+            with (
+                self.subTest(changed=changed),
+                self.cr.savepoint(),
+                self.assertRaises(UserError),
+            ):
+                incident.record_fta_confirmation({**evidence, **changed})
+        for elevated in (False, True):
+            with (
+                self.subTest(reader_sudo=elevated),
+                self.cr.savepoint(),
+                self.assertRaises(AccessError),
+            ):
+                incident.with_user(reader).sudo(elevated).record_fta_confirmation(
+                    evidence
+                )
+        self.assertEqual(confirmation.with_user(reader).document.content, content)
+        with self.cr.savepoint(), self.assertRaises(UserError):
+            confirmation.write({"external_reference": "Changed"})
+        with self.cr.savepoint(), self.assertRaises((AccessError, UserError)):
+            confirmation.unlink()
+        self.assertTrue(incident.action_open())
+        self.assertEqual(incident.notification_due_date, date(2026, 12, 10))
+        self.assertEqual(incident.activity_ids.date_deadline, date(2026, 12, 10))
+        opened = incident.read(
+            ["state", "write_date", "notification_due_date", "activity_ids"]
+        )
+        self.assertEqual(incident.record_fta_confirmation(evidence), result)
+        self.assertEqual(
+            incident.read(
+                ["state", "write_date", "notification_due_date", "activity_ids"]
+            ),
+            opened,
+        )
+        self.assertEqual(incident.fta_confirmation_ids, confirmation)
+        self.assertFalse(incident.notice_ids)
+
+    @freeze_time("2026-12-08 12:00:00")
     def test_manager_retains_reviewed_outage_impacts_without_new_submissions(self):
         manager = new_test_user(
             self.env,
