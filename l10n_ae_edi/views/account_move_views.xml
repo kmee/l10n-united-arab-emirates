@@ -96,6 +96,18 @@
                             readonly="l10n_ae_transmission_id or l10n_ae_received_document"
                         />
                         <field
+                            name="l10n_ae_summary"
+                            readonly="l10n_ae_transmission_id or l10n_ae_received_document"
+                        />
+                        <field
+                            name="l10n_ae_invoicing_period_start"
+                            readonly="l10n_ae_transmission_id or l10n_ae_received_document"
+                        />
+                        <field
+                            name="l10n_ae_invoicing_period_end"
+                            readonly="l10n_ae_transmission_id or l10n_ae_received_document"
+                        />
+                        <field
                             name="l10n_ae_exports"
                             readonly="l10n_ae_transmission_id or l10n_ae_received_document"
                         />

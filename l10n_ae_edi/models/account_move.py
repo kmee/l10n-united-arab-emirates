@@ -137,6 +137,10 @@ class AccountMove(models.Model):
     l10n_ae_deemed_supply = fields.Boolean(string="Deemed Supply", copy=False)
     l10n_ae_margin_scheme = fields.Boolean(string="Profit Margin Scheme", copy=False)
     l10n_ae_summary = fields.Boolean(string="Summary Invoice", copy=False)
+    l10n_ae_invoicing_period_start = fields.Date(
+        string="Invoice Period Start", copy=False
+    )
+    l10n_ae_invoicing_period_end = fields.Date(string="Invoice Period End", copy=False)
     l10n_ae_continuous_supply = fields.Boolean(string="Continuous Supply", copy=False)
     l10n_ae_disclosed_agent = fields.Boolean(
         string="Disclosed Agent Billing", copy=False
@@ -326,6 +330,8 @@ class AccountMove(models.Model):
             "l10n_ae_tax_exchange_rate",
             "l10n_ae_tax_exchange_date",
             "l10n_ae_tax_exchange_source",
+            "l10n_ae_invoicing_period_start",
+            "l10n_ae_invoicing_period_end",
             "l10n_ae_beneficiary_id",
             "l10n_ae_principal_id",
             "l10n_ae_document_category",
@@ -557,7 +563,7 @@ class AccountMove(models.Model):
         counterparty = party(partner)
         agreement = self.l10n_ae_selfbilling_agreement_id
         destination = self._l10n_ae_destination_override()
-        return {
+        snapshot = {
             "contract_version": "kmee-controlled-1",
             "company": company_party,
             "counterparty": counterparty,
@@ -664,6 +670,14 @@ class AccountMove(models.Model):
                 if not line.display_type or line.display_type == "product"
             ],
         }
+        if self.l10n_ae_invoicing_period_start or self.l10n_ae_invoicing_period_end:
+            snapshot["invoicing_period"] = {
+                "start_date": fields.Date.to_string(self.l10n_ae_invoicing_period_start)
+                or None,
+                "end_date": fields.Date.to_string(self.l10n_ae_invoicing_period_end)
+                or None,
+            }
+        return snapshot
 
     def _l10n_ae_prepare_xml(self):
         """Format addons provide submitted bytes at the preparation boundary."""
