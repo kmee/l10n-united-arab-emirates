@@ -6069,7 +6069,10 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         self,
     ):
         binding = self.env["l10n_ae.edi.binding"].create(
-            {"name": "Synthetic reviewed emirate addresses"}
+            {
+                "name": "Synthetic reviewed emirate addresses",
+                "fiscal_uuid_policy": "controlled_local",
+            }
         )
         cases = (
             ("base.state_ae_az", "AUH", "Abu Dhabi"),
