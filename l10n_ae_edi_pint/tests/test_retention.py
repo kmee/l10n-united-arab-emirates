@@ -26,11 +26,16 @@ class TestUaeReceivedRetention(AccountTestInvoicingCommon):
             {"l10n_ae_tin": "1000000001", "l10n_ae_tin_confirmed": True}
         )
         cls.env.company.partner_id.write(
-            {"routing_scheme": "0235", "routing_endpoint": "1000000001"}
+            {
+                "routing_scheme": "0235",
+                "routing_endpoint": "1000000001",
+                "state_id": cls.env.ref("base.state_ae_du").id,
+            }
         )
         cls.partner_a.write(
             {
                 "country_id": cls.env.ref("base.ae").id,
+                "state_id": cls.env.ref("base.state_ae_du").id,
                 "routing_scheme": "0235",
                 "routing_endpoint": "1000000002",
             }
