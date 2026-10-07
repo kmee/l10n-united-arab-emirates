@@ -109,7 +109,7 @@ class AccountEdiUblUae(models.AbstractModel):
     def _l10n_ae_exchange_rate(self, vals):
         if vals["currency"].name == "AED":
             return Decimal(1)
-        return Decimal(vals["invoice"].l10n_ae_tax_exchange_rate)
+        return Decimal(vals["invoice"]._l10n_ae_tax_exchange()["rate"])
 
     def _l10n_ae_decimal_text(self, value):
         text = format(value, "f")
@@ -425,7 +425,9 @@ class AccountEdiUblUae(models.AbstractModel):
             document["cac:TaxExchangeRate"] = {
                 "cbc:SourceCurrencyCode": {"_text": currency},
                 "cbc:TargetCurrencyCode": {"_text": "AED"},
-                "cbc:CalculationRate": {"_text": invoice.l10n_ae_tax_exchange_rate},
+                "cbc:CalculationRate": {
+                    "_text": invoice._l10n_ae_tax_exchange()["rate"]
+                },
             }
             vat = (
                 sum(
