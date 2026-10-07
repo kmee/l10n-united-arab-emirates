@@ -1,6 +1,7 @@
 # Copyright 2026 KMEE
 # License AGPL-3.0 or later (https://www.gnu.org/licenses/agpl).
 from odoo import api, fields, models
+from odoo.exceptions import UserError
 
 
 class ProductTemplate(models.Model):
@@ -76,3 +77,25 @@ class ProductTemplate(models.Model):
             "l10n_ae_service_accounting_code",
             "l10n_ae_service_accounting_version",
         ]
+
+    def write(self, vals):
+        if {
+            "l10n_ae_is_good_and_service",
+            "l10n_ae_classification_code",
+            "l10n_ae_service_accounting_code",
+            "l10n_ae_service_accounting_version",
+        }.intersection(vals):
+            for template in self:
+                variants = (
+                    template.product_variant_ids
+                    or template.with_context(active_test=False).product_variant_ids
+                )
+                if len(variants) > 1:
+                    # The native proxy inverse otherwise silently ignores this
+                    # write. Make the required variant-level review explicit.
+                    raise UserError(
+                        self.env._(
+                            "Configure UAE classification on each individual variant."
+                        )
+                    )
+        return super().write(vals)
