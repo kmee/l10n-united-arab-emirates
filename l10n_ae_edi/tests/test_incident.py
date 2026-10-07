@@ -44,6 +44,44 @@ class TestUaeIncident(AccountTestInvoicingCommon):
     def setUpClass(cls):
         super().setUpClass()
 
+    def test_calendar_context_default_cannot_select_unapproved_version(self):
+        manager = new_test_user(
+            self.env,
+            login="synthetic-calendar-default-manager",
+            groups="account.group_account_manager",
+            company_ids=self.env.company.ids,
+            company_id=self.env.company.id,
+        )
+        calendar = (
+            self.env["l10n_ae.edi.calendar"]
+            .with_user(manager)
+            .create(
+                {
+                    "name": "Synthetic unreviewed calendar",
+                    "version": "synthetic-draft",
+                }
+            )
+        )
+        incidents = self.env["l10n_ae.edi.incident"].with_user(manager)
+        for defaults in (False, True):
+            with self.subTest(context_default=defaults):
+                target = (
+                    incidents.with_context(default_calendar_version_id=calendar.id)
+                    if defaults
+                    else incidents
+                )
+                values = {"name": "Synthetic unapproved selection"}
+                if not defaults:
+                    values["calendar_version_id"] = calendar.id
+                with (
+                    self.cr.savepoint(),
+                    self.assertRaisesRegex(ValidationError, "reviewed calendar"),
+                ):
+                    target.create(values)
+        self.assertFalse(
+            incidents.search([("name", "=", "Synthetic unapproved selection")])
+        )
+
     @freeze_time("2026-12-01 12:00:00")
     def test_incident_form_selects_approved_calendar_and_freezes_basis(self):
         manager = new_test_user(
