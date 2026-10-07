@@ -74,6 +74,9 @@ class UaeEdiIncident(models.Model):
     notice_ids = fields.One2many(
         "l10n_ae.edi.incident.notice", "incident_id", readonly=True
     )
+    impact_ids = fields.One2many(
+        "l10n_ae.edi.incident.impact", "incident_id", readonly=True, copy=False
+    )
 
     _protected_fields: ClassVar[set[str]] = {
         "state",
@@ -82,6 +85,7 @@ class UaeEdiIncident(models.Model):
         "opened_at",
         "timezone",
         "notice_ids",
+        "impact_ids",
     }
 
     @api.depends("calendar_holidays")
@@ -148,6 +152,7 @@ class UaeEdiIncident(models.Model):
                 opened_by_id=False,
                 opened_at=False,
                 notice_ids=[],
+                impact_ids=[],
             )
             prepared.append(vals)
         return super().create(prepared)
@@ -353,6 +358,22 @@ class UaeEdiIncident(models.Model):
             "notice_purpose": notice.notice_purpose,
             "evidence_origin": notice.evidence_origin,
         }
+
+    def record_affected_transmissions(self, evidence):
+        self.ensure_one()
+        self._check_actor("write")
+        if self.env["ir.config_parameter"].sudo().get_bool("database.is_neutralized"):
+            raise UserError(
+                self.env._("Impact recording is disabled on a neutralized copy.")
+            )
+        self.env.cr.execute(
+            "SELECT id FROM l10n_ae_edi_incident WHERE id = %s FOR UPDATE", (self.id,)
+        )
+        self.invalidate_recordset()
+        batch = self.env["l10n_ae.edi.incident.impact"]._record(self, evidence)
+        batch.check_access("read")
+        self.invalidate_recordset(["impact_ids"])
+        return {"id": batch.id, "transmission_ids": batch.transmission_ids.ids}
 
     @api.ondelete(at_uninstall=False)
     def _unlink_except_opened_incident(self):
