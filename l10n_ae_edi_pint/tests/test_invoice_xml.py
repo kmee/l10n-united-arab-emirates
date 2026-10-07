@@ -4383,6 +4383,158 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
             with self.assertRaisesRegex(UserError, "received"):
                 bill.write(values)
 
+    def test_received_summary_invalid_periods_are_retained_without_accounting(self):
+        company = self.env.company
+        source = self.init_invoice(
+            "out_invoice", amounts=[40, 60], taxes=self.tax_sale_a, post=True
+        )
+        source.write(
+            {
+                "l10n_ae_summary": True,
+                "l10n_ae_invoicing_period_start": "2019-01-01",
+                "l10n_ae_invoicing_period_end": "2019-01-31",
+                "l10n_ae_fiscal_uuid": "cccccccf-2222-4222-8222-222222222222",
+            }
+        )
+        valid_report = source.validate_l10n_ae_pint()
+        self.assertTrue(valid_report["valid"], valid_report)
+        control = self._received_test_xml(source)
+        control_report = OfflinePintValidator(
+            "/opt/uae-addons/.runtime/normative",
+            ruleset="kmee-pint-ae-1.0.4-ubl-2.1",
+        ).validate(etree.tostring(control))
+        self.assertTrue(control_report["valid"], control_report)
+        self.assertEqual(control.findtext("cbc:InvoiceTypeCode", namespaces=NS), "380")
+        self.assertEqual(
+            control.findtext("cbc:ProfileExecutionID", namespaces=NS), "00010000"
+        )
+        for path, expected in (
+            ("cac:LegalMonetaryTotal/cbc:TaxExclusiveAmount", "100.00"),
+            ("cac:TaxTotal/cbc:TaxAmount", "5.00"),
+            ("cac:LegalMonetaryTotal/cbc:TaxInclusiveAmount", "105.00"),
+            ("cac:LegalMonetaryTotal/cbc:PayableAmount", "105.00"),
+        ):
+            self.assertEqual(control.findtext(path, namespaces=NS), expected)
+        self.assertEqual(
+            (source.amount_untaxed, source.amount_tax, source.amount_total),
+            (100, 5, 105),
+        )
+
+        receiver = (
+            self.env["l10n_ae.edi.inbox"]
+            .with_user(self.simple_accountman)
+            .with_context(allowed_company_ids=[company.id])
+        )
+        self.assertFalse(receiver.env.su)
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {"name": "Synthetic invalid received Summary periods"}
+        )
+        move_model_names = (
+            "account.move",
+            "account.move.line",
+            "l10n_ae.edi.transmission",
+            "l10n_ae.edi.attempt",
+            "l10n_ae.edi.event",
+        )
+        ledger_fields = [
+            "account_id",
+            "partner_id",
+            "currency_id",
+            "date",
+            "debit",
+            "credit",
+            "balance",
+            "amount_currency",
+            "tax_ids",
+            "write_date",
+        ]
+        source_ledger = source.line_ids.sorted("id").read(ledger_fields)
+        source_timestamps = source.read(["create_date", "write_date"])
+        for index, (vector, expected_rule) in enumerate(
+            (("reversed", "ibr-029"), ("missing", "ibr-138-ae")), start=1
+        ):
+            with self.subTest(vector=vector):
+                tree = etree.fromstring(etree.tostring(control))
+                tree.find(
+                    "cbc:UUID", NS
+                ).text = f"eeeeee{index:02d}-2222-4222-8222-222222222222"
+                period = tree.find("cac:InvoicePeriod", NS)
+                self.assertIsNotNone(period)
+                if vector == "reversed":
+                    period.find("cbc:StartDate", NS).text = "2019-01-31"
+                    period.find("cbc:EndDate", NS).text = "2019-01-01"
+                else:
+                    tree.remove(period)
+                content = etree.tostring(tree, encoding="UTF-8", xml_declaration=True)
+                original_hash = hashlib.sha256(content).hexdigest()
+                before_ids = {
+                    model: self.env[model].search([("company_id", "=", company.id)]).ids
+                    for model in move_model_names
+                }
+                inbox = receiver.receive_controlled_document(
+                    binding.id, f"invalid-summary-period-{vector}", content
+                )
+                self.assertFalse(inbox.action_process())
+                self.assertEqual(inbox.state, "review")
+                self.assertFalse(inbox.move_id)
+                self.assertEqual(inbox.original_xml.content, content)
+                self.assertEqual(inbox.xml_hash, original_hash)
+                history = inbox.processing_history_ids.sorted("id")
+                self.assertEqual(len(history), 1)
+                report = json.loads(history[0].validation_report)
+                self.assertEqual(
+                    history[0].validation_report_hash,
+                    hashlib.sha256(history[0].validation_report.encode()).hexdigest(),
+                )
+                self.assertTrue(report["xsd_valid"], report)
+                self.assertFalse(report["valid"], report)
+                self.assertEqual(report["ruleset"], "kmee-pint-ae-1.0.4-ubl-2.1")
+                failures = {
+                    failure["code"]
+                    for layer in report["layers"]
+                    for failure in layer["failures"]
+                }
+                self.assertEqual(failures, {expected_rule}, report)
+                self.assertIn(expected_rule, inbox.diagnostic.lower())
+                self.assertFalse(inbox.action_process())
+                self.assertEqual(inbox.state, "review")
+                self.assertFalse(inbox.move_id)
+                self.assertEqual(inbox.original_xml.content, content)
+                self.assertEqual(inbox.xml_hash, original_hash)
+                self.assertEqual(
+                    {
+                        model: self.env[model]
+                        .search([("company_id", "=", company.id)])
+                        .ids
+                        for model in move_model_names
+                    },
+                    before_ids,
+                )
+                self.assertEqual(
+                    source.line_ids.sorted("id").read(ledger_fields),
+                    source_ledger,
+                )
+                self.assertEqual(
+                    source.read(["create_date", "write_date"]), source_timestamps
+                )
+                reports = [
+                    json.loads(row.validation_report)
+                    for row in inbox.processing_history_ids.sorted("id")
+                ]
+                self.assertEqual(len(reports), 2)
+                self.assertTrue(all(not row["valid"] for row in reports))
+                self.assertEqual(
+                    [
+                        {
+                            failure["code"]
+                            for layer in row["layers"]
+                            for failure in layer["failures"]
+                        }
+                        for row in reports
+                    ],
+                    [{expected_rule}, {expected_rule}],
+                )
+
     def test_received_free_zone_preserves_beneficiary_without_changing_vat(self):
         source = self.init_invoice(
             "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
@@ -7732,6 +7884,175 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         self.assertEqual(issue.submission_state, "queued")
         self.assertFalse(issue.attempt_ids)
         self.assertFalse(issue.event_ids)
+
+    def test_summary_tax_invoice_serializes_single_reviewed_period_endpoint(self):
+        company = self.env.company
+        self.assertEqual((company.currency_id.name, self.tax_sale_a.amount), ("AED", 5))
+        manager_moves = (
+            self.env["account.move"]
+            .with_user(self.simple_accountman)
+            .with_context(allowed_company_ids=[company.id])
+        )
+        self.assertFalse(manager_moves.env.su)
+        journal = self.env["account.journal"].search(
+            [("company_id", "=", company.id), ("type", "=", "sale")], limit=1
+        )
+        ledger_fields = [
+            "account_id",
+            "partner_id",
+            "currency_id",
+            "date",
+            "debit",
+            "credit",
+            "balance",
+            "amount_currency",
+            "tax_ids",
+            "write_date",
+        ]
+        for index, (start, end) in enumerate(
+            (("2019-01-01", False), (False, "2019-01-31")), start=1
+        ):
+            with self.subTest(start=start, end=end):
+                binding = self.env["l10n_ae.edi.binding"].create(
+                    {"name": f"Synthetic one-ended summary period {index}"}
+                )
+                invoice = manager_moves.create(
+                    {
+                        "move_type": "out_invoice",
+                        "partner_id": self.partner_a.id,
+                        "journal_id": journal.id,
+                        "currency_id": company.currency_id.id,
+                        "invoice_date": "2019-01-31",
+                        "l10n_ae_summary": True,
+                        "l10n_ae_invoicing_period_start": start,
+                        "l10n_ae_invoicing_period_end": end,
+                        "l10n_ae_binding_id": binding.id,
+                        "l10n_ae_fiscal_uuid": (
+                            f"cccccc{index:02d}-1111-4111-8111-111111111111"
+                        ),
+                        "invoice_line_ids": [
+                            (
+                                0,
+                                0,
+                                {
+                                    "name": "Synthetic monthly supply forty",
+                                    "product_id": self.product_a.id,
+                                    "quantity": 1,
+                                    "price_unit": 40,
+                                    "tax_ids": [(6, 0, self.tax_sale_a.ids)],
+                                },
+                            ),
+                            (
+                                0,
+                                0,
+                                {
+                                    "name": "Synthetic monthly supply sixty",
+                                    "product_id": self.product_a.id,
+                                    "quantity": 1,
+                                    "price_unit": 60,
+                                    "tax_ids": [(6, 0, self.tax_sale_a.ids)],
+                                },
+                            ),
+                        ],
+                    }
+                )
+                self.assertFalse(invoice.env.su)
+                invoice.action_post()
+                self.assertEqual(
+                    (invoice.amount_untaxed, invoice.amount_tax, invoice.amount_total),
+                    (100, 5, 105),
+                )
+                ledger = invoice.line_ids.sorted("id").read(ledger_fields)
+                invoice.action_l10n_ae_prepare()
+                issue = invoice.l10n_ae_transmission_id
+                self.assertEqual(
+                    json.loads(issue.payload)["invoicing_period"],
+                    {"start_date": start or None, "end_date": end or None},
+                )
+                frozen_issue = (
+                    issue.id,
+                    issue.payload,
+                    issue.payload_hash,
+                    issue.xml_content,
+                    issue.xml_hash,
+                    issue.idempotency_key,
+                )
+                invoice_timestamps = invoice.read(["create_date", "write_date"])
+                issue_timestamps = issue.read(["create_date", "write_date"])
+
+                xml_text = invoice.preview_l10n_ae_pint()
+                report = invoice.validate_l10n_ae_pint()
+                self.assertTrue(report["valid"], report)
+                self.assertEqual(report["ruleset"], "kmee-pint-ae-1.0.4-ubl-2.1")
+                xml = etree.fromstring(xml_text.encode())
+                self.assertEqual(
+                    xml.findtext("cbc:InvoiceTypeCode", namespaces=NS), "380"
+                )
+                self.assertEqual(
+                    xml.findtext("cbc:ProfileExecutionID", namespaces=NS),
+                    "00010000",
+                )
+                periods = xml.findall("cac:InvoicePeriod", namespaces=NS)
+                self.assertEqual(len(periods), 1)
+                self.assertEqual(
+                    periods[0].findtext("cbc:StartDate", namespaces=NS), start or None
+                )
+                self.assertEqual(
+                    periods[0].findtext("cbc:EndDate", namespaces=NS), end or None
+                )
+                self.assertEqual(
+                    periods[0].find("cbc:StartDate", namespaces=NS) is not None,
+                    bool(start),
+                )
+                self.assertEqual(
+                    periods[0].find("cbc:EndDate", namespaces=NS) is not None,
+                    bool(end),
+                )
+                for path, expected in (
+                    ("cac:LegalMonetaryTotal/cbc:TaxExclusiveAmount", "100.00"),
+                    ("cac:TaxTotal/cbc:TaxAmount", "5.00"),
+                    ("cac:LegalMonetaryTotal/cbc:TaxInclusiveAmount", "105.00"),
+                    ("cac:LegalMonetaryTotal/cbc:PayableAmount", "105.00"),
+                ):
+                    self.assertEqual(xml.findtext(path, namespaces=NS), expected)
+                self.assertEqual(issue.xml_content, xml_text)
+                self.assertEqual(
+                    hashlib.sha256(issue.xml_content.encode()).hexdigest(),
+                    issue.xml_hash,
+                )
+                self.assertEqual(
+                    (
+                        issue.id,
+                        issue.payload,
+                        issue.payload_hash,
+                        issue.xml_content,
+                        issue.xml_hash,
+                        issue.idempotency_key,
+                    ),
+                    frozen_issue,
+                )
+                self.assertEqual(invoice.preview_l10n_ae_pint(), frozen_issue[3])
+                period_field = (
+                    "l10n_ae_invoicing_period_start"
+                    if start
+                    else "l10n_ae_invoicing_period_end"
+                )
+                with self.assertRaisesRegex(UserError, "frozen UAE"):
+                    invoice.write({period_field: "2019-02-01"})
+                repeated_report = invoice.validate_l10n_ae_pint()
+                self.assertTrue(repeated_report["valid"], repeated_report)
+                self.assertEqual(
+                    invoice.line_ids.sorted("id").read(ledger_fields), ledger
+                )
+                self.assertEqual(
+                    invoice.read(["create_date", "write_date"]), invoice_timestamps
+                )
+                self.assertEqual(
+                    issue.read(["create_date", "write_date"]), issue_timestamps
+                )
+                self.assertEqual(issue.submission_state, "queued")
+                self.assertFalse(issue.attempt_ids)
+                self.assertFalse(issue.event_ids)
 
     def test_combined_free_zone_export_preserves_eight_bits_and_beneficiary(self):
         invoice = self.init_invoice(
