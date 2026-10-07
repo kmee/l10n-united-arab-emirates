@@ -245,6 +245,15 @@ class AccountEdiUblUae(models.AbstractModel):
     def _ubl_add_line_item_commodity_classification_nodes(self, vals):
         # Extend the public Odoo20 hook, as the LGPL-3 Odoo PR262200 does.
         nodes = super()._ubl_add_line_item_commodity_classification_nodes(vals)
+        # IBR-188-AE restricts this document's scheme to HS. Optional native
+        # localizations can contribute CPV/UNSPSC/KPD here; keep their product
+        # data and generic exporters intact, filtering only this UAE node list.
+        nodes[:] = [
+            node
+            for node in nodes
+            if "cbc:ItemClassificationCode" not in node
+            or node["cbc:ItemClassificationCode"].get("listID") == "HS"
+        ]
         product = vals["line_vals"]["base_line"]["product_id"]
         if not product:
             return nodes
