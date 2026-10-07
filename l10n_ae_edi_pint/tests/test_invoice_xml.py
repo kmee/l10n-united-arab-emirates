@@ -1873,7 +1873,9 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
                 self.assertFalse(invoice.l10n_ae_transmission_id)
                 self.assertEqual(invoice.state, "draft")
 
-    def test_export99_requires_explicit_dated_recipient_review_before_posting(self):
+    def test_export99_posts_but_requires_dated_recipient_review_before_preparation(
+        self,
+    ):
         self.env.company.l10n_ae_edi_auto_prepare = True
         self.partner_a.routing_endpoint = False
         binding = self.env["l10n_ae.edi.binding"].create(
@@ -1899,10 +1901,13 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
                         "l10n_ae_fiscal_uuid": str(uuid.uuid4()),
                     }
                 )
+                invoice.action_post()
+                self.assertEqual(invoice.state, "posted")
+                self.assertEqual(invoice.l10n_ae_preparation_state, "review")
+                self.assertRegex(invoice.l10n_ae_preparation_error, diagnostic)
+                self.assertFalse(invoice.l10n_ae_transmission_ids)
                 with self.assertRaisesRegex(UserError, diagnostic):
-                    invoice.action_post()
-                self.assertEqual(invoice.state, "draft")
-                self.assertFalse(invoice.l10n_ae_transmission_id)
+                    invoice.action_l10n_ae_prepare()
 
     def test_reviewed_non_peppol_export_routes_to_99_preserving_the_buyer(self):
         self.partner_a.write(
@@ -1971,7 +1976,7 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         report = invoice.validate_l10n_ae_pint()
         self.assertTrue(report["valid"], report)
 
-    def test_disclosed_agent_invalid_principal_blocks_posting_with_specific_diagnostic(
+    def test_disclosed_agent_invalid_principal_posts_with_preparation_diagnostic(
         self,
     ):
         self.env.company.l10n_ae_edi_auto_prepare = True
@@ -1991,10 +1996,13 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
                         "l10n_ae_principal_id": principal,
                     }
                 )
+                invoice.action_post()
+                self.assertEqual(invoice.state, "posted")
+                self.assertEqual(invoice.l10n_ae_preparation_state, "review")
+                self.assertRegex(invoice.l10n_ae_preparation_error, diagnostic)
+                self.assertFalse(invoice.l10n_ae_transmission_ids)
                 with self.assertRaisesRegex(UserError, diagnostic):
-                    invoice.action_post()
-                self.assertEqual(invoice.state, "draft")
-                self.assertFalse(invoice.l10n_ae_transmission_id)
+                    invoice.action_l10n_ae_prepare()
 
     def test_prepared_disclosed_agent_issue_freezes_principal_and_scenario(self):
         invoice = self.init_invoice(
@@ -7273,7 +7281,7 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         report = credit.validate_l10n_ae_pint()
         self.assertTrue(report["valid"], report)
 
-    def test_commercial_standard_vat_is_rejected_before_posting_or_freezing(self):
+    def test_commercial_standard_vat_posts_but_is_refused_before_freezing(self):
         binding = self.env["l10n_ae.edi.binding"].create(
             {
                 "name": "Invalid commercial simulation",
@@ -7315,9 +7323,12 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
                 )
                 with self.assertRaisesRegex(UserError, "IBR-122-AE"):
                     move.action_l10n_ae_validate()
+                move.action_post()
+                self.assertEqual(move.state, "posted")
+                self.assertEqual(move.l10n_ae_preparation_state, "review")
+                self.assertIn("IBR-122-AE", move.l10n_ae_preparation_error)
                 with self.assertRaisesRegex(UserError, "IBR-122-AE"):
-                    move.action_post()
-                self.assertEqual(move.state, "draft")
+                    move.action_l10n_ae_prepare()
                 self.assertEqual((move.amount_tax, move.amount_total), (5, 105))
                 self.assertFalse(move.l10n_ae_fiscal_uuid)
                 self.assertFalse(move.l10n_ae_transmission_id)
@@ -7641,7 +7652,7 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         with self.assertRaisesRegex(UserError, "purchase"):
             invoice.action_l10n_ae_validate()
 
-    def test_self_billing_posting_is_atomic_when_agreement_is_outside_its_term(self):
+    def test_self_billing_posts_with_review_when_agreement_is_outside_its_term(self):
         bill, agreement = self._selfbilling_bill_with_agreement()
         self.env.company.write(
             {
@@ -7650,9 +7661,12 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
             }
         )
         agreement.write({"start_date": "2000-01-01", "end_date": "2000-12-31"})
+        bill.action_post()
+        self.assertEqual(bill.state, "posted")
+        self.assertEqual(bill.l10n_ae_preparation_state, "review")
+        self.assertIn("self-billing agreement", bill.l10n_ae_preparation_error)
         with self.assertRaisesRegex(UserError, "self-billing agreement"):
-            bill.action_post()
-        self.assertEqual(bill.state, "draft")
+            bill.action_l10n_ae_prepare()
         self.assertFalse(bill.l10n_ae_transmission_id)
 
     def test_readonly_accountant_cannot_authorize_a_self_billing_agreement(self):
