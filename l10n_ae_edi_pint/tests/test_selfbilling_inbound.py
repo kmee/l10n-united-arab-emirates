@@ -104,7 +104,7 @@ class TestUaeSelfBillingInbound(AccountTestInvoicingCommon):
         return source, recipient_agreement, binding
 
     def test_received_invalid_emirate_retains_original_and_explains_local_review(self):
-        source, agreement, binding = self._selfbilling_fixture()
+        source, _agreement, binding = self._selfbilling_fixture()
         company = self.env.company
         manager = new_test_user(
             self.env,
@@ -115,8 +115,12 @@ class TestUaeSelfBillingInbound(AccountTestInvoicingCommon):
         )
         self.assertFalse(manager.has_group("base.group_system"))
         namespaces = {
-            "cac": "urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2",
-            "cbc": "urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2",
+            "cac": (
+                "urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2"
+            ),
+            "cbc": (
+                "urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2"
+            ),
         }
         root = etree.fromstring(source.preview_l10n_ae_pint().encode())
         subdivision = root.find(
@@ -126,11 +130,15 @@ class TestUaeSelfBillingInbound(AccountTestInvoicingCommon):
         self.assertEqual(subdivision.text, "DXB")
         subdivision.text = "Dubai"
         content = etree.tostring(root)
-        inbox_model = self.env["l10n_ae.edi.inbox"].with_user(manager).with_context(
-            allowed_company_ids=company.ids
+        inbox_model = (
+            self.env["l10n_ae.edi.inbox"]
+            .with_user(manager)
+            .with_context(allowed_company_ids=company.ids)
         )
-        moves = self.env["account.move"].with_user(manager).with_context(
-            allowed_company_ids=company.ids
+        moves = (
+            self.env["account.move"]
+            .with_user(manager)
+            .with_context(allowed_company_ids=company.ids)
         )
         domain = [("company_id", "=", company.id), ("move_type", "=", "out_invoice")]
         before = moves.search_count(domain)

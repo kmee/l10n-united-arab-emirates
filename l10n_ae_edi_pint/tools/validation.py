@@ -299,7 +299,13 @@ def _validate_offline(content, directory, ruleset=DEFAULT_RULESET):
         country = address.findtext(f"{{{cac}}}Country/{{{basic}}}IdentificationCode")
         subdivision = address.findtext(f"{{{basic}}}CountrySubentity")
         if country == "AE" and subdivision not in {
-            "AUH", "DXB", "SHJ", "UAQ", "FUJ", "AJM", "RAK"
+            "AUH",
+            "DXB",
+            "SHJ",
+            "UAQ",
+            "FUJ",
+            "AJM",
+            "RAK",
         }:
             failures.append(
                 {

@@ -268,6 +268,11 @@ class AccountMove(models.Model):
                     f"{failure['code']}: {failure['message']}"
                     for failure in layer["failures"]
                 )
+            for check in report.get("supplemental_checks", []):
+                diagnostics.extend(
+                    f"KMEE supplemental {failure['code']}: {failure['message']}"
+                    for failure in check["failures"]
+                )
             raise UserError(
                 self.env._("PINT-AE validation failed:\n%s", "\n".join(diagnostics))
             )
