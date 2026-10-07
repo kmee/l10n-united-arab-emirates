@@ -184,6 +184,107 @@ class TestUaeProductClassification(AccountTestInvoicingCommon):
         self.assertFalse(issue.attempt_ids)
         self.assertFalse(issue.event_ids)
 
+    def test_native_manual_ae_line_preserves_reviewed_nature_and_standard_id(self):
+        # Synthetic declared AE/0% line: net100, VAT0 and payable100.
+        # This exercises BTAE-09/IBR-174, not the nominal-rate interpretation.
+        tax = self.tax_sale_a.copy(
+            {
+                "name": "Synthetic manually reviewed AE",
+                "amount": 0,
+                "ubl_cii_tax_category_code": "AE",
+            }
+        )
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {
+                "name": "Synthetic manual AE sandbox",
+                "fiscal_uuid_policy": "controlled_local",
+            }
+        )
+        invoice = self.init_invoice("out_invoice", amounts=[100], taxes=tax)
+        invoice.l10n_ae_binding_id = binding
+        invoice = invoice.with_user(self.simple_accountman)
+        self.assertFalse(invoice.env.su)
+        form = Form(invoice)
+        with form.invoice_line_ids.edit(0) as line:
+            line.product_id = False
+            line.name = "Synthetic manually described electronic goods"
+            line.tax_ids.clear()
+            line.tax_ids.add(tax)
+            line.l10n_ae_edi_rcm_nature_code = "DL8.48.8.2"
+            line.l10n_ae_edi_rcm_standard_id = "6291041500213"
+        invoice = form.save()
+        self.assertFalse(invoice.invoice_line_ids.product_id)
+        self.assertEqual(invoice.invoice_line_ids.tax_ids, tax)
+        invoice.action_post()
+        self.assertEqual(
+            (invoice.amount_untaxed, invoice.amount_tax, invoice.amount_total),
+            (100, 0, 100),
+        )
+        ledger = invoice.line_ids.read(
+            [
+                "account_id",
+                "currency_id",
+                "debit",
+                "credit",
+                "balance",
+                "tax_ids",
+                "write_date",
+            ]
+        )
+        invoice.action_l10n_ae_prepare()
+        issue = invoice.l10n_ae_transmission_id
+        item = etree.fromstring(issue.xml_content.encode()).find(
+            "cac:InvoiceLine/cac:Item", NS
+        )
+        self.assertEqual(
+            item.xpath(
+                "cac:CommodityClassification/cbc:NatureCode/text()", namespaces=NS
+            ),
+            ["DL8.48.8.2"],
+        )
+        self.assertFalse(
+            item.xpath("cac:CommodityClassification/cbc:CommodityCode", namespaces=NS)
+        )
+        identifier = item.find("cac:StandardItemIdentification/cbc:ID", NS)
+        self.assertEqual(
+            (identifier.text, identifier.attrib),
+            ("6291041500213", {"schemeID": "0160"}),
+        )
+        classification = json.loads(issue.payload)["lines"][0]["item_classification"]
+        self.assertEqual(classification["rcm_nature_code"], "DL8.48.8.2")
+        self.assertEqual(classification["rcm_standard_id"], "6291041500213")
+        report = invoice.validate_l10n_ae_pint()
+        self.assertTrue(report["valid"], report)
+        original = issue.read(["payload", "payload_hash", "xml_content", "xml_hash"])
+        with self.assertRaisesRegex(UserError, "frozen UAE invoice lines"):
+            invoice.invoice_line_ids.write(
+                {"l10n_ae_edi_rcm_nature_code": "DL8.48.3.1"}
+            )
+        with self.assertRaisesRegex(UserError, "frozen UAE invoice lines"):
+            invoice.invoice_line_ids.write(
+                {"l10n_ae_edi_rcm_standard_id": "6291041500214"}
+            )
+        invoice.action_l10n_ae_prepare()
+        self.assertEqual(
+            issue.read(["payload", "payload_hash", "xml_content", "xml_hash"]), original
+        )
+        self.assertEqual(
+            invoice.line_ids.read(
+                [
+                    "account_id",
+                    "currency_id",
+                    "debit",
+                    "credit",
+                    "balance",
+                    "tax_ids",
+                    "write_date",
+                ]
+            ),
+            ledger,
+        )
+        self.assertFalse(issue.attempt_ids)
+        self.assertFalse(issue.event_ids)
+
     def test_service_product_preserves_reviewed_sac_in_frozen_xml_and_snapshot(self):
         # BTAE-13/17, IBR-185/189: S requires a separate SAC identifier.
         # These arbitrary codes/version are synthetic reviewed test data only.
