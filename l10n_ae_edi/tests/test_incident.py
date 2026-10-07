@@ -288,6 +288,129 @@ class TestUaeIncident(AccountTestInvoicingCommon):
         with self.cr.savepoint(), self.assertRaises(UserError):
             review.unlink()
 
+    @freeze_time("2026-12-08 12:00:00")
+    def test_manager_reviews_impact_and_restoration_in_native_dialogs(self):
+        manager = new_test_user(
+            self.env,
+            login="synthetic-recovery-dialog-manager",
+            groups="account.group_account_manager",
+            company_ids=self.env.company.ids,
+            company_id=self.env.company.id,
+        )
+        self.env.company.write(
+            {"l10n_ae_tin": "1000000001", "l10n_ae_tin_confirmed": True}
+        )
+        self.partner_a.country_id = self.env.ref("base.ae")
+        if "routing_scheme" in self.env["res.partner"]._fields:
+            self.env.company.partner_id.write(
+                {"routing_scheme": "0235", "routing_endpoint": "1000000001"}
+            )
+            self.partner_a.write(
+                {"routing_scheme": "0235", "routing_endpoint": "1000000002"}
+            )
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {"name": "Synthetic native recovery binding"}
+        )
+        invoice = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
+        ).with_user(manager)
+        invoice.l10n_ae_binding_id = binding
+        invoice.action_l10n_ae_prepare()
+        issue = invoice.l10n_ae_transmission_id
+        incident = (
+            self.env["l10n_ae.edi.incident"]
+            .with_user(manager)
+            .create(
+                {
+                    "name": "Synthetic native recovery review",
+                    "affected_roles": "issuer",
+                    "occurrence_at": "2026-12-01 09:00:00",
+                    "detected_at": "2026-12-01 10:00:00",
+                    "reason": "Controlled service failure",
+                    "responsible_id": manager.id,
+                    "calendar_start": "2026-12-01",
+                    "calendar_end": "2026-12-10",
+                    "calendar_holidays": [],
+                    "calendar_source": "Reviewed synthetic calendar",
+                    "calendar_version": "synthetic-2026",
+                    "source_reference": "Reviewed MD243 Art12",
+                    "review_note": "Native review; no fiscal success inferred",
+                }
+            )
+        )
+        incident.action_open()
+        invoice_before = invoice.read(
+            ["state", "amount_total", "line_ids", "write_date"]
+        )
+        basis_before = incident.read(
+            ["state", "opened_at", "notification_due_date", "write_date"]
+        )
+        activity_before = incident.activity_ids.read(
+            ["user_id", "date_deadline", "summary"]
+        )
+        action = incident.action_review_impact()
+        with Form(
+            incident.env[action["res_model"]].with_context(**action["context"]),
+            view=action["view_id"],
+        ) as form:
+            form.transmission_ids.add(issue)
+            form.source_reference = "Reviewed original queued invoice inventory"
+            form.review_note = "Original is affected; preserve its transmission key"
+        impact_dialog = form.record
+        self.assertTrue(impact_dialog.evidence_key)
+        self.assertEqual(impact_dialog.incident_id, incident)
+        self.assertEqual(
+            impact_dialog.action_confirm()["type"], "ir.actions.act_window_close"
+        )
+        batch = incident.impact_ids
+        self.assertEqual(len(batch), 1)
+        impact_dialog.action_confirm()
+        self.assertEqual(incident.impact_ids, batch)
+        self.assertEqual(batch.transmission_ids, issue)
+        action = incident.action_review_restoration()
+        with Form(
+            incident.env[action["res_model"]].with_context(**action["context"]),
+            view=action["view_id"],
+        ) as form:
+            form.evidence_origin = "simulated"
+            form.restored_at = fields.Datetime.to_datetime("2026-12-08 10:00:00")
+            form.source_reference = "Controlled service response available"
+            form.review_note = "Local restoration review; invoice still pending"
+        restoration_dialog = form.record
+        self.assertEqual(
+            restoration_dialog.action_confirm()["type"], "ir.actions.act_window_close"
+        )
+        review = incident.restoration_ids
+        restoration_dialog.action_confirm()
+        self.assertEqual(incident.restoration_ids, review)
+        self.assertEqual(len(review), 1)
+        overview = Form(incident, view="l10n_ae_edi.edi_incident_form")
+        self.assertTrue(overview.restoration_reviewed)
+        self.assertEqual(overview.affected_document_count, 1)
+        self.assertEqual(overview.pending_submission_count, 1)
+        self.assertEqual(overview.pending_confirmation_count, 1)
+        self.assertEqual(incident.affected_transmission_ids, issue)
+        with self.assertRaises(AssertionError):
+            overview.pending_confirmation_count = 0
+        self.assertEqual(issue.submission_state, "queued")
+        self.assertEqual(issue.confirmation_state, "pending")
+        self.assertFalse(issue.attempt_ids)
+        self.assertFalse(issue.remote_id)
+        self.assertEqual(
+            invoice.read(["state", "amount_total", "line_ids", "write_date"]),
+            invoice_before,
+        )
+        self.assertEqual(
+            incident.read(
+                ["state", "opened_at", "notification_due_date", "write_date"]
+            ),
+            basis_before,
+        )
+        self.assertEqual(
+            incident.activity_ids.read(["user_id", "date_deadline", "summary"]),
+            activity_before,
+        )
+
     @freeze_time("2026-12-01 12:00:00")
     def test_manager_enters_reviewed_holidays_in_native_incident_form(self):
         manager = new_test_user(
