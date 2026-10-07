@@ -966,7 +966,12 @@ class UaeEdiInbox(models.Model):
             ],
             limit=2,
         )
-        if len(agreement) != 1:
+        if (
+            len(agreement) != 1
+            or not (agreement.name or "").strip()
+            or not (agreement.scope or "").strip()
+            or not (agreement.onboarding_reference or "").strip()
+        ):
             raise UserError(
                 self.env._("The received self-billing agreement requires review.")
             )
