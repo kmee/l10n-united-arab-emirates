@@ -27,7 +27,9 @@ class TestUaeIncident(AccountTestInvoicingCommon):
         self,
     ):
         company_a = self.env.company
-        company_b = self.company_data_2["company"]
+        company_b = self.setup_other_company(
+            name="Synthetic FTA confirmation company B"
+        )["company"]
         company_b.country_id = self.env.ref("base.ae")
         manager = new_test_user(
             self.env,
