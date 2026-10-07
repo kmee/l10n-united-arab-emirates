@@ -126,7 +126,8 @@ class AccountMove(models.Model):
                 raise UserError(
                     self.env._(
                         "IBR-122-AE: commercial invoices and credits require tax "
-                        "categories E, O or Z. Review the line taxes before posting."
+                        "categories E, O or Z. Review the line taxes "
+                        "before preparation."
                     )
                 )
         for move in self.filtered("is_self_billing"):
