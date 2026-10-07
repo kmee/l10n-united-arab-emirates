@@ -18,7 +18,13 @@ class TestUaeRetention(AccountTestInvoicingCommon):
         cls.env.company.write(
             {"l10n_ae_tin": "1000000001", "l10n_ae_tin_confirmed": True}
         )
-        cls.partner_a.country_id = cls.env.ref("base.ae")
+        cls.partner_a.write(
+            {
+                "country_id": cls.env.ref("base.ae").id,
+                "state_id": cls.env.ref("base.state_ae_du").id,
+            }
+        )
+        cls.env.company.partner_id.state_id = cls.env.ref("base.state_ae_du")
         if "routing_scheme" in cls.partner_a._fields:
             cls.env.company.partner_id.write(
                 {"routing_scheme": "0235", "routing_endpoint": "1000000001"}
@@ -479,6 +485,7 @@ class TestUaeRetention(AccountTestInvoicingCommon):
         )
         company_b = company_b_data["company"]
         company_b.write({"l10n_ae_tin": "1000000011", "l10n_ae_tin_confirmed": True})
+        company_b.partner_id.state_id = self.env.ref("base.state_ae_du")
         if "routing_scheme" in company_b.partner_id._fields:
             company_b.partner_id.write(
                 {"routing_scheme": "0235", "routing_endpoint": "1000000011"}

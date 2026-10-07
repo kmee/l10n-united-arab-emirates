@@ -78,6 +78,7 @@ class TestUaeIncident(AccountTestInvoicingCommon):
     @AccountTestInvoicingCommon.setup_country("ae")
     def setUpClass(cls):
         super().setUpClass()
+        cls.env.company.partner_id.state_id = cls.env.ref("base.state_ae_du")
 
     @freeze_time("2026-12-01 12:00:00")
     def test_draft_incident_cannot_open_without_approved_calendar_version(self):
@@ -849,6 +850,7 @@ class TestUaeIncident(AccountTestInvoicingCommon):
             {"l10n_ae_tin": "1000000001", "l10n_ae_tin_confirmed": True}
         )
         self.partner_a.country_id = self.env.ref("base.ae")
+        self.partner_a.state_id = self.env.ref("base.state_ae_du")
         if "routing_scheme" in self.env["res.partner"]._fields:
             self.env.company.partner_id.write(
                 {"routing_scheme": "0235", "routing_endpoint": "1000000001"}
@@ -988,6 +990,7 @@ class TestUaeIncident(AccountTestInvoicingCommon):
             {"l10n_ae_tin": "1000000001", "l10n_ae_tin_confirmed": True}
         )
         self.partner_a.country_id = self.env.ref("base.ae")
+        self.partner_a.state_id = self.env.ref("base.state_ae_du")
         if "routing_scheme" in self.env["res.partner"]._fields:
             self.env.company.partner_id.write(
                 {"routing_scheme": "0235", "routing_endpoint": "1000000001"}
@@ -1179,6 +1182,7 @@ class TestUaeIncident(AccountTestInvoicingCommon):
 
         company_a.write({"l10n_ae_tin": "1000000001", "l10n_ae_tin_confirmed": True})
         self.partner_a.country_id = self.env.ref("base.ae")
+        self.partner_a.state_id = self.env.ref("base.state_ae_du")
         if "routing_scheme" in self.env["res.partner"]._fields:
             company_a.partner_id.write(
                 {"routing_scheme": "0235", "routing_endpoint": "1000000001"}
@@ -1561,6 +1565,7 @@ class TestUaeIncident(AccountTestInvoicingCommon):
             {"l10n_ae_tin": "1000000001", "l10n_ae_tin_confirmed": True}
         )
         self.partner_a.country_id = self.env.ref("base.ae")
+        self.partner_a.state_id = self.env.ref("base.state_ae_du")
         if "routing_scheme" in self.env["res.partner"]._fields:
             self.env.company.partner_id.write(
                 {"routing_scheme": "0235", "routing_endpoint": "1000000001"}
