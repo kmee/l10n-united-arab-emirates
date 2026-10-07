@@ -290,8 +290,10 @@ class AccountEdiUblUae(models.AbstractModel):
             for category in item["cac:ClassifiedTaxCategory"]
         ):
             return result
-        product = vals["line_vals"]["base_line"]["product_id"]
-        nature = product.l10n_ae_edi_rcm_nature_code if product else False
+        base_line = vals["line_vals"]["base_line"]
+        line = base_line["record"]
+        facts = line._l10n_ae_item_classification()
+        nature = facts.get("rcm_nature_code")
         if not nature:
             raise UserError(
                 self.env._(
@@ -301,12 +303,18 @@ class AccountEdiUblUae(models.AbstractModel):
             )
         # Inspect the category already computed by the core; no second tax
         # calculation, tax-name inference or NatureCode per tax-category row.
+        classifications = item["cac:CommodityClassification"]
         classification = next(
-            node
-            for node in item["cac:CommodityClassification"]
-            if "cbc:CommodityCode" in node
+            (node for node in classifications if "cbc:CommodityCode" in node), None
         )
+        if classification is None:
+            classification = {}
+            classifications.append(classification)
         classification["cbc:NatureCode"] = {"_text": nature}
+        if facts.get("rcm_standard_id"):
+            item["cac:StandardItemIdentification"] = {
+                "cbc:ID": {"_text": facts["rcm_standard_id"], "schemeID": "0160"}
+            }
         return result
 
     def _ubl_add_line_price_node(self, vals, in_foreign_currency=True):
