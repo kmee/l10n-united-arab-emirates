@@ -37,6 +37,12 @@ class UaeEdiIncident(models.Model):
     calendar_start = fields.Date(string="Calendar Coverage Starts")
     calendar_end = fields.Date(string="Calendar Coverage Ends")
     calendar_holidays = fields.Json(default=list)
+    calendar_holiday_dates = fields.Text(
+        string="Federal Holiday Dates",
+        compute="_compute_calendar_holiday_dates",
+        inverse="_inverse_calendar_holiday_dates",
+        help="Enter one reviewed federal holiday per line in YYYY-MM-DD format.",
+    )
     calendar_source = fields.Text(string="Federal Calendar Source")
     calendar_version = fields.Char()
     source_reference = fields.Text(string="Reviewed Legal Basis")
@@ -61,6 +67,25 @@ class UaeEdiIncident(models.Model):
         "opened_at",
         "timezone",
     }
+
+    @api.depends("calendar_holidays")
+    def _compute_calendar_holiday_dates(self):
+        for record in self:
+            dates = record.calendar_holidays
+            record.calendar_holiday_dates = (
+                "\n".join(dates)
+                if isinstance(dates, list)
+                and all(isinstance(value, str) for value in dates)
+                else False
+            )
+
+    def _inverse_calendar_holiday_dates(self):
+        for record in self:
+            record.calendar_holidays = [
+                line.strip()
+                for line in (record.calendar_holiday_dates or "").splitlines()
+                if line.strip()
+            ]
 
     def _check_actor(self, operation):
         principal = self.env.user.with_user(self.env.uid)
