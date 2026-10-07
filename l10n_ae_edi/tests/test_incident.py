@@ -4,8 +4,9 @@ from datetime import date
 
 from freezegun import freeze_time
 
+from odoo import fields
 from odoo.exceptions import AccessError, UserError
-from odoo.tests import tagged
+from odoo.tests import Form, tagged
 from odoo.tests.common import new_test_user
 
 from odoo.addons.account.tests.common import AccountTestInvoicingCommon
@@ -17,6 +18,54 @@ class TestUaeIncident(AccountTestInvoicingCommon):
     @AccountTestInvoicingCommon.setup_country("ae")
     def setUpClass(cls):
         super().setUpClass()
+
+    @freeze_time("2026-12-01 12:00:00")
+    def test_manager_enters_reviewed_holidays_in_native_incident_form(self):
+        manager = new_test_user(
+            self.env,
+            login="synthetic-incident-form-manager",
+            groups="account.group_account_manager",
+            company_ids=self.env.company.ids,
+            company_id=self.env.company.id,
+        )
+        view = self.env.ref("l10n_ae_edi.edi_incident_form", raise_if_not_found=False)
+        self.assertTrue(view, "The native incident review form must be installed")
+        with Form(
+            self.env["l10n_ae.edi.incident"].with_user(manager), view=view
+        ) as form:
+            form.name = "Synthetic incident entered through the native form"
+            form.affected_roles = "both"
+            form.occurrence_at = fields.Datetime.to_datetime("2026-11-30 21:30:00")
+            form.detected_at = fields.Datetime.to_datetime("2026-12-01 08:00:00")
+            form.reason = "Synthetic electronic issue and receipt failure"
+            form.responsible_id = manager
+            form.calendar_start = date(2026, 12, 1)
+            form.calendar_end = date(2026, 12, 10)
+            form.calendar_holiday_dates = "2026-12-02\n2026-12-03"
+            form.calendar_source = "Reviewed synthetic federal holidays"
+            form.calendar_version = "synthetic-federal-2026"
+            form.source_reference = "MD243 Art12; reviewed Art49 day exclusion"
+            form.review_note = "Dubai Dec1 anchor; Dec4 day1 and Dec7 day2"
+        incident = form.record
+        self.assertEqual(incident.company_id, self.env.company)
+        self.assertEqual(incident.calendar_holidays, ["2026-12-02", "2026-12-03"])
+        self.assertEqual(
+            incident.occurrence_at, fields.Datetime.to_datetime("2026-11-30 21:30:00")
+        )
+        self.assertEqual(
+            incident.detected_at, fields.Datetime.to_datetime("2026-12-01 08:00:00")
+        )
+        self.assertFalse(incident.notification_due_date)
+        self.assertTrue(incident.action_open())
+        self.assertEqual(incident.notification_due_date, date(2026, 12, 7))
+        self.assertEqual(len(incident.activity_ids), 1)
+        self.assertEqual(incident.activity_ids.user_id, manager)
+        self.assertEqual(incident.activity_ids.date_deadline, date(2026, 12, 7))
+        reviewed = Form(incident, view=view)
+        self.assertEqual(reviewed.calendar_holiday_dates, "2026-12-02\n2026-12-03")
+        with self.assertRaises(AssertionError):
+            reviewed.calendar_holiday_dates = "2026-12-04"
+        self.assertEqual(incident.calendar_holidays, ["2026-12-02", "2026-12-03"])
 
     @freeze_time("2026-12-01 12:00:00")
     def test_manager_opens_failure_with_reviewed_calendar_and_one_internal_alert(self):
