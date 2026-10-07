@@ -1,11 +1,36 @@
 # Copyright 2026 KMEE
 # License AGPL-3.0 or later (https://www.gnu.org/licenses/agpl).
-from odoo import api, models
+from odoo import api, fields, models
 from odoo.exceptions import UserError
+
+from .product_product import UAE_RCM_NATURE_CODES
 
 
 class AccountMoveLine(models.Model):
     _inherit = "account.move.line"
+
+    l10n_ae_edi_rcm_nature_code = fields.Selection(
+        selection=UAE_RCM_NATURE_CODES,
+        string="UAE RCM Nature Override",
+        help="Reviewed AE item nature for this line; overrides the product's nature. "
+        "No goods or service classification is inferred for a line without a product.",
+    )
+    l10n_ae_edi_rcm_standard_id = fields.Char(
+        string="UAE RCM Standard ID",
+        help="Reviewed scheme 0160 identifier for this AE item; overrides the product "
+        "barcode. No identifier is generated from its description.",
+    )
+
+    def _l10n_ae_item_classification(self):
+        self.ensure_one()
+        classification = (
+            self.product_id._l10n_ae_item_classification() if self.product_id else {}
+        )
+        if self.l10n_ae_edi_rcm_nature_code:
+            classification["rcm_nature_code"] = self.l10n_ae_edi_rcm_nature_code
+        if self.l10n_ae_edi_rcm_standard_id:
+            classification["rcm_standard_id"] = self.l10n_ae_edi_rcm_standard_id
+        return classification
 
     def _l10n_ae_fiscal_line_fields(self):
         return {
@@ -21,6 +46,8 @@ class AccountMoveLine(models.Model):
             "balance",
             "amount_currency",
             "move_id",
+            "l10n_ae_edi_rcm_nature_code",
+            "l10n_ae_edi_rcm_standard_id",
         }
 
     def _l10n_ae_check_fiscal_line_edit(self, moves):

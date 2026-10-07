@@ -880,10 +880,9 @@ class AccountMove(models.Model):
             lambda line: not line.display_type or line.display_type == "product"
         )
         for line, snapshot_line in zip(product_lines, snapshot["lines"], strict=True):
-            if line.product_id:
-                snapshot_line["item_classification"] = (
-                    line.product_id._l10n_ae_item_classification()
-                )
+            classification = line._l10n_ae_item_classification()
+            if classification:
+                snapshot_line["item_classification"] = classification
         if self.l10n_ae_invoicing_period_start or self.l10n_ae_invoicing_period_end:
             snapshot["invoicing_period"] = {
                 "start_date": fields.Date.to_string(self.l10n_ae_invoicing_period_start)
