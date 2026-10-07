@@ -14,6 +14,7 @@ from unittest.mock import patch
 
 from lxml import etree
 
+from odoo import fields
 from odoo.exceptions import AccessError, UserError, ValidationError
 from odoo.tests import Form, tagged
 from odoo.tests.common import new_test_user
@@ -6064,6 +6065,66 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
                 "additional_identifiers": {"AE_TL": "SYNTH-TRADE-0002"},
             }
         )
+
+    def test_native_form_shows_unverified_effective_aed_quote_and_frozen_source(self):
+        usd = self.env.ref("base.USD")
+        usd.active = True
+        quote = self.env["res.currency.rate"].create(
+            {
+                "currency_id": usd.id,
+                "company_id": self.env.company.id,
+                "name": "2018-12-31",
+                "rate": 1 / 3.6725,
+            }
+        )
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {
+                "name": "Synthetic native FX form",
+                "fiscal_uuid_policy": "controlled_local",
+            }
+        )
+        invoice = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a, currency=usd
+        )
+        invoice.l10n_ae_binding_id = binding
+        invoice = invoice.with_user(self.simple_accountman)
+        self.assertFalse(invoice.env.su)
+        displayed = {
+            "l10n_ae_effective_tax_exchange_rate": "3.672500",
+            "l10n_ae_effective_tax_exchange_date": fields.Date.to_date("2018-12-31"),
+            "l10n_ae_effective_tax_exchange_conversion_date": fields.Date.to_date(
+                "2019-01-01"
+            ),
+            "l10n_ae_effective_tax_exchange_source": "Odoo currency rates: USD to AED",
+            "l10n_ae_effective_tax_exchange_origin": "native_unverified",
+            "l10n_ae_effective_tax_exchange_diagnostic": False,
+        }
+        form = Form(invoice)
+        for name, expected in displayed.items():
+            self.assertEqual(getattr(form, name), expected, name)
+        with self.assertRaisesRegex(AssertionError, "readonly field"):
+            form.l10n_ae_effective_tax_exchange_rate = "3.700000"
+        for name in displayed:
+            with self.assertRaisesRegex(UserError, "protected"):
+                invoice.write({name: False})
+        invoice.action_post()
+        invoice.action_l10n_ae_prepare()
+        issue = invoice.l10n_ae_transmission_id
+        frozen = issue.read(["payload", "payload_hash", "xml_content", "xml_hash"])
+        quote.rate = 1 / 3.7
+        prepared = Form(invoice)
+        for name, expected in displayed.items():
+            self.assertEqual(getattr(prepared, name), expected, name)
+        invoice.action_l10n_ae_prepare()
+        self.assertEqual(
+            issue.read(["payload", "payload_hash", "xml_content", "xml_hash"]), frozen
+        )
+        self.assertEqual(invoice.amount_total, 105)
+        self.assertEqual(invoice.amount_tax_signed, 18.36)
+        self.assertEqual(invoice.amount_total_signed, 385.61)
+        self.assertFalse(invoice.l10n_ae_tax_exchange_rate)
+        self.assertFalse(invoice.l10n_ae_tax_exchange_date)
+        self.assertFalse(invoice.l10n_ae_tax_exchange_source)
 
     def test_usd_invoice_prepares_from_dated_native_rates_without_manual_quote(self):
         usd = self.env.ref("base.USD")
