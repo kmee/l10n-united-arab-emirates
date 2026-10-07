@@ -101,6 +101,12 @@ class UaeEdiCalendar(models.Model):
         for record in self:
             self.env["l10n_ae.edi.incident"]._check_incident_company(record.company_id)
 
+    def _check_holiday_input(self, dates):
+        if dates is not False and not isinstance(dates, list):
+            raise ValidationError(
+                self.env._("Federal holidays must be a list of ISO dates.")
+            )
+
     @api.model_create_multi
     def create(self, vals_list):
         self._check_actor("create")
@@ -109,6 +115,12 @@ class UaeEdiCalendar(models.Model):
             vals = dict(values)
             if self._protected_fields.intersection(vals):
                 raise UserError(self.env._("Use the calendar approval action."))
+            holidays = vals.get(
+                "calendar_holidays",
+                self.default_get(["calendar_holidays"]).get("calendar_holidays", []),
+            )
+            self._check_holiday_input(holidays)
+            vals["calendar_holidays"] = holidays
             company_id = vals.get("company_id", self.env.company.id)
             if type(company_id) is not int:
                 raise ValidationError(
@@ -133,6 +145,8 @@ class UaeEdiCalendar(models.Model):
             raise UserError(self.env._("Calendar identity and approval are protected."))
         if self.filtered(lambda record: record.state == "approved"):
             raise UserError(self.env._("Reviewed calendar versions are immutable."))
+        if "calendar_holidays" in vals:
+            self._check_holiday_input(vals["calendar_holidays"])
         return super().write(vals)
 
     @api.ondelete(at_uninstall=False)
@@ -161,7 +175,7 @@ class UaeEdiCalendar(models.Model):
             raise ValidationError(
                 self.env._("Review calendar version, source snapshot and note.")
             )
-        dates = self.calendar_holidays or []
+        dates = [] if self.calendar_holidays is False else self.calendar_holidays
         if not isinstance(dates, list):
             raise ValidationError(
                 self.env._("Federal holidays must be a list of ISO dates.")
