@@ -304,7 +304,11 @@ class UaeEdiIncident(models.Model):
                 restoration_ids=[],
             )
             vals["calendar_source_sha256"] = False
-            calendar_id = vals.get("calendar_version_id")
+            calendar_id = vals.get(
+                "calendar_version_id",
+                self.default_get(["calendar_version_id"]).get("calendar_version_id"),
+            )
+            vals["calendar_version_id"] = calendar_id or False
             if calendar_id:
                 vals.update(self._selected_calendar_snapshot(calendar_id, company))
             prepared.append(vals)
