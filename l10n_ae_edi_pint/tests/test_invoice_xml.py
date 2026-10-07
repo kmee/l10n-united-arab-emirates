@@ -8425,6 +8425,36 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
             (100, 5, 105),
         )
 
+    def test_native_reset_rolls_back_queued_history_when_accounting_refuses_batch(self):
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {"name": "Synthetic native Reset accounting lock sandbox"}
+        )
+        invoices = self.env["account.move"]
+        originals = []
+        for amount in (100, 200):
+            invoice = self.init_invoice(
+                "out_invoice", amounts=[amount], taxes=self.tax_sale_a, post=True
+            )
+            invoice.l10n_ae_binding_id = binding
+            invoice.action_l10n_ae_prepare()
+            issue = invoice.l10n_ae_transmission_id
+            originals.append((invoice, issue, issue.payload, issue.xml_content))
+            invoices |= invoice
+        invoices[-1].button_hash()
+        self.assertTrue(invoices[-1].inalterable_hash)
+        invoices = invoices.with_user(self.simple_accountman)
+        self.assertFalse(invoices.env.su)
+        with self.assertRaisesRegex(UserError, "locked journal entry"):
+            invoices.button_draft()
+        for invoice, issue, payload, xml in originals:
+            self.assertEqual(invoice.state, "posted")
+            self.assertEqual(invoice.l10n_ae_transmission_id, issue)
+            self.assertEqual(invoice.l10n_ae_transmission_ids, issue)
+            self.assertFalse(invoice.l10n_ae_correction_id)
+            self.assertFalse(issue.local_correction_id)
+            self.assertEqual((issue.payload, issue.xml_content), (payload, xml))
+            self.assertFalse(issue.attempt_ids)
+
     def test_native_reset_preserves_queued_original_and_prepares_next_revision(self):
         binding = self.env["l10n_ae.edi.binding"].create(
             {
