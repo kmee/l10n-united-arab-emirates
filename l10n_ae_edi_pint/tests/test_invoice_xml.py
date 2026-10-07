@@ -8425,6 +8425,97 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
             (100, 5, 105),
         )
 
+    def test_native_reset_preserves_queued_original_and_prepares_next_revision(self):
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {
+                "name": "Synthetic ordinary native Reset sandbox",
+                "fiscal_uuid_policy": "controlled_local",
+            }
+        )
+        operator = new_test_user(
+            self.env,
+            login="synthetic-ordinary-native-reset",
+            groups="base.group_user,account.group_account_invoice",
+            company_id=self.env.company.id,
+            company_ids=[self.env.company.id],
+        )
+        invoice = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
+        ).with_user(operator)
+        self.assertFalse(invoice.env.su)
+        self.assertFalse(operator.has_group("account.group_account_manager"))
+        self.assertFalse(operator.has_group("base.group_system"))
+        invoice.l10n_ae_binding_id = binding
+        invoice.action_l10n_ae_prepare()
+        source = invoice.l10n_ae_transmission_id
+        original = source.read(
+            [
+                "payload",
+                "payload_hash",
+                "xml_content",
+                "xml_hash",
+                "idempotency_key",
+                "revision",
+                "submission_state",
+                "remote_id",
+                "attempt_ids",
+                "event_ids",
+                "validation_receipt",
+            ]
+        )
+        fiscal_uuid = invoice.l10n_ae_fiscal_uuid
+        self.assertEqual(invoice.amount_total, 105)
+        self.assertEqual(source.submission_state, "queued")
+        self.assertFalse(source.attempt_ids)
+        with self.cr.savepoint(), self.assertRaisesRegex(UserError, "frozen UAE"):
+            invoice.write({"state": "draft"})
+
+        self.assertTrue(invoice.button_draft())
+        self.assertEqual(invoice.state, "draft")
+        self.assertFalse(invoice.l10n_ae_transmission_id)
+        self.assertEqual(invoice.l10n_ae_transmission_ids, source)
+        correction = invoice.l10n_ae_correction_id
+        self.assertEqual(correction.source_transmission_id, source)
+        self.assertEqual(source.local_correction_id, correction)
+        self.assertEqual(correction.started_by, operator)
+        self.assertTrue(correction.started_at)
+        self.assertTrue(correction.reason)
+        self.assertEqual(correction.state, "editing")
+        self.assertEqual(invoice.l10n_ae_fiscal_uuid, fiscal_uuid)
+        self.assertEqual(source.read(list(original[0].keys() - {"id"})), original)
+
+        invoice.invoice_line_ids.filtered(
+            lambda line: line.display_type == "product"
+        ).write({"price_unit": 200})
+        invoice.action_post()
+        invoice.action_l10n_ae_prepare()
+        replacement = invoice.l10n_ae_transmission_id
+        self.assertNotEqual(replacement, source)
+        self.assertEqual(replacement.revision, 2)
+        self.assertNotEqual(replacement.idempotency_key, source.idempotency_key)
+        self.assertEqual(correction.replacement_transmission_id, replacement)
+        self.assertEqual(correction.state, "completed")
+        self.assertTrue(correction.completed_at)
+        self.assertEqual(invoice.l10n_ae_fiscal_uuid, fiscal_uuid)
+        self.assertEqual(
+            (invoice.amount_untaxed, invoice.amount_tax, invoice.amount_total),
+            (200, 10, 210),
+        )
+        self.assertEqual(
+            set(invoice.l10n_ae_transmission_ids.ids), {source.id, replacement.id}
+        )
+        self.assertEqual(source.read(list(original[0].keys() - {"id"})), original)
+        self.assertFalse(replacement.attempt_ids)
+        report = invoice.validate_l10n_ae_pint()
+        self.assertTrue(report["valid"], report)
+        xml = etree.fromstring(replacement.xml_content.encode())
+        self.assertEqual(
+            xml.findtext(
+                "cac:LegalMonetaryTotal/cbc:TaxInclusiveAmount", namespaces=NS
+            ),
+            "210.00",
+        )
+
     def test_usd_billing_batch_preserves_native_fx_and_refuses_unreviewed_tax_date(
         self,
     ):
