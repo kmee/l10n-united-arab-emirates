@@ -497,7 +497,7 @@ class UaeEdiInbox(models.Model):
             and type_code == "380"
         )
         summary_document = (
-            transaction_flags == "00010000"
+            transaction_flags in ("00010000", "10010000")
             and not selfbilling
             and type_code == ("381" if is_credit else "380")
         )

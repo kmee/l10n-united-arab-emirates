@@ -4383,6 +4383,165 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
             with self.assertRaisesRegex(UserError, "received"):
                 bill.write(values)
 
+    def test_received_free_zone_summary_invoice_preserves_beneficiary_and_period(self):
+        source = self.init_invoice(
+            "out_invoice", amounts=[40, 60], taxes=self.tax_sale_a, post=True
+        )
+        source.write(
+            {
+                "l10n_ae_summary": True,
+                "l10n_ae_free_zone": True,
+                "l10n_ae_beneficiary_id": "1000000003",
+                "l10n_ae_invoicing_period_start": "2019-01-01",
+                "l10n_ae_invoicing_period_end": "2019-01-31",
+                "l10n_ae_fiscal_uuid": "cccccccf-2222-4222-8222-222222222222",
+            }
+        )
+        content = etree.tostring(self._received_test_xml(source))
+        tree = etree.fromstring(content)
+        self.assertEqual(tree.findtext("cbc:InvoiceTypeCode", namespaces=NS), "380")
+        self.assertEqual(
+            tree.findtext("cbc:ProfileExecutionID", namespaces=NS), "10010000"
+        )
+        beneficiary_xpath = (
+            "cac:BuyerCustomerParty/cac:Party/cac:PartyIdentification/cbc:ID"
+        )
+        self.assertEqual(len(tree.findall(beneficiary_xpath, namespaces=NS)), 1)
+        self.assertEqual(tree.findtext(beneficiary_xpath, namespaces=NS), "1000000003")
+        self.assertEqual(
+            tree.findtext("cbc:CustomizationID", namespaces=NS),
+            "urn:peppol:pint:billing-1@ae-1",
+        )
+        self.assertEqual(
+            tree.findtext("cbc:DocumentCurrencyCode", namespaces=NS), "AED"
+        )
+        self.assertEqual(
+            (
+                tree.findtext("cac:InvoicePeriod/cbc:StartDate", namespaces=NS),
+                tree.findtext("cac:InvoicePeriod/cbc:EndDate", namespaces=NS),
+            ),
+            ("2019-01-01", "2019-01-31"),
+        )
+        self.assertEqual(
+            tree.findtext("cbc:ProfileID", namespaces=NS), "urn:peppol:bis:billing"
+        )
+        self.assertEqual(
+            (
+                tree.findtext(
+                    "cac:LegalMonetaryTotal/cbc:TaxExclusiveAmount", namespaces=NS
+                ),
+                tree.findtext("cac:TaxTotal/cbc:TaxAmount", namespaces=NS),
+                tree.findtext(
+                    "cac:LegalMonetaryTotal/cbc:TaxInclusiveAmount", namespaces=NS
+                ),
+            ),
+            ("100.00", "5.00", "105.00"),
+        )
+        source_ledger = source.line_ids.sorted("id").read(
+            ["account_id", "debit", "credit", "balance", "write_date"]
+        )
+        source_timestamps = source.read(["create_date", "write_date"])
+        formal = OfflinePintValidator(
+            "/opt/uae-addons/.runtime/normative",
+            ruleset="kmee-pint-ae-1.0.4-ubl-2.1",
+        ).validate(content)
+        self.assertTrue(formal["valid"], formal)
+        original_hash = hashlib.sha256(content).hexdigest()
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {"name": "Synthetic received Free Zone Summary period"}
+        )
+        receiver = (
+            self.env["l10n_ae.edi.inbox"]
+            .with_user(self.simple_accountman)
+            .with_context(allowed_company_ids=[self.env.company.id])
+        )
+        self.assertFalse(receiver.env.su)
+        account_moves = self.env["account.move"].search([]).ids
+        inbox = receiver.receive_controlled_document(
+            binding.id, "received-free-zone-summary-month", content
+        )
+        processed = inbox.action_process()
+        report = json.loads(inbox.processing_history_ids.validation_report)
+        self.assertTrue(report["valid"], report)
+        self.assertEqual(report["ruleset"], "kmee-pint-ae-1.0.4-ubl-2.1")
+        self.assertTrue(processed, inbox.diagnostic)
+        bill = inbox.move_id
+        self.assertEqual((bill.move_type, bill.state), ("in_invoice", "draft"))
+        self.assertTrue(bill.l10n_ae_summary)
+        self.assertTrue(bill.l10n_ae_free_zone)
+        self.assertEqual(bill.l10n_ae_beneficiary_id, "1000000003")
+        self.assertEqual(
+            (
+                bill.l10n_ae_invoicing_period_start.isoformat(),
+                bill.l10n_ae_invoicing_period_end.isoformat(),
+            ),
+            ("2019-01-01", "2019-01-31"),
+        )
+        self.assertEqual(
+            (bill.amount_untaxed, bill.amount_tax, bill.amount_total), (100, 5, 105)
+        )
+        self.assertEqual(inbox.original_xml.content, content)
+        self.assertEqual(inbox.xml_hash, original_hash)
+        self.assertFalse(bill.l10n_ae_transmission_ids)
+        ledger_fields = [
+            "account_id",
+            "partner_id",
+            "currency_id",
+            "date",
+            "debit",
+            "credit",
+            "balance",
+            "amount_currency",
+            "tax_ids",
+            "write_date",
+        ]
+        self.assertEqual(len(inbox.processing_history_ids), 1)
+        history = inbox.processing_history_ids.read(
+            ["validation_report", "validation_report_hash"]
+        )
+        self.assertEqual(
+            sorted(self.env["account.move"].search([]).ids),
+            sorted(account_moves + [bill.id]),
+        )
+        ledger = bill.line_ids.sorted("id").read(ledger_fields)
+        timestamps = bill.read(["create_date", "write_date"])
+        replay = receiver.receive_controlled_document(
+            binding.id, "received-free-zone-summary-month", content
+        )
+        self.assertEqual(replay, inbox)
+        self.assertTrue(replay.action_process(), replay.diagnostic)
+        self.assertEqual(replay.move_id, bill)
+        self.assertEqual(bill.line_ids.sorted("id").read(ledger_fields), ledger)
+        self.assertEqual(bill.read(["create_date", "write_date"]), timestamps)
+        self.assertEqual(
+            inbox.processing_history_ids.read(
+                ["validation_report", "validation_report_hash"]
+            ),
+            history,
+        )
+        self.assertEqual(
+            sorted(self.env["account.move"].search([]).ids),
+            sorted(account_moves + [bill.id]),
+        )
+        self.assertEqual(
+            source.line_ids.sorted("id").read(
+                ["account_id", "debit", "credit", "balance", "write_date"]
+            ),
+            source_ledger,
+        )
+        self.assertEqual(source.read(["create_date", "write_date"]), source_timestamps)
+        self.assertEqual(inbox.original_xml.content, content)
+        self.assertEqual(inbox.xml_hash, original_hash)
+        for values in (
+            {"l10n_ae_summary": False},
+            {"l10n_ae_free_zone": False},
+            {"l10n_ae_beneficiary_id": "1000000004"},
+            {"l10n_ae_invoicing_period_start": "2019-02-01"},
+            {"l10n_ae_invoicing_period_end": "2019-02-28"},
+        ):
+            with self.assertRaisesRegex(UserError, "received"):
+                bill.write(values)
+
     def test_received_summary_invalid_periods_are_retained_without_accounting(self):
         company = self.env.company
         source = self.init_invoice(
@@ -4940,6 +5099,20 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         self.assertEqual(bill.state, "draft")
 
     def test_received_summary_credit_preserves_period_and_links_supplier_bill(self):
+        self._assert_received_summary_credit(
+            expected_flags="00010000", free_zone=False, beneficiary_id=False
+        )
+
+    def test_received_free_zone_summary_credit_preserves_original_and_period(self):
+        self._assert_received_summary_credit(
+            expected_flags="10010000",
+            free_zone=True,
+            beneficiary_id="1000000003",
+        )
+
+    def _assert_received_summary_credit(
+        self, expected_flags, free_zone, beneficiary_id
+    ):
         # Independently worked credit: AED40 net, AED2 VAT, AED42 inclusive;
         # the settled amount is fully prepaid, so payable is zero.
         original = self.init_invoice(
@@ -4989,6 +5162,14 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
                 "l10n_ae_invoicing_period_start": "2019-01-01",
                 "l10n_ae_invoicing_period_end": "2019-01-31",
                 "l10n_ae_fiscal_uuid": "aaaaaaab-4444-4444-8444-444444444444",
+                **(
+                    {
+                        "l10n_ae_free_zone": True,
+                        "l10n_ae_beneficiary_id": beneficiary_id,
+                    }
+                    if free_zone
+                    else {}
+                ),
             }
         )
         credit.action_post()
@@ -5007,8 +5188,24 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         )
         self.assertEqual(tree.findtext("cbc:CreditNoteTypeCode", namespaces=NS), "381")
         self.assertEqual(
-            tree.findtext("cbc:ProfileExecutionID", namespaces=NS), "00010000"
+            tree.findtext("cbc:ProfileExecutionID", namespaces=NS), expected_flags
         )
+        if free_zone:
+            beneficiary_xpath = (
+                "cac:BuyerCustomerParty/cac:Party/cac:PartyIdentification/cbc:ID"
+            )
+            self.assertEqual(len(tree.findall(beneficiary_xpath, namespaces=NS)), 1)
+            self.assertEqual(
+                tree.findtext(beneficiary_xpath, namespaces=NS), beneficiary_id
+            )
+            for party in ("AccountingSupplierParty", "AccountingCustomerParty"):
+                for path in (
+                    "cac:Party/cbc:EndpointID",
+                    "cac:Party/cac:PartyTaxScheme/cbc:CompanyID",
+                ):
+                    identity = tree.findtext(f"cac:{party}/{path}", namespaces=NS)
+                    self.assertTrue(identity)
+                    self.assertNotEqual(identity, beneficiary_id)
         self.assertEqual(
             tree.findtext("cbc:CustomizationID", namespaces=NS),
             "urn:peppol:pint:billing-1@ae-1",
@@ -5081,6 +5278,8 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         self.assertEqual(refund.partner_id, self.partner_a)
         self.assertEqual(refund.reversed_entry_id, bill)
         self.assertTrue(refund.l10n_ae_summary)
+        self.assertEqual(refund.l10n_ae_free_zone, free_zone)
+        self.assertEqual(refund.l10n_ae_beneficiary_id or False, beneficiary_id)
         self.assertEqual(refund.l10n_ae_credit_reason, "DL8.61.1.C")
         self.assertEqual(
             (
@@ -5147,11 +5346,19 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
             bill_ledger,
         )
         self.assertEqual(bill.read(["create_date", "write_date"]), bill_timestamps)
-        for values in (
+        protected_received_values = [
             {"l10n_ae_summary": False},
             {"l10n_ae_invoicing_period_start": "2019-02-01"},
             {"l10n_ae_invoicing_period_end": "2019-02-28"},
-        ):
+        ]
+        if free_zone:
+            protected_received_values.extend(
+                [
+                    {"l10n_ae_free_zone": False},
+                    {"l10n_ae_beneficiary_id": "1000000004"},
+                ]
+            )
+        for values in protected_received_values:
             with self.assertRaisesRegex(UserError, "received"):
                 refund.write(values)
         self.assertEqual(
