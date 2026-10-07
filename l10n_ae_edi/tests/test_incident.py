@@ -541,8 +541,10 @@ class TestUaeIncident(AccountTestInvoicingCommon):
             forged_default = (
                 self.env[action["res_model"]]
                 .with_user(manager)
-                .with_context(**forged_context)
                 .sudo(elevated)
+                # Escalating sudo removes default_* context in Odoo 20. Supply
+                # the forged form default afterward to test the actual guard.
+                .with_context(**forged_context)
             )
             self.assertEqual(
                 forged_default.default_get(["incident_id"]),
