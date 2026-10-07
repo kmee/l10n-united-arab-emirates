@@ -4,6 +4,7 @@ import json
 
 from lxml import etree
 
+from odoo.exceptions import UserError
 from odoo.tests import tagged
 
 from odoo.addons.account.tests.common import AccountTestInvoicingCommon
@@ -138,6 +139,92 @@ class TestUaeProductClassification(AccountTestInvoicingCommon):
         )
         self.assertFalse(issue.attempt_ids)
         self.assertFalse(issue.event_ids)
+
+    def test_incomplete_classification_posts_in_review_and_repairs_without_ledger_edit(
+        self,
+    ):
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {
+                "name": "Synthetic classification review",
+                "fiscal_uuid_policy": "controlled_local",
+            }
+        )
+        self.env.company.write(
+            {"l10n_ae_edi_auto_prepare": True, "l10n_ae_edi_binding_id": binding.id}
+        )
+        # Each missing fact has an independently stated expected diagnostic.
+        cases = [
+            ("consu", False, "l10n_ae_classification_code", "IBR-184-AE"),
+            ("service", False, "l10n_ae_service_accounting_code", "IBR-185-AE"),
+            (
+                "service",
+                False,
+                "l10n_ae_service_accounting_version",
+                "SAC scheme version",
+            ),
+            ("consu", True, "l10n_ae_classification_code", "IBR-186-AE"),
+            ("service", True, "l10n_ae_service_accounting_code", "IBR-186-AE"),
+        ]
+        for product_type, mixed, missing, diagnostic in cases:
+            with self.subTest(missing=missing, mixed=mixed):
+                reviewed = {
+                    "l10n_ae_classification_code": "999999",
+                    "l10n_ae_service_accounting_code": "SYNTHETIC-REPAIRED-SAC",
+                    "l10n_ae_service_accounting_version": "SYNTHETIC-SAC-2026",
+                }
+                product = self.env["product.product"].create(
+                    {
+                        "name": "Synthetic incomplete classification",
+                        "type": product_type,
+                        "list_price": 100,
+                        "l10n_ae_is_good_and_service": mixed,
+                        **reviewed,
+                        missing: "   ",
+                    }
+                )
+                invoice = self.init_invoice(
+                    "out_invoice", amounts=[100], taxes=self.tax_sale_a
+                )
+                invoice.invoice_line_ids.product_id = product
+                invoice = invoice.with_user(self.simple_accountman)
+                invoice.action_post()
+                self.assertEqual(invoice.state, "posted")
+                self.assertEqual(invoice.l10n_ae_preparation_state, "review")
+                self.assertIn(diagnostic, invoice.l10n_ae_preparation_error)
+                self.assertTrue(invoice.l10n_ae_preparation_review_at)
+                self.assertFalse(invoice.l10n_ae_transmission_id)
+                self.assertFalse(invoice.l10n_ae_fiscal_uuid)
+                self.assertEqual(
+                    (invoice.amount_untaxed, invoice.amount_tax, invoice.amount_total),
+                    (100, 5, 105),
+                )
+                ledger = invoice.line_ids.read(
+                    ["debit", "credit", "balance", "tax_ids"]
+                )
+                with self.assertRaisesRegex(UserError, diagnostic):
+                    invoice.action_l10n_ae_validate()
+                with self.assertRaisesRegex(UserError, diagnostic):
+                    invoice.action_l10n_ae_prepare()
+                self.assertFalse(invoice.l10n_ae_transmission_id)
+                self.assertFalse(invoice.l10n_ae_fiscal_uuid)
+                product.write({missing: reviewed[missing]})
+                invoice.action_l10n_ae_validate()
+                invoice.action_l10n_ae_prepare()
+                issue = invoice.l10n_ae_transmission_id
+                self.assertTrue(issue)
+                self.assertEqual(invoice.l10n_ae_preparation_state, "ready")
+                self.assertFalse(invoice.l10n_ae_preparation_error)
+                self.assertFalse(invoice.l10n_ae_preparation_review_at)
+                report = invoice.validate_l10n_ae_pint()
+                self.assertTrue(report["valid"], report)
+                invoice.action_l10n_ae_prepare()
+                self.assertEqual(invoice.l10n_ae_transmission_id, issue)
+                self.assertEqual(
+                    invoice.line_ids.read(["debit", "credit", "balance", "tax_ids"]),
+                    ledger,
+                )
+                self.assertFalse(issue.attempt_ids)
+                self.assertFalse(issue.event_ids)
 
     def test_goods_and_service_preserves_distinct_hs_and_sac(self):
         # BTAE-13 and IBR-186 require both identifiers, not a shared code.
