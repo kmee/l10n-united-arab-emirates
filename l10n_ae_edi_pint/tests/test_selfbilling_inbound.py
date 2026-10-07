@@ -103,6 +103,65 @@ class TestUaeSelfBillingInbound(AccountTestInvoicingCommon):
         )
         return source, recipient_agreement, binding
 
+    def test_received_invalid_emirate_retains_original_and_explains_local_review(self):
+        source, agreement, binding = self._selfbilling_fixture()
+        company = self.env.company
+        manager = new_test_user(
+            self.env,
+            login="uae-inbound-emirate-manager",
+            groups="account.group_account_manager",
+            company_id=company.id,
+            company_ids=[(6, 0, company.ids)],
+        )
+        self.assertFalse(manager.has_group("base.group_system"))
+        namespaces = {
+            "cac": "urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2",
+            "cbc": "urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2",
+        }
+        root = etree.fromstring(source.preview_l10n_ae_pint().encode())
+        subdivision = root.find(
+            "cac:AccountingSupplierParty/cac:Party/cac:PostalAddress/cbc:CountrySubentity",
+            namespaces,
+        )
+        self.assertEqual(subdivision.text, "DXB")
+        subdivision.text = "Dubai"
+        content = etree.tostring(root)
+        inbox_model = self.env["l10n_ae.edi.inbox"].with_user(manager).with_context(
+            allowed_company_ids=company.ids
+        )
+        moves = self.env["account.move"].with_user(manager).with_context(
+            allowed_company_ids=company.ids
+        )
+        domain = [("company_id", "=", company.id), ("move_type", "=", "out_invoice")]
+        before = moves.search_count(domain)
+        inbox = inbox_model.receive_controlled_document(
+            binding.id, "invalid-emirate-received-selfbilling", content
+        )
+        self.assertFalse(inbox.action_process())
+        self.assertEqual(inbox.state, "review")
+        self.assertFalse(inbox.move_id)
+        self.assertEqual(moves.search_count(domain), before)
+        self.assertIn("ibr-128-ae", inbox.diagnostic)
+        self.assertIn("valid emirate code", inbox.diagnostic)
+        self.assertEqual(inbox.original_xml.content, content)
+        self.assertEqual(inbox.xml_hash, hashlib.sha256(content).hexdigest())
+        history = inbox.processing_history_ids
+        self.assertEqual(len(history), 1)
+        self.assertEqual(history.operator_id, manager)
+        self.assertEqual(history.outcome, "review")
+        report = json.loads(history.validation_report)
+        self.assertFalse(report["valid"])
+        self.assertTrue(report["xsd_valid"])
+        self.assertTrue(all(not layer["failures"] for layer in report["layers"]))
+        self.assertEqual(
+            [f["code"] for f in report["supplemental_checks"][0]["failures"]],
+            ["ibr-128-ae"],
+        )
+        self.assertEqual(
+            hashlib.sha256(history.validation_report.encode()).hexdigest(),
+            history.validation_report_hash,
+        )
+
     def test_received_blank_agreement_evidence_requires_review_and_repaired_retry(self):
         source, agreement, binding = self._selfbilling_fixture()
         company = self.env.company
