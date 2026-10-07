@@ -23,6 +23,85 @@ class TestUaeIncident(AccountTestInvoicingCommon):
         super().setUpClass()
 
     @freeze_time("2026-12-08 12:00:00")
+    def test_new_registration_cannot_open_from_typed_receipt_without_original(self):
+        manager = new_test_user(
+            self.env,
+            login="synthetic-confirmation-intake-manager",
+            groups="account.group_account_manager",
+            company_ids=self.env.company.ids,
+            company_id=self.env.company.id,
+        )
+        incident = (
+            self.env["l10n_ae.edi.incident"]
+            .with_user(manager)
+            .create(
+                {
+                    "name": "Synthetic new registration requiring original",
+                    "incident_kind": "registration_change",
+                    "fta_confirmation_received_at": "2026-11-30 21:30:00",
+                    "fta_confirmation_reference": "Synthetic FTA registration receipt",
+                    "reason": "Synthetic address amendment",
+                    "responsible_id": manager.id,
+                    "calendar_start": "2026-12-01",
+                    "calendar_end": "2026-12-10",
+                    "calendar_holidays": ["2026-12-02", "2026-12-03"],
+                    "calendar_source": "Reviewed synthetic federal calendar",
+                    "calendar_version": "synthetic-2026",
+                    "source_reference": "Reviewed MD243 Art5.3 and date exclusion",
+                    "review_note": "Dubai Dec1; Dec4,7,8,9,10 are days1 through5",
+                }
+            )
+        )
+        before = incident.read(
+            [
+                "state",
+                "write_date",
+                "notification_due_date",
+                "activity_ids",
+                "opened_at",
+                "fta_confirmation_received_at",
+                "fta_confirmation_reference",
+            ]
+        )
+        with (
+            self.cr.savepoint(),
+            self.assertRaisesRegex(ValidationError, "original FTA confirmation"),
+        ):
+            incident.action_open()
+        self.assertEqual(
+            incident.read(
+                [
+                    "state",
+                    "write_date",
+                    "notification_due_date",
+                    "activity_ids",
+                    "opened_at",
+                    "fta_confirmation_received_at",
+                    "fta_confirmation_reference",
+                ]
+            ),
+            before,
+        )
+        incident.record_fta_confirmation(
+            {
+                "evidence_key": "synthetic-intake-original",
+                "evidence_origin": "simulated",
+                "received_at": "2026-11-30 21:30:00",
+                "external_reference": "Synthetic FTA registration receipt",
+                "source_reference": "Supplied synthetic original",
+                "review_note": "Reviewed declaration; no independent verification",
+                "document_filename": "synthetic-intake-confirmation.txt",
+                "document": base64.b64encode(
+                    b"Synthetic FTA registration confirmation\n"
+                ).decode(),
+            }
+        )
+        self.assertTrue(incident.action_open())
+        self.assertEqual(incident.notification_due_date, date(2026, 12, 10))
+        self.assertEqual(len(incident.activity_ids), 1)
+        self.assertEqual(len(incident.fta_confirmation_ids), 1)
+
+    @freeze_time("2026-12-08 12:00:00")
     def test_confirmation_capture_refuses_forged_facts_and_unauthorized_original_reads(
         self,
     ):
