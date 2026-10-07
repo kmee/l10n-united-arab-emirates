@@ -7403,6 +7403,162 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
             (100, 5, 105),
         )
 
+    def test_billing_summary_period_survives_submission_replay_and_conflict(self):
+        company = self.env.company
+        journal = self.env["account.journal"].search(
+            [("company_id", "=", company.id), ("type", "=", "sale")], limit=1
+        )
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {
+                "name": "Synthetic Summary billing sandbox",
+                "fiscal_uuid_policy": "controlled_local",
+            }
+        )
+        billing = (
+            self.env["l10n_ae.edi.billing"]
+            .with_user(self.simple_accountman)
+            .with_context(allowed_company_ids=[company.id])
+        )
+        self.assertFalse(billing.env.su)
+        identity = {
+            "company_id": company.id,
+            "environment": "sandbox",
+            "process": "billing",
+            "origin_system": "SyntheticSummaryBilling",
+            "origin_document_id": "Reviewed-January-2019",
+        }
+        # Independent worksheet: AED40+60, VAT2+3, payable105.
+        request = {
+            "move_type": "out_invoice",
+            "partner_id": self.partner_a.id,
+            "journal_id": journal.id,
+            "currency_id": company.currency_id.id,
+            "invoice_date": "2019-01-31",
+            "l10n_ae_binding_id": binding.id,
+            "l10n_ae_summary": True,
+            "l10n_ae_invoicing_period_start": "2019-01-01",
+            "l10n_ae_invoicing_period_end": "2019-01-31",
+            "lines": [
+                {
+                    "name": "Synthetic reviewed monthly supply",
+                    "product_id": self.product_a.id,
+                    "quantity": 1,
+                    "price_unit": amount,
+                    "tax_ids": self.tax_sale_a.ids,
+                }
+                for amount in (40, 60)
+            ],
+        }
+        original_request = json.dumps(request, sort_keys=True)
+        result = billing.submit_document(**identity, invoice=request)
+        self.assertEqual(result["status"], "found")
+        self.assertEqual(
+            {
+                key: result["accounting"][key]
+                for key in (
+                    "state",
+                    "move_type",
+                    "amount_untaxed",
+                    "amount_tax",
+                    "amount_total",
+                )
+            },
+            {
+                "state": "posted",
+                "move_type": "out_invoice",
+                "amount_untaxed": 100,
+                "amount_tax": 5,
+                "amount_total": 105,
+            },
+        )
+        move = billing.env["account.move"].browse(result["accounting"]["move_id"])
+        issue = move.l10n_ae_transmission_id
+        self.assertEqual(len(move.l10n_ae_transmission_ids), 1)
+        self.assertEqual(issue.submission_state, "queued")
+        self.assertEqual(
+            json.loads(issue.payload)["invoicing_period"],
+            {"start_date": "2019-01-01", "end_date": "2019-01-31"},
+        )
+        move_fields = [
+            "name",
+            "state",
+            "l10n_ae_fiscal_uuid",
+            "l10n_ae_invoicing_period_start",
+            "l10n_ae_invoicing_period_end",
+            "amount_untaxed",
+            "amount_tax",
+            "amount_total",
+            "create_date",
+            "write_date",
+        ]
+        issue_fields = [
+            "payload",
+            "payload_hash",
+            "xml_content",
+            "xml_hash",
+            "idempotency_key",
+            "submission_state",
+            "create_date",
+            "write_date",
+        ]
+        ledger_fields = [
+            "account_id",
+            "partner_id",
+            "currency_id",
+            "date",
+            "debit",
+            "credit",
+            "balance",
+            "amount_currency",
+            "tax_ids",
+            "write_date",
+        ]
+        frozen_move = move.read(move_fields)
+        frozen_issue = issue.read(issue_fields)
+        ledger = move.line_ids.sorted("id").read(ledger_fields)
+        artifact = billing.get_document_artifact(**identity, revision=1)
+        self.assertEqual(artifact["content"], issue.xml_content)
+        self.assertEqual(artifact["sha256"], issue.xml_hash)
+        xml = etree.fromstring(artifact["content"].encode())
+        self.assertEqual(xml.findtext("cbc:InvoiceTypeCode", namespaces=NS), "380")
+        self.assertEqual(
+            xml.findtext("cbc:ProfileExecutionID", namespaces=NS), "00010000"
+        )
+        self.assertEqual(
+            xml.findtext("cac:InvoicePeriod/cbc:StartDate", namespaces=NS), "2019-01-01"
+        )
+        self.assertEqual(
+            xml.findtext("cac:InvoicePeriod/cbc:EndDate", namespaces=NS), "2019-01-31"
+        )
+        report = move.validate_l10n_ae_pint()
+        self.assertTrue(report["valid"], report)
+        self.assertEqual(report["ruleset"], "kmee-pint-ae-1.0.4-ubl-2.1")
+        self.assertEqual(billing.submit_document(**identity, invoice=request), result)
+        self.assertEqual(json.dumps(request, sort_keys=True), original_request)
+        self.assertEqual(
+            billing.get_document(**identity)["document"], result["document"]
+        )
+        with self.assertRaisesRegex(UserError, "conflicts with the original"):
+            billing.submit_document(
+                **identity,
+                invoice={**request, "l10n_ae_invoicing_period_end": "2019-01-30"},
+            )
+        with self.assertRaisesRegex(UserError, "Invalid typed billing field"):
+            billing.submit_document(
+                **identity,
+                invoice={**request, "l10n_ae_invoicing_period_start": "01/01/2019"},
+            )
+        self.assertEqual(move.read(move_fields), frozen_move)
+        self.assertEqual(issue.read(issue_fields), frozen_issue)
+        self.assertEqual(move.line_ids.sorted("id").read(ledger_fields), ledger)
+        self.assertEqual(
+            billing.get_document_artifact(**identity, revision=1), artifact
+        )
+        self.assertEqual(len(move.l10n_ae_transmission_ids), 1)
+        self.assertFalse(issue.attempt_ids)
+        self.assertFalse(issue.event_ids)
+        self.assertFalse(issue.remote_id)
+
     def test_summary_tax_invoice_serializes_reviewed_invoice_period(self):
         company = self.env.company
         self.assertEqual((company.currency_id.name, self.tax_sale_a.amount), ("AED", 5))
