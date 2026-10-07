@@ -7,6 +7,7 @@ from datetime import timedelta
 
 from odoo import api, fields, models
 from odoo.exceptions import UserError
+from odoo.fields import Domain
 from odoo.tools.binary import BinaryBytes
 
 
@@ -158,6 +159,40 @@ class UaeEdiTransmission(models.Model):
         ],
         compute="_compute_confirmation_state",
     )
+
+    @api.depends("origin_document_id", "move_id.name", "revision")
+    @api.depends_context(
+        "uid", "allowed_company_ids", "l10n_ae_incident_impact_selection"
+    )
+    def _compute_display_name(self):
+        if not self.env.context.get("l10n_ae_incident_impact_selection"):
+            return super()._compute_display_name()
+        # Native name_search elevates label reads. Preserve the caller's access.
+        originals = self.with_user(self.env.uid)
+        originals.check_access("read")
+        originals.move_id.check_access("read")
+        for record in originals:
+            self.browse(record.id).display_name = self.env._(
+                "%(invoice)s (Revision %(revision)s)",
+                invoice=record.move_id.name,
+                revision=record.revision,
+            )
+
+    @api.model
+    def _search_display_name(self, operator, value):
+        origin = super()._search_display_name(operator, value)
+        if not self.env.context.get("l10n_ae_incident_impact_selection"):
+            return origin
+        caller = self.with_user(self.env.uid)
+        caller.check_access("read")
+        caller.env["account.move"].check_access("read")
+        invoice = Domain("move_id.name", operator, value)
+        identities = (
+            origin & invoice
+            if operator in Domain.NEGATIVE_OPERATORS
+            else origin | invoice
+        )
+        return identities & Domain("company_id", "in", caller.env.companies.ids)
 
     @api.depends("revision")
     def _compute_xml_download_filename(self):

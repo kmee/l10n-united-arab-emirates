@@ -191,11 +191,13 @@ class UaeEdiIncident(models.Model):
         }
 
     def action_review_impact(self):
-        return self._recovery_review_action(
+        action = self._recovery_review_action(
             "l10n_ae.edi.incident.impact.wizard",
             "l10n_ae_edi.edi_incident_impact_wizard_form",
             self.env._("Review Affected Documents"),
         )
+        action["context"]["l10n_ae_incident_impact_selection"] = True
+        return action
 
     def action_review_restoration(self):
         return self._recovery_review_action(
