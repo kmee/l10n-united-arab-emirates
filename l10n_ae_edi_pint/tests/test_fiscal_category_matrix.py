@@ -95,6 +95,32 @@ class TestUaeFiscalCategoryMatrix(AccountTestInvoicingCommon):
         self.assertEqual(invoice.line_ids.read(ledger_fields), ledger)
         self.assertFalse(issue.attempt_ids or issue.event_ids)
 
+    def test_native_chart_reload_fills_missing_zero_category_and_keeps_reviewed_values(self):
+        company = self.env.company
+        zero = self.env.ref(f"account.{company.id}_uae_sale_tax_0")
+        custom = zero.copy({"name": "Reviewed custom exempt tax", "ubl_cii_tax_category_code": "E"})
+        financial_fields = [
+            "id", "name", "active", "amount", "amount_type", "type_tax_use",
+            "invoice_repartition_line_ids", "refund_repartition_line_ids",
+            "tax_group_id", "price_include_override", "fiscal_position_ids",
+        ]
+        native = self.env["account.tax"].with_context(active_test=False).search([
+            ("company_id", "=", company.id),
+        ])
+        before = native.read(financial_fields)
+        zero.ubl_cii_tax_category_code = False
+        self.env["account.chart.template"].try_loading("ae", company, install_demo=False, force_create=False)
+        self.assertEqual(zero.ubl_cii_tax_category_code, "Z")
+        self.assertEqual(custom.ubl_cii_tax_category_code, "E")
+        self.assertEqual(native.read(financial_fields), before)
+        self.assertEqual(self.env.ref(f"account.{company.id}_uae_sale_tax_0"), zero)
+        # A reviewed selection is retained on subsequent chart reloads.
+        zero.ubl_cii_tax_category_code = "O"
+        self.env["account.chart.template"].try_loading("ae", company, install_demo=False, force_create=False)
+        self.assertEqual(zero.ubl_cii_tax_category_code, "O")
+        self.assertEqual(custom.ubl_cii_tax_category_code, "E")
+        self.assertEqual(native.read(financial_fields), before)
+
     def test_tax_inclusive_discount_preserves_net_allowance_and_original_ledger(self):
         # Independent AED example: gross unit price105 includes5% VAT.
         # Before discount the net basis is100. A10% discount therefore means
