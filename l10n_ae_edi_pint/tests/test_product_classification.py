@@ -90,6 +90,8 @@ class TestUaeProductClassification(AccountTestInvoicingCommon):
                 "fiscal_uuid_policy": "controlled_local",
             }
         )
+        # Native product assignment selects the reviewed product's own taxes.
+        product.taxes_id = tax
         invoice = self.init_invoice("out_invoice", amounts=[100], taxes=tax)
         invoice.invoice_line_ids.product_id = product
         self.assertEqual(invoice.invoice_line_ids.tax_ids, tax)
