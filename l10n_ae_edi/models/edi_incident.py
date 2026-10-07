@@ -213,6 +213,9 @@ class UaeEdiIncident(models.Model):
                 self.env._("The reviewed calendar must cover the legal event date.")
             )
         values = self.calendar_holidays
+        # Odoo JSON fields store an empty list as NULL and return False.
+        if values is False:
+            values = []
         if not isinstance(values, list):
             raise ValidationError(
                 self.env._("Federal holidays must be a list of ISO dates.")
