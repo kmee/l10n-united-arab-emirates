@@ -4,7 +4,7 @@ import hashlib
 import json
 import re
 import uuid
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 
 from odoo import api, fields, models
 from odoo.exceptions import AccessError, UserError
@@ -684,15 +684,7 @@ class AccountMove(models.Model):
             ],
             "process": "selfbilling" if self.is_self_billing else "billing",
             "currency": self.currency_id.name,
-            "tax_exchange": {
-                "source_currency": self.currency_id.name,
-                "target_currency": "AED",
-                "rate": self.l10n_ae_tax_exchange_rate,
-                "date": fields.Date.to_string(self.l10n_ae_tax_exchange_date),
-                "source": self.l10n_ae_tax_exchange_source,
-            }
-            if self.currency_id.name != "AED"
-            else None,
+            "tax_exchange": self._l10n_ae_tax_exchange(),
             "origin": {
                 "system": self.l10n_ae_origin_system,
                 "document_id": self.l10n_ae_origin_document_id,
@@ -1200,6 +1192,120 @@ class AccountMove(models.Model):
                     )
                 )
 
+    def _l10n_ae_tax_exchange(self):
+        """Resolve explicit overrides or capture the actual dated native conversion."""
+        self.ensure_one()
+        if self.currency_id.name == "AED":
+            return None
+        if self.l10n_ae_transmission_id:
+            return json.loads(self.l10n_ae_transmission_id.payload)["tax_exchange"]
+        exchange = {
+            "source_currency": self.currency_id.name,
+            "target_currency": "AED",
+            "rate": self.l10n_ae_tax_exchange_rate,
+            "date": fields.Date.to_string(self.l10n_ae_tax_exchange_date),
+            "source": self.l10n_ae_tax_exchange_source,
+        }
+        # A partial override requires repair, never silent replacement by a default.
+        if any(exchange[key] for key in ("rate", "date", "source")):
+            return exchange
+        if self.company_currency_id.name != "AED":
+            raise UserError(
+                self.env._(
+                    "Review an AED exchange rate for this non-AED company ledger."
+                )
+            )
+        conversion_date = self._get_invoice_currency_rate_date()
+        if self.taxable_supply_date and self.taxable_supply_date != conversion_date:
+            raise UserError(
+                self.env._(
+                    "Review the AED exchange rate for the VAT point date; the native "
+                    "accounting conversion uses a different date."
+                )
+            )
+        if self.invoice_currency_rate <= 0:
+            raise UserError(
+                self.env._("The native AED exchange rate must be positive.")
+            )
+        native_currency = self.currency_id.with_company(self.company_id).with_context(
+            date=fields.Date.to_string(conversion_date),
+            to_currency=self.company_currency_id.id,
+        )
+        inverse = Decimal(1) / Decimal(str(self.invoice_currency_rate))
+        quantum = Decimal("0.000001")
+        rate_text = format(inverse.quantize(quantum, rounding=ROUND_HALF_UP), "f")
+        expected = Decimal(str(native_currency.inverse_rate)).quantize(
+            quantum, rounding=ROUND_HALF_UP
+        )
+        if Decimal(rate_text) != expected:
+            raise UserError(
+                self.env._(
+                    "The native AED exchange rate no longer matches its dated "
+                    "currency records. Review the fiscal quote before preparation."
+                )
+            )
+        rate_facts = []
+        for currency in self.currency_id | self.company_currency_id:
+            dated_currency = currency.with_company(self.company_id).with_context(
+                date=fields.Date.to_string(conversion_date),
+                to_currency=self.company_currency_id.id,
+            )
+            source_date = dated_currency.rate_date
+            if not source_date and currency == self.company_currency_id:
+                # Native company-currency unit anchor, not a dated publication.
+                continue
+            if not source_date or source_date > conversion_date:
+                raise UserError(
+                    self.env._(
+                        "A dated AED exchange rate source is missing or lies after "
+                        "the native conversion date. Review the fiscal quote."
+                    )
+                )
+            record = self.env["res.currency.rate"].search(
+                [
+                    ("currency_id", "=", currency.id),
+                    ("name", "=", source_date),
+                    ("company_id", "in", [False, self.company_id.root_id.id]),
+                ],
+                order="company_id, id desc",
+                limit=1,
+            )
+            if not record:
+                raise UserError(
+                    self.env._("The dated AED exchange rate source cannot be read.")
+                )
+            rate_facts.append(
+                {
+                    "record_id": record.id,
+                    "currency": currency.name,
+                    "date": fields.Date.to_string(record.name),
+                    "company_id": record.company_id.id or None,
+                    "value": str(record.rate),
+                    "written_at": fields.Datetime.to_string(record.write_date),
+                }
+            )
+        evidence = {
+            "kind": "odoo_currency_table",
+            "cbuae_origin_verified": False,
+            "conversion_date": fields.Date.to_string(conversion_date),
+            "company_currency": self.company_currency_id.name,
+            "invoice_currency_rate": str(self.invoice_currency_rate),
+            "inverse_before_serialization": str(inverse),
+            "rates": rate_facts,
+        }
+        evidence["source_sha256"] = hashlib.sha256(
+            json.dumps(evidence, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+        exchange.update(
+            {
+                "rate": rate_text,
+                "date": fields.Date.to_string(native_currency.rate_date),
+                "source": f"Odoo currency rates: {self.currency_id.name} to AED",
+                "evidence": evidence,
+            }
+        )
+        return exchange
+
     def action_l10n_ae_validate(self):
         for move in self:
             if move.l10n_ae_received_document:
@@ -1257,10 +1363,11 @@ class AccountMove(models.Model):
             move._l10n_ae_destination_override()
             move._check_l10n_ae_credit_references()
             move._check_l10n_ae_product_classification()
-            if move.currency_id.name != "AED" and not (
-                move.l10n_ae_tax_exchange_rate
-                and move.l10n_ae_tax_exchange_date
-                and (move.l10n_ae_tax_exchange_source or "").strip()
+            exchange = move._l10n_ae_tax_exchange()
+            if exchange and not (
+                exchange["rate"]
+                and exchange["date"]
+                and (exchange["source"] or "").strip()
             ):
                 raise UserError(
                     self.env._(
@@ -1268,11 +1375,9 @@ class AccountMove(models.Model):
                         "before preparing a foreign-currency e-invoice."
                     )
                 )
-            if move.currency_id.name != "AED" and (
-                not re.fullmatch(
-                    r"[0-9]+(?:\.[0-9]{1,6})?", move.l10n_ae_tax_exchange_rate
-                )
-                or Decimal(move.l10n_ae_tax_exchange_rate) <= 0
+            if exchange and (
+                not re.fullmatch(r"[0-9]+(?:\.[0-9]{1,6})?", exchange["rate"])
+                or Decimal(exchange["rate"]) <= 0
             ):
                 raise UserError(
                     self.env._(
