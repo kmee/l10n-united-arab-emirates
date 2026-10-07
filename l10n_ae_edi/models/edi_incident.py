@@ -304,6 +304,31 @@ class UaeEdiIncident(models.Model):
         )
         return True
 
+    def action_record_notice(self):
+        self.ensure_one()
+        self._check_actor("write")
+        if self.state != "open":
+            raise UserError(self.env._("Open the reviewed incident first."))
+        if self.env["ir.config_parameter"].sudo().get_bool("database.is_neutralized"):
+            raise UserError(
+                self.env._("Notice recording is disabled on a neutralized copy.")
+            )
+        return {
+            "type": "ir.actions.act_window",
+            "name": self.env._("Record Supplied Notice Evidence"),
+            "res_model": "l10n_ae.edi.incident.notice.wizard",
+            "view_mode": "form",
+            "view_id": self.env.ref("l10n_ae_edi.edi_incident_notice_wizard_form").id,
+            "target": "new",
+            "context": {
+                "default_incident_id": self.id,
+                "default_recipient_role": (
+                    "asp" if self.incident_kind == "registration_change" else "fta"
+                ),
+                "default_taxpayer_roles": self.affected_roles or False,
+            },
+        }
+
     def record_notice(self, evidence):
         self.ensure_one()
         self._check_actor("write")

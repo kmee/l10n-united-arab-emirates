@@ -15,6 +15,13 @@
                         invisible="state != 'draft'"
                     />
                     <field name="state" widget="statusbar" readonly="1" />
+                    <button
+                        name="action_record_notice"
+                        type="object"
+                        string="Record Supplied Notice"
+                        groups="account.group_account_manager"
+                        invisible="state != 'open'"
+                    />
                 </header>
                 <sheet>
                     <group>
@@ -92,6 +99,21 @@
                     <p class="text-muted">
                         Opening a reviewed incident schedules one internal reminder for its responsible user. The reminder records an internal action; it does not confirm that a notification was delivered or acknowledged.
                     </p>
+                    <group string="Supplied Notice Evidence">
+                        <field name="notice_ids" nolabel="1" readonly="1">
+                            <list create="false" edit="false" delete="false">
+                                <field name="notice_purpose" />
+                                <field name="evidence_origin" />
+                                <field name="sender_role" />
+                                <field name="taxpayer_roles" />
+                                <field name="recipient_role" />
+                                <field name="sent_at" />
+                                <field name="external_reference" />
+                                <field name="recorded_by_id" />
+                                <field name="recorded_at" />
+                            </list>
+                        </field>
+                    </group>
                 </sheet>
                 <chatter />
             </form>

@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<odoo>
+    <record id="edi_incident_notice_form" model="ir.ui.view">
+        <field name="name">l10n_ae.edi.incident.notice.form</field>
+        <field name="model">l10n_ae.edi.incident.notice</field>
+        <field name="arch" type="xml">
+            <form
+                string="Supplied Notice Evidence"
+                create="false"
+                edit="false"
+                delete="false"
+                duplicate="false"
+            >
+                <sheet>
+                    <group>
+                        <field
+                            name="incident_id"
+                            options="{'no_create': True, 'no_open': True}"
+                        />
+                        <field name="company_id" />
+                        <field name="notice_purpose" />
+                        <field name="evidence_origin" />
+                        <field name="sender_role" />
+                        <field name="sender_name" />
+                        <field
+                            name="taxpayer_roles"
+                            invisible="sender_role != 'taxpayer'"
+                        />
+                        <field name="recipient_role" />
+                        <field name="recipient_name" />
+                        <field name="recipient_address" />
+                        <field name="channel" />
+                        <field name="sent_at" />
+                        <field name="external_reference" />
+                        <field name="review_note" />
+                        <field name="document_filename" />
+                        <field name="document" filename="document_filename" />
+                        <field name="document_sha256" />
+                        <field name="recorded_by_id" />
+                        <field name="recorded_at" />
+                    </group>
+                    <p class="text-muted">
+                        This record preserves a reviewed supplied artifact. It does not confirm authenticity, delivery, acknowledgment or discharge of the taxpayer's obligation.
+                    </p>
+                </sheet>
+            </form>
+        </field>
+    </record>
+</odoo>
