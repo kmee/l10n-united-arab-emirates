@@ -44,6 +44,72 @@ class TestUaeIncident(AccountTestInvoicingCommon):
     def setUpClass(cls):
         super().setUpClass()
 
+    @freeze_time("2026-12-01 12:00:00")
+    def test_incident_form_selects_approved_calendar_and_freezes_basis(self):
+        manager = new_test_user(
+            self.env,
+            login="synthetic-approved-calendar-manager",
+            groups="account.group_account_manager",
+            company_ids=self.env.company.ids,
+            company_id=self.env.company.id,
+        )
+        calendar_model = self.env["l10n_ae.edi.calendar"].with_user(manager)
+        with Form(calendar_model, view="l10n_ae_edi.edi_calendar_form") as form:
+            form.name = "Synthetic calendar; arithmetic fixture only"
+            form.version = "synthetic-2026-v1"
+            form.calendar_start = date(2026, 12, 1)
+            form.calendar_end = date(2026, 12, 10)
+            form.calendar_holiday_dates = "2026-12-02\n2026-12-03"
+            form.source_reference = "Synthetic source; no official holiday claim"
+            form.source_snapshot = "Synthetic Dec2/3 holidays, Saturday/Sunday weekend."
+            form.review_note = "Arithmetic qualification only; not for production"
+        calendar = form.record
+        self.assertEqual(calendar.state, "draft")
+        self.assertFalse(calendar.approved_by_id)
+        self.assertFalse(calendar.approved_at)
+        self.assertTrue(calendar.action_approve())
+        self.assertEqual(calendar.approved_by_id, manager)
+        self.assertEqual(calendar.approved_at, fields.Datetime.now())
+        approved_before = calendar.read()
+        self.assertTrue(calendar.action_approve())
+        self.assertEqual(calendar.read(), approved_before)
+        with self.cr.savepoint(), self.assertRaises(UserError):
+            calendar.write({"calendar_holiday_dates": "2026-12-04"})
+
+        with Form(
+            self.env["l10n_ae.edi.incident"].with_user(manager),
+            view="l10n_ae_edi.edi_incident_form",
+        ) as form:
+            form.name = "Synthetic failure using approved calendar"
+            form.affected_roles = "issuer"
+            form.occurrence_at = fields.Datetime.to_datetime("2026-11-30 21:30:00")
+            form.detected_at = fields.Datetime.to_datetime("2026-12-01 08:00:00")
+            form.reason = "Synthetic controlled failure"
+            form.responsible_id = manager
+            form.calendar_version_id = calendar
+            form.source_reference = "Reviewed MD243 art12 and date exclusion"
+            form.review_note = "Dubai Dec1; Dec4 and Dec7 are working days1 and2"
+        incident = form.record
+        self.assertEqual(incident.calendar_start, date(2026, 12, 1))
+        self.assertEqual(incident.calendar_end, date(2026, 12, 10))
+        self.assertEqual(incident.calendar_holidays, ["2026-12-02", "2026-12-03"])
+        self.assertEqual(incident.calendar_source, calendar.source_reference)
+        self.assertEqual(incident.calendar_version, "synthetic-2026-v1")
+        self.assertTrue(incident.action_open())
+        self.assertEqual(incident.notification_due_date, date(2026, 12, 7))
+        self.assertEqual(incident.opened_by_id, manager)
+        self.assertEqual(len(incident.activity_ids), 1)
+        self.assertEqual(incident.activity_ids.date_deadline, date(2026, 12, 7))
+        before = incident.read()
+        activity_before = incident.activity_ids.read()
+        self.assertTrue(incident.action_open())
+        self.assertEqual(incident.read(), before)
+        self.assertEqual(incident.activity_ids.read(), activity_before)
+        reviewed = Form(incident, view="l10n_ae_edi.edi_incident_form")
+        self.assertEqual(reviewed.calendar_version_id, calendar)
+        with self.assertRaises(AssertionError):
+            reviewed.calendar_version_id = False
+
     @freeze_time("2026-12-08 12:00:00")
     def test_new_registration_cannot_open_from_typed_receipt_without_original(self):
         manager = new_test_user(
