@@ -7662,6 +7662,9 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
                     "name": f"Synthetic Publisher {name}",
                     "vat": vat,
                     "routing_endpoint": endpoint,
+                    "l10n_ae_registration_type": "TL",
+                    "l10n_ae_registration_authority": "Synthetic Publisher Authority",
+                    "additional_identifiers": {"AE_TL": f"SYNTH-PUBLISHER-{name}-TL"},
                 }
             )
             bill = self.init_invoice(
