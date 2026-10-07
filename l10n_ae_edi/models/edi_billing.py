@@ -38,6 +38,8 @@ BILLING_HEADER_FIELDS = {
     "l10n_ae_tax_exchange_rate",
     "l10n_ae_tax_exchange_date",
     "l10n_ae_tax_exchange_source",
+    "l10n_ae_invoicing_period_start",
+    "l10n_ae_invoicing_period_end",
     "l10n_ae_buyer_not_implemented",
     "l10n_ae_export_buyer_no_peppol",
     "l10n_ae_buyer_onboarding_review_date",
