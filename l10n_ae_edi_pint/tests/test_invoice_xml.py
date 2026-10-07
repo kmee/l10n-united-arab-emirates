@@ -8425,6 +8425,157 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
             (100, 5, 105),
         )
 
+    def test_usd_billing_batch_preserves_native_fx_and_refuses_unreviewed_tax_date(
+        self,
+    ):
+        company = self.env.company
+        usd = self.env.ref("base.USD")
+        usd.active = True
+        quote = self.env["res.currency.rate"].create(
+            {
+                "currency_id": usd.id,
+                "company_id": company.id,
+                "name": "2018-12-31",
+                "rate": 1 / 3.6725,
+            }
+        )
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {
+                "name": "Synthetic automatic USD billing",
+                "fiscal_uuid_policy": "controlled_local",
+            }
+        )
+        billing = (
+            self.env["l10n_ae.edi.billing"]
+            .with_user(self.simple_accountman)
+            .with_context(allowed_company_ids=[company.id])
+        )
+        self.assertFalse(billing.env.su)
+        identity = {
+            "company_id": company.id,
+            "environment": "sandbox",
+            "process": "billing",
+            "origin_system": "SyntheticAutomaticUsdBatch",
+        }
+        journal = self.env["account.journal"].search(
+            [("company_id", "=", company.id), ("type", "=", "sale")], limit=1
+        )
+        request = {
+            "move_type": "out_invoice",
+            "partner_id": self.partner_a.id,
+            "journal_id": journal.id,
+            "currency_id": usd.id,
+            "invoice_date": "2019-01-01",
+            "l10n_ae_binding_id": binding.id,
+            "lines": [
+                {
+                    "name": "Synthetic dated USD supply",
+                    "product_id": self.product_a.id,
+                    "quantity": 1,
+                    "price_unit": 100,
+                    "tax_ids": self.tax_sale_a.ids,
+                }
+            ],
+        }
+        original_request = json.dumps(request, sort_keys=True)
+        first = billing.submit_document(
+            **identity, origin_document_id="USD-valid-first", invoice=request
+        )
+        with self.assertRaisesRegex(UserError, "VAT point date"):
+            billing.submit_document(
+                **identity,
+                origin_document_id="USD-tax-date-review",
+                invoice={**request, "taxable_supply_date": "2018-12-30"},
+            )
+        second = billing.submit_document(
+            **identity, origin_document_id="USD-valid-second", invoice=request
+        )
+        self.assertNotEqual(
+            first["accounting"]["move_id"], second["accounting"]["move_id"]
+        )
+        originals = []
+        for result in (first, second):
+            move = billing.env["account.move"].browse(result["accounting"]["move_id"])
+            self.assertEqual(
+                (move.state, move.amount_untaxed, move.amount_tax, move.amount_total),
+                ("posted", 100, 5, 105),
+            )
+            self.assertEqual(
+                (move.amount_tax_signed, move.amount_total_signed), (18.36, 385.61)
+            )
+            self.assertFalse(move.l10n_ae_tax_exchange_rate)
+            self.assertFalse(move.l10n_ae_tax_exchange_date)
+            self.assertFalse(move.l10n_ae_tax_exchange_source)
+            issue = move.l10n_ae_transmission_id
+            exchange = json.loads(issue.payload)["tax_exchange"]
+            self.assertEqual(exchange["rate"], "3.672500")
+            self.assertEqual(exchange["date"], "2018-12-31")
+            self.assertEqual(exchange["evidence"]["conversion_date"], "2019-01-01")
+            self.assertFalse(exchange["evidence"]["cbuae_origin_verified"])
+            self.assertEqual(len(move.l10n_ae_transmission_ids), 1)
+            self.assertFalse(issue.attempt_ids)
+            self.assertFalse(issue.event_ids)
+            artifact = billing.get_document_artifact(
+                **identity, origin_document_id=issue.origin_document_id, revision=1
+            )
+            xml = etree.fromstring(artifact["content"].encode())
+            self.assertEqual(
+                xml.findtext("cac:TaxExchangeRate/cbc:CalculationRate", namespaces=NS),
+                "3.672500",
+            )
+            self.assertEqual(
+                xml.findtext(
+                    "cac:InvoiceLine/cac:ItemPriceExtension/cbc:Amount", namespaces=NS
+                ),
+                "385.6125",
+            )
+            report = move.validate_l10n_ae_pint()
+            self.assertTrue(report["valid"], report)
+            originals.append(
+                (
+                    move,
+                    result,
+                    artifact,
+                    move.line_ids.read(
+                        ["account_id", "debit", "credit", "amount_currency", "tax_ids"]
+                    ),
+                )
+            )
+        domain = [
+            ("company_id", "=", company.id),
+            ("l10n_ae_origin_system", "=", identity["origin_system"]),
+        ]
+        self.assertEqual(billing.env["account.move"].search_count(domain), 2)
+        receipts = billing.env["l10n_ae.edi.billing.request"].search(
+            [
+                ("company_id", "=", company.id),
+                ("origin_system", "=", identity["origin_system"]),
+            ]
+        )
+        self.assertEqual(len(receipts), 2)
+        quote.rate = 1 / 3.7
+        for move, result, artifact, ledger in originals:
+            origin = move.l10n_ae_origin_document_id
+            self.assertEqual(
+                billing.submit_document(
+                    **identity, origin_document_id=origin, invoice=request
+                ),
+                result,
+            )
+            self.assertEqual(
+                billing.get_document_artifact(
+                    **identity, origin_document_id=origin, revision=1
+                ),
+                artifact,
+            )
+            self.assertEqual(
+                move.line_ids.read(
+                    ["account_id", "debit", "credit", "amount_currency", "tax_ids"]
+                ),
+                ledger,
+            )
+        self.assertEqual(json.dumps(request, sort_keys=True), original_request)
+
     def test_billing_summary_period_survives_submission_replay_and_conflict(self):
         company = self.env.company
         journal = self.env["account.journal"].search(
