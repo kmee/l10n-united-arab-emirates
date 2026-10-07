@@ -206,7 +206,7 @@ class TestUaeProductClassification(AccountTestInvoicingCommon):
         self.assertFalse(invoice.env.su)
         form = Form(invoice)
         with form.invoice_line_ids.edit(0) as line:
-            line.product_id = False
+            line.product_id = self.env["product.product"]
             line.name = "Synthetic manually described electronic goods"
             line.tax_ids.clear()
             line.tax_ids.add(tax)
