@@ -6031,6 +6031,9 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
     @AccountTestInvoicingCommon.setup_country("ae")
     def setUpClass(cls):
         super().setUpClass()
+        # Reviewed synthetic HS for the goods-backed Summary/billing fixtures.
+        # No customer or authoritative tariff classification is implied.
+        cls.product_a.l10n_ae_classification_code = "999999"
         cls.env.company.write(
             {"l10n_ae_tin": "1000000001", "l10n_ae_tin_confirmed": True}
         )
