@@ -7205,6 +7205,64 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         self.assertFalse(transmission.event_ids)
         self.assertEqual((invoice.amount_tax, invoice.amount_total), (5, 105))
 
+    def test_reversed_summary_period_is_refused_before_an_issue_is_frozen(self):
+        invoice = (
+            self.init_invoice(
+                "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
+            )
+            .with_user(self.simple_accountman)
+            .with_context(allowed_company_ids=[self.env.company.id])
+        )
+        self.assertFalse(invoice.env.su)
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {"name": "Synthetic Summary reversed-period review"}
+        )
+        invoice.write(
+            {
+                "l10n_ae_summary": True,
+                "l10n_ae_invoicing_period_start": "2019-01-31",
+                "l10n_ae_invoicing_period_end": "2019-01-01",
+                "l10n_ae_binding_id": binding.id,
+                "l10n_ae_fiscal_uuid": "cccccccc-1111-4111-8111-111111111111",
+            }
+        )
+        invoice_fields = [
+            "state",
+            "l10n_ae_fiscal_uuid",
+            "l10n_ae_invoicing_period_start",
+            "l10n_ae_invoicing_period_end",
+            "write_date",
+        ]
+        ledger_fields = [
+            "account_id",
+            "partner_id",
+            "currency_id",
+            "date",
+            "debit",
+            "credit",
+            "balance",
+            "amount_currency",
+            "tax_ids",
+            "write_date",
+        ]
+        before = invoice.read(invoice_fields)
+        ledger = invoice.line_ids.sorted("id").read(ledger_fields)
+        with self.assertRaisesRegex(UserError, "IBR-029.*end.*start"):
+            invoice.action_l10n_ae_prepare()
+        self.assertFalse(invoice.l10n_ae_transmission_id)
+        self.assertFalse(invoice.l10n_ae_transmission_ids)
+        self.assertEqual(invoice.read(invoice_fields), before)
+        self.assertEqual(invoice.line_ids.sorted("id").read(ledger_fields), ledger)
+        invoice.l10n_ae_invoicing_period_end = "2019-01-31"
+        invoice.action_l10n_ae_prepare()
+        self.assertEqual(len(invoice.l10n_ae_transmission_ids), 1)
+        report = invoice.validate_l10n_ae_pint()
+        self.assertTrue(report["valid"], report)
+        self.assertEqual(
+            (invoice.amount_untaxed, invoice.amount_tax, invoice.amount_total),
+            (100, 5, 105),
+        )
+
     def test_summary_without_period_is_refused_before_an_issue_is_frozen(self):
         invoice = (
             self.init_invoice(
