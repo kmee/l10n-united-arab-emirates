@@ -204,6 +204,122 @@ class TestUaeIncident(AccountTestInvoicingCommon):
         self.assertEqual(calendar.state, "draft")
         self.assertTrue(calendar.action_approve())
 
+    def test_calendar_selection_rechecks_actor_and_company_under_sudo(self):
+        company_a = self.env.company
+        company_b = self.setup_other_company(name="Synthetic calendar company B")[
+            "company"
+        ]
+        company_b.country_id = self.env.ref("base.ae")
+        manager = new_test_user(
+            self.env,
+            login="synthetic-calendar-two-company-manager",
+            groups="account.group_account_manager",
+            company_ids=(company_a | company_b).ids,
+            company_id=company_a.id,
+        )
+        reader = new_test_user(
+            self.env,
+            login="synthetic-calendar-company-reader",
+            groups="account.group_account_readonly",
+            company_ids=company_a.ids,
+            company_id=company_a.id,
+        )
+
+        def approve_calendar(company, allowed_company_ids, suffix):
+            calendar = (
+                self.env["l10n_ae.edi.calendar"]
+                .with_user(manager)
+                .with_context(allowed_company_ids=allowed_company_ids)
+                .create(
+                    {
+                        "name": "Synthetic calendar " + suffix,
+                        "company_id": company.id,
+                        "version": "synthetic-calendar-" + suffix,
+                        "calendar_start": "2026-12-01",
+                        "calendar_end": "2026-12-10",
+                        "calendar_holidays": ["2026-12-02"],
+                        "source_reference": "Synthetic source",
+                        "source_snapshot": "Synthetic source snapshot " + suffix,
+                        "review_note": "Authorization qualification only",
+                    }
+                )
+            )
+            self.assertTrue(calendar.action_approve())
+            return calendar
+
+        calendar_a = approve_calendar(company_a, company_a.ids, "a")
+        calendar_b = approve_calendar(company_b, company_b.ids, "b")
+        incidents = self.env["l10n_ae.edi.incident"].with_user(manager)
+        allowed_a = {"allowed_company_ids": company_a.ids}
+        target = incidents.with_context(**allowed_a).create(
+            {"name": "Synthetic A selection target", "company_id": company_a.id}
+        )
+        same_company = incidents.with_context(**allowed_a).create(
+            {"name": "Synthetic A positive control", "company_id": company_a.id}
+        )
+
+        # An ordinary same-company selection succeeds and copies reviewed facts.
+        same_company.write({"calendar_version_id": calendar_a.id})
+        self.assertEqual(same_company.calendar_version_id, calendar_a)
+        self.assertEqual(same_company.calendar_start, calendar_a.calendar_start)
+        self.assertEqual(same_company.calendar_end, calendar_a.calendar_end)
+        self.assertEqual(same_company.calendar_holidays, ["2026-12-02"])
+        self.assertEqual(same_company.calendar_source, calendar_a.source_reference)
+        self.assertEqual(same_company.calendar_version, calendar_a.version)
+        self.assertEqual(same_company.calendar_source_sha256, calendar_a.source_sha256)
+
+        fields_to_compare = [
+            "state",
+            "company_id",
+            "calendar_version_id",
+            "calendar_start",
+            "calendar_end",
+            "calendar_holidays",
+            "calendar_source",
+            "calendar_version",
+            "calendar_source_sha256",
+            "notification_due_date",
+            "opened_by_id",
+            "opened_at",
+            "activity_ids",
+            "write_date",
+        ]
+        before = target.read(fields_to_compare)
+
+        # The manager belongs to B, but B is not active in this A-only context.
+        for elevated in (False, True):
+            with (
+                self.subTest(active_companies="A", manager_sudo=elevated),
+                self.cr.savepoint(),
+                self.assertRaises(AccessError),
+            ):
+                target.with_context(**allowed_a).sudo(elevated).write(
+                    {"calendar_version_id": calendar_b.id}
+                )
+            self.assertEqual(target.read(fields_to_compare), before)
+
+        # B is readable when active; attaching it to the A incident still fails.
+        allowed_both = {"allowed_company_ids": (company_a | company_b).ids}
+        for elevated in (False, True):
+            with (
+                self.subTest(active_companies="A+B", manager_sudo=elevated),
+                self.cr.savepoint(),
+                self.assertRaisesRegex(
+                    ValidationError, "Select a reviewed calendar in this company"
+                ),
+            ):
+                target.with_context(**allowed_both).sudo(elevated).write(
+                    {"calendar_version_id": calendar_b.id}
+                )
+            self.assertEqual(target.read(fields_to_compare), before)
+
+        # Sudo cannot turn a readonly same-company user into an incident manager.
+        with self.cr.savepoint(), self.assertRaises(AccessError):
+            target.with_user(reader).with_context(**allowed_a).sudo().write(
+                {"calendar_version_id": calendar_a.id}
+            )
+        self.assertEqual(target.read(fields_to_compare), before)
+
     def test_calendar_context_default_cannot_select_unapproved_version(self):
         manager = new_test_user(
             self.env,
