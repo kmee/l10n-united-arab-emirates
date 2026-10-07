@@ -74,6 +74,9 @@ class UaeEdiIncident(models.Model):
     notice_ids = fields.One2many(
         "l10n_ae.edi.incident.notice", "incident_id", readonly=True
     )
+    fta_confirmation_ids = fields.One2many(
+        "l10n_ae.edi.incident.confirmation", "incident_id", readonly=True, copy=False
+    )
     impact_ids = fields.One2many(
         "l10n_ae.edi.incident.impact", "incident_id", readonly=True, copy=False
     )
@@ -113,6 +116,7 @@ class UaeEdiIncident(models.Model):
         "opened_at",
         "timezone",
         "notice_ids",
+        "fta_confirmation_ids",
         "impact_ids",
         "restoration_ids",
         "affected_transmission_ids",
@@ -251,6 +255,7 @@ class UaeEdiIncident(models.Model):
                 opened_by_id=False,
                 opened_at=False,
                 notice_ids=[],
+                fta_confirmation_ids=[],
                 impact_ids=[],
                 restoration_ids=[],
             )
@@ -267,7 +272,34 @@ class UaeEdiIncident(models.Model):
             raise UserError(
                 self.env._("An opened incident's reviewed basis is immutable.")
             )
+        if {
+            "incident_kind",
+            "fta_confirmation_received_at",
+            "fta_confirmation_reference",
+        }.intersection(vals) and self.filtered("fta_confirmation_ids"):
+            raise UserError(
+                self.env._(
+                    "The captured confirmation fixes the registration clock basis."
+                )
+            )
         return super().write(vals)
+
+    def _registration_confirmation_anchor(self):
+        self.ensure_one()
+        anchor_at = self.fta_confirmation_received_at
+        if self.fta_confirmation_ids:
+            confirmation = self.fta_confirmation_ids
+            if (
+                anchor_at != confirmation.received_at
+                or self.fta_confirmation_reference != confirmation.external_reference
+            ):
+                raise ValidationError(
+                    self.env._(
+                        "The registration basis conflicts with the captured original."
+                    )
+                )
+            anchor_at = confirmation.received_at
+        return anchor_at
 
     def _reviewed_notification_due_date(self):
         self.ensure_one()
@@ -291,7 +323,7 @@ class UaeEdiIncident(models.Model):
             )
         now = fields.Datetime.now()
         if self.incident_kind == "registration_change":
-            anchor_at = self.fta_confirmation_received_at
+            anchor_at = self._registration_confirmation_anchor()
             remaining = 5
             if not anchor_at or not (self.fta_confirmation_reference or "").strip():
                 raise ValidationError(
@@ -435,6 +467,36 @@ class UaeEdiIncident(models.Model):
                 ),
                 "default_taxpayer_roles": self.affected_roles or False,
             },
+        }
+
+    def record_fta_confirmation(self, evidence):
+        self.ensure_one()
+        self._check_actor("write")
+        if self.env["ir.config_parameter"].sudo().get_bool("database.is_neutralized"):
+            raise UserError(
+                self.env._("Confirmation recording is disabled on a neutralized copy.")
+            )
+        self.env.cr.execute(
+            "SELECT id FROM l10n_ae_edi_incident WHERE id = %s FOR UPDATE", (self.id,)
+        )
+        self.invalidate_recordset()
+        existing = bool(self.fta_confirmation_ids)
+        confirmation = self.env["l10n_ae.edi.incident.confirmation"]._record(
+            self, evidence
+        )
+        confirmation.check_access("read")
+        if not existing:
+            super().write(
+                {
+                    "fta_confirmation_received_at": confirmation.received_at,
+                    "fta_confirmation_reference": confirmation.external_reference,
+                }
+            )
+            self.invalidate_recordset(["fta_confirmation_ids"])
+        return {
+            "id": confirmation.id,
+            "document_sha256": confirmation.document_sha256,
+            "evidence_origin": confirmation.evidence_origin,
         }
 
     def record_notice(self, evidence):
