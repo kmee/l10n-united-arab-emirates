@@ -7625,6 +7625,192 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
                     f"urn:peppol:bis:{process}",
                 )
 
+    def test_publisher_posting_batch_isolates_missing_agreement_evidence_and_repairs(
+        self,
+    ):
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {
+                "name": "Synthetic publisher batch sandbox",
+                "fiscal_uuid_policy": "controlled_local",
+            }
+        )
+        self.env.company.write(
+            {
+                "l10n_ae_edi_auto_prepare": True,
+                "l10n_ae_edi_binding_id": binding.id,
+            }
+        )
+        operator = new_test_user(
+            self.env,
+            login="synthetic-publisher-batch-writer",
+            groups="base.group_user,account.group_account_invoice",
+            company_id=self.env.company.id,
+            company_ids=[(6, 0, self.env.company.ids)],
+        )
+        bills = self.env["account.move"]
+        agreements = self.env["l10n_ae.selfbilling.agreement"]
+        # Independent worksheet: purchases100/200/300 at5% have VAT5/10/15
+        # and gross105/210/315. The distinct publishers share the local buyer.
+        publishers = [
+            ("Alpha", "100000001000003", "1000000010", 100),
+            ("Beta", "100000001100003", "1000000011", 200),
+            ("Gamma", "100000001200003", "1000000012", 300),
+        ]
+        for name, vat, endpoint, amount in publishers:
+            partner = self.partner_a.copy(
+                {
+                    "name": f"Synthetic Publisher {name}",
+                    "vat": vat,
+                    "routing_endpoint": endpoint,
+                }
+            )
+            bill = self.init_invoice(
+                "in_invoice",
+                partner=partner,
+                amounts=[amount],
+                taxes=self.tax_purchase_a,
+            )
+            bill.journal_id.is_self_billing = True
+            agreement = self.env["l10n_ae.selfbilling.agreement"].create(
+                {
+                    "name": f"SYNTH-PUBLISHER-{name.upper()}",
+                    "partner_id": partner.id,
+                    "start_date": bill.invoice_date,
+                    "scope": "   " if name == "Beta" else "Reviewed synthetic services",
+                    "onboarding_reference": f"SYNTH-ONBOARD-{name.upper()}",
+                }
+            )
+            bill.l10n_ae_selfbilling_agreement_id = agreement
+            bills |= bill
+            agreements |= agreement
+        actor = bills.with_user(operator)
+        self.assertFalse(actor.env.su)
+        self.assertFalse(actor.env.user.has_group("base.group_system"))
+        self.assertFalse(actor.env.user.has_group("account.group_account_manager"))
+        actor.action_post()
+        self.assertEqual(actor.mapped("state"), ["posted"] * 3)
+        self.assertEqual(actor.mapped("amount_total"), [105, 210, 315])
+        self.assertEqual(
+            actor.mapped("l10n_ae_preparation_state"), ["ready", "review", "ready"]
+        )
+        invalid = actor[1]
+        self.assertIn("self-billing agreement", invalid.l10n_ae_preparation_error)
+        self.assertTrue(invalid.l10n_ae_preparation_review_at)
+        self.assertFalse(invalid.l10n_ae_transmission_ids)
+        self.assertFalse(invalid.l10n_ae_fiscal_uuid)
+        with self.assertRaisesRegex(UserError, "self-billing agreement"):
+            invalid.action_l10n_ae_prepare()
+        ledger = actor.line_ids.read(
+            [
+                "account_id",
+                "partner_id",
+                "debit",
+                "credit",
+                "amount_currency",
+                "tax_ids",
+            ]
+        )
+        originals = actor.mapped("l10n_ae_transmission_ids")
+        self.assertEqual(len(originals), 2)
+        preserved = originals.read(
+            ["payload", "payload_hash", "xml_content", "xml_hash", "idempotency_key"]
+        )
+        with self.assertRaises(AccessError):
+            agreements[1].with_user(operator).write({"scope": "Unauthorized repair"})
+        agreements[1].with_user(
+            self.simple_accountman
+        ).scope = "Reviewed synthetic services"
+        invalid.action_l10n_ae_prepare()
+        invalid.action_l10n_ae_prepare()
+        self.assertEqual(invalid.l10n_ae_preparation_state, "ready")
+        self.assertFalse(invalid.l10n_ae_preparation_error)
+        self.assertFalse(invalid.l10n_ae_preparation_review_at)
+        self.assertEqual(len(invalid.l10n_ae_transmission_ids), 1)
+        issues = actor.mapped("l10n_ae_transmission_ids")
+        self.assertEqual(len(issues), 3)
+        self.assertFalse(issues.mapped("attempt_ids"))
+        self.assertFalse(issues.mapped("event_ids"))
+        self.assertEqual(len(set(issues.mapped("idempotency_key"))), 3)
+        self.assertEqual(len(set(actor.mapped("l10n_ae_fiscal_uuid"))), 3)
+        for bill, (name, vat, endpoint, _amount), totals in zip(
+            actor,
+            publishers,
+            [
+                ("100.00", "5.00", "105.00"),
+                ("200.00", "10.00", "210.00"),
+                ("300.00", "15.00", "315.00"),
+            ],
+            strict=True,
+        ):
+            snapshot = json.loads(bill.l10n_ae_transmission_id.payload)
+            self.assertEqual(snapshot["issuer_role"], "buyer")
+            self.assertEqual(snapshot["supplier"]["vat"], vat)
+            self.assertEqual(snapshot["buyer"]["vat"], "100000000100003")
+            self.assertEqual(
+                snapshot["selfbilling_agreement"]["reference"],
+                f"SYNTH-PUBLISHER-{name.upper()}",
+            )
+            tree = etree.fromstring(bill.l10n_ae_transmission_id.xml_content.encode())
+            for path, expected in {
+                "cbc:InvoiceTypeCode": "389",
+                "cbc:CustomizationID": "urn:peppol:pint:selfbilling-1@ae-1",
+                "cbc:ProfileID": "urn:peppol:bis:selfbilling",
+                "cac:AccountingSupplierParty/cac:Party/cbc:EndpointID": endpoint,
+                "cac:AccountingCustomerParty/cac:Party/cbc:EndpointID": "1000000001",
+                "cac:LegalMonetaryTotal/cbc:TaxExclusiveAmount": totals[0],
+                "cac:TaxTotal/cbc:TaxAmount": totals[1],
+                "cac:LegalMonetaryTotal/cbc:PayableAmount": totals[2],
+            }.items():
+                self.assertEqual(tree.findtext(path, namespaces=NS), expected, path)
+            report = bill.validate_l10n_ae_pint()
+            self.assertTrue(report["valid"], report)
+            self.assertEqual(report["profile"], "selfbilling")
+        self.assertEqual(
+            actor.line_ids.read(
+                [
+                    "account_id",
+                    "partner_id",
+                    "debit",
+                    "credit",
+                    "amount_currency",
+                    "tax_ids",
+                ]
+            ),
+            ledger,
+        )
+        self.assertEqual(
+            originals.read(
+                [
+                    "payload",
+                    "payload_hash",
+                    "xml_content",
+                    "xml_hash",
+                    "idempotency_key",
+                ]
+            ),
+            preserved,
+        )
+        all_frozen = issues.read(
+            ["payload", "payload_hash", "xml_content", "xml_hash", "idempotency_key"]
+        )
+        agreements.with_user(self.simple_accountman).write(
+            {"scope": "Edited after all preparation", "active": False}
+        )
+        for bill in actor:
+            bill.action_l10n_ae_prepare()
+        self.assertEqual(
+            issues.read(
+                [
+                    "payload",
+                    "payload_hash",
+                    "xml_content",
+                    "xml_hash",
+                    "idempotency_key",
+                ]
+            ),
+            all_frozen,
+        )
+
     def _selfbilling_bill_with_agreement(self):
         bill = self.init_invoice("in_invoice", amounts=[100], taxes=self.tax_purchase_a)
         bill.journal_id.is_self_billing = True
