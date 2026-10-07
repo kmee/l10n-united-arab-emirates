@@ -6102,7 +6102,7 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
                 self.assertFalse(invoice.l10n_ae_fiscal_uuid)
                 invoice.action_post()
                 self.assertEqual(invoice.state, "posted")
-                self.assertEqual(invoice.l10n_ae_preparation_state, "requires_review")
+                self.assertEqual(invoice.l10n_ae_preparation_state, "review")
                 self.assertIn("IBR-128-AE", invoice.l10n_ae_preparation_error)
                 self.assertFalse(invoice.l10n_ae_transmission_id)
                 self.assertFalse(invoice.l10n_ae_fiscal_uuid)
@@ -6120,7 +6120,7 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
                 party.state_id = self.env.ref("base.state_ae_du")
                 invoice.action_l10n_ae_validate()
                 invoice.action_l10n_ae_prepare()
-                self.assertEqual(invoice.l10n_ae_preparation_state, "prepared")
+                self.assertEqual(invoice.l10n_ae_preparation_state, "ready")
                 self.assertEqual(invoice.amount_total, 105)
                 self.assertEqual(invoice.amount_tax, 5)
                 self.assertEqual(
