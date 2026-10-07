@@ -15,6 +15,28 @@ from odoo.tools.binary import BinaryBytes
 from odoo.addons.account.tests.common import AccountTestInvoicingCommon
 
 
+def open_recovery_fixture(incident):
+    if incident.incident_kind == "registration_change":
+        incident.record_fta_confirmation(
+            {
+                "evidence_key": (
+                    "synthetic-recovery-registration-confirmation-"
+                    + str(incident.company_id.id)
+                ),
+                "evidence_origin": "simulated",
+                "received_at": "2026-12-01 09:00:00",
+                "external_reference": "Synthetic FTA confirmation",
+                "source_reference": "Supplied synthetic recovery fixture",
+                "review_note": ("Reviewed declaration; no independent verification"),
+                "document_filename": "synthetic-recovery-confirmation.txt",
+                "document": base64.b64encode(
+                    b"Synthetic FTA recovery confirmation\n"
+                ).decode(),
+            }
+        )
+    incident.action_open()
+
+
 @tagged("post_install", "-at_install")
 class TestUaeIncident(AccountTestInvoicingCommon):
     @classmethod
@@ -757,7 +779,7 @@ class TestUaeIncident(AccountTestInvoicingCommon):
                 .create(values)
             )
             if open_record:
-                incident.action_open()
+                open_recovery_fixture(incident)
             return incident
 
         system_a = create_incident(company_a, "Synthetic open system incident A")
@@ -1386,6 +1408,25 @@ class TestUaeIncident(AccountTestInvoicingCommon):
         self.assertFalse(incident.notification_due_date)
         self.assertFalse(incident.activity_ids)
         incident.fta_confirmation_reference = "Synthetic FTA confirmation receipt A"
+        with self.cr.savepoint(), self.assertRaises(ValidationError):
+            incident.action_open()
+        self.assertEqual(incident.state, "draft")
+        self.assertFalse(incident.notification_due_date)
+        self.assertFalse(incident.activity_ids)
+        incident.record_fta_confirmation(
+            {
+                "evidence_key": "synthetic-registration-deadline-confirmation-A",
+                "evidence_origin": "simulated",
+                "received_at": "2026-11-30 21:30:00",
+                "external_reference": "Synthetic FTA confirmation receipt A",
+                "source_reference": "Supplied synthetic registration fixture",
+                "review_note": "Reviewed declaration; no independent verification",
+                "document_filename": "synthetic-registration-confirmation-A.txt",
+                "document": base64.b64encode(
+                    b"Synthetic registration deadline confirmation A\n"
+                ).decode(),
+            }
+        )
         self.assertTrue(incident.action_open())
         self.assertEqual(incident.notification_due_date, date(2026, 12, 10))
         self.assertFalse(incident.occurrence_at)
@@ -1839,6 +1880,22 @@ class TestUaeIncident(AccountTestInvoicingCommon):
             )
             with self.cr.savepoint(), self.assertRaises(UserError):
                 incident.action_record_notice()
+            incident.record_fta_confirmation(
+                {
+                    "evidence_key": (
+                        "synthetic-dialog-registration-confirmation-" + str(company.id)
+                    ),
+                    "evidence_origin": "simulated",
+                    "received_at": "2026-11-30 21:30:00",
+                    "external_reference": "Synthetic FTA receipt",
+                    "source_reference": "Supplied synthetic company fixture",
+                    "review_note": "Reviewed declaration; no independent verification",
+                    "document_filename": "synthetic-dialog-confirmation.txt",
+                    "document": base64.b64encode(
+                        b"Synthetic dialog registration confirmation\n"
+                    ).decode(),
+                }
+            )
             incident.action_open()
             cases.append(incident)
         case_a, case_b = cases
