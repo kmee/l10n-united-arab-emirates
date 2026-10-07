@@ -1,4 +1,7 @@
 id,name,model_id,group_id/id,operation,domain
+access_uae_incident_manager,UAE incident manager,l10n_ae.edi.incident,account.group_account_manager,crud,
+access_uae_incident_accountant,UAE incident reader,l10n_ae.edi.incident,account.group_account_readonly,r,
+access_uae_incident_invoice,UAE incident invoice reader,l10n_ae.edi.incident,account.group_account_invoice,r,
 access_uae_deadline_manager,UAE deadline manager,l10n_ae.edi.deadline,account.group_account_manager,crud,
 access_uae_deadline_accountant,UAE deadline accountant,l10n_ae.edi.deadline,account.group_account_readonly,r,
 access_uae_deadline_invoice,UAE deadline invoice reader,l10n_ae.edi.deadline,account.group_account_invoice,r,
