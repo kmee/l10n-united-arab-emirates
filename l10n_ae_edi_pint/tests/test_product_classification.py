@@ -138,3 +138,68 @@ class TestUaeProductClassification(AccountTestInvoicingCommon):
         )
         self.assertFalse(issue.attempt_ids)
         self.assertFalse(issue.event_ids)
+
+    def test_goods_product_preserves_hs_without_emitting_service_identifiers(self):
+        # G requires IBT-158 with the UAE HS scheme (IBR-184/188).
+        # 999999 is synthetic test input, not an approved goods classification.
+        product = self.env["product.product"].create(
+            {
+                "name": "Synthetic classified goods",
+                "type": "consu",
+                "l10n_ae_classification_code": "999999",
+                "l10n_ae_service_accounting_code": "UNUSED-SYNTHETIC-SAC",
+                "l10n_ae_service_accounting_version": "UNUSED-SYNTHETIC-VERSION",
+            }
+        )
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {
+                "name": "Synthetic goods classification",
+                "fiscal_uuid_policy": "controlled_local",
+            }
+        )
+        invoice = self.init_invoice("out_invoice", amounts=[100], taxes=self.tax_sale_a)
+        invoice.invoice_line_ids.product_id = product
+        invoice.l10n_ae_binding_id = binding
+        invoice = invoice.with_user(self.simple_accountman)
+        invoice.action_post()
+        ledger = invoice.line_ids.read(["debit", "credit", "balance", "tax_ids"])
+        invoice.action_l10n_ae_prepare()
+        issue = invoice.l10n_ae_transmission_id
+        tree = etree.fromstring(issue.xml_content.encode())
+        item = tree.find("cac:InvoiceLine/cac:Item", NS)
+        self.assertEqual(
+            item.xpath(
+                "cac:CommodityClassification/cbc:CommodityCode/text()", namespaces=NS
+            ),
+            ["G"],
+        )
+        hs = item.find("cac:CommodityClassification/cbc:ItemClassificationCode", NS)
+        self.assertEqual(hs.text, "999999")
+        self.assertEqual(hs.attrib, {"listID": "HS"})
+        self.assertIsNone(item.find("cac:AdditionalItemIdentification", NS))
+        self.assertEqual(
+            json.loads(issue.payload)["lines"][0]["item_classification"],
+            {
+                "type": "G",
+                "hs_code": "999999",
+                "sac_code": None,
+                "sac_scheme_version": None,
+            },
+        )
+        report = invoice.validate_l10n_ae_pint()
+        self.assertTrue(report["valid"], report)
+        original = issue.read(["payload", "payload_hash", "xml_content", "xml_hash"])
+        product.l10n_ae_classification_code = "111111"
+        invoice.action_l10n_ae_prepare()
+        self.assertEqual(invoice.preview_l10n_ae_pint(), original[0]["xml_content"])
+        self.assertEqual(
+            issue.read(["payload", "payload_hash", "xml_content", "xml_hash"]), original
+        )
+        self.assertEqual(
+            invoice.line_ids.read(["debit", "credit", "balance", "tax_ids"]), ledger
+        )
+        self.assertEqual(
+            (invoice.amount_untaxed, invoice.amount_tax, invoice.amount_total),
+            (100, 5, 105),
+        )
+        self.assertFalse(issue.attempt_ids)
