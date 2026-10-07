@@ -7205,6 +7205,178 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         self.assertFalse(transmission.event_ids)
         self.assertEqual((invoice.amount_tax, invoice.amount_total), (5, 105))
 
+    def test_summary_tax_invoice_serializes_reviewed_invoice_period(self):
+        company = self.env.company
+        self.assertEqual((company.currency_id.name, self.tax_sale_a.amount), ("AED", 5))
+        manager_moves = (
+            self.env["account.move"]
+            .with_user(self.simple_accountman)
+            .with_context(allowed_company_ids=[company.id])
+        )
+        self.assertFalse(manager_moves.env.su)
+        journal = self.env["account.journal"].search(
+            [("company_id", "=", company.id), ("type", "=", "sale")], limit=1
+        )
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {"name": "Synthetic summary invoice period"}
+        )
+        invoice = manager_moves.create(
+            {
+                "move_type": "out_invoice",
+                "partner_id": self.partner_a.id,
+                "journal_id": journal.id,
+                "currency_id": company.currency_id.id,
+                "invoice_date": "2019-01-31",
+                "l10n_ae_summary": True,
+                # These proposed public values make the baseline RED on unknown fields.
+                "l10n_ae_invoicing_period_start": "2019-01-01",
+                "l10n_ae_invoicing_period_end": "2019-01-31",
+                "l10n_ae_binding_id": binding.id,
+                "l10n_ae_fiscal_uuid": "ccccccca-1111-4111-8111-111111111111",
+                "invoice_line_ids": [
+                    (
+                        0,
+                        0,
+                        {
+                            "name": "Synthetic monthly supply forty",
+                            "product_id": self.product_a.id,
+                            "quantity": 1,
+                            "price_unit": 40,
+                            "tax_ids": [(6, 0, self.tax_sale_a.ids)],
+                        },
+                    ),
+                    (
+                        0,
+                        0,
+                        {
+                            "name": "Synthetic monthly supply sixty",
+                            "product_id": self.product_a.id,
+                            "quantity": 1,
+                            "price_unit": 60,
+                            "tax_ids": [(6, 0, self.tax_sale_a.ids)],
+                        },
+                    ),
+                ],
+            }
+        )
+        self.assertFalse(invoice.env.su)
+        invoice.action_post()
+        self.assertEqual(
+            (invoice.amount_untaxed, invoice.amount_tax, invoice.amount_total),
+            (100, 5, 105),
+        )
+        ledger_fields = [
+            "account_id",
+            "partner_id",
+            "currency_id",
+            "date",
+            "debit",
+            "credit",
+            "balance",
+            "amount_currency",
+            "tax_ids",
+            "write_date",
+        ]
+        ledger = invoice.line_ids.sorted("id").read(ledger_fields)
+        invoice.action_l10n_ae_prepare()
+        issue = invoice.l10n_ae_transmission_id
+        self.assertEqual(
+            json.loads(issue.payload)["invoicing_period"],
+            {"start_date": "2019-01-01", "end_date": "2019-01-31"},
+        )
+        original = (
+            issue.id,
+            issue.payload,
+            issue.xml_content,
+            issue.xml_hash,
+            issue.idempotency_key,
+        )
+        invoice_timestamps = invoice.read(["create_date", "write_date"])
+        issue_timestamps = issue.read(["create_date", "write_date"])
+        xml_text = invoice.preview_l10n_ae_pint()
+        report = invoice.validate_l10n_ae_pint()
+        self.assertTrue(report["valid"], report)
+        self.assertEqual(report["ruleset"], "kmee-pint-ae-1.0.4-ubl-2.1")
+        xml = etree.fromstring(xml_text.encode())
+        self.assertEqual(xml.findtext("cbc:InvoiceTypeCode", namespaces=NS), "380")
+        self.assertEqual(
+            xml.findtext("cbc:ProfileExecutionID", namespaces=NS), "00010000"
+        )
+        self.assertEqual(
+            xml.findtext("cac:InvoicePeriod/cbc:StartDate", namespaces=NS),
+            "2019-01-01",
+        )
+        self.assertEqual(
+            xml.findtext("cac:InvoicePeriod/cbc:EndDate", namespaces=NS),
+            "2019-01-31",
+        )
+        for path, expected in (
+            ("cac:LegalMonetaryTotal/cbc:TaxExclusiveAmount", "100.00"),
+            ("cac:TaxTotal/cbc:TaxAmount", "5.00"),
+            ("cac:LegalMonetaryTotal/cbc:TaxInclusiveAmount", "105.00"),
+            ("cac:LegalMonetaryTotal/cbc:PayableAmount", "105.00"),
+        ):
+            self.assertEqual(xml.findtext(path, namespaces=NS), expected)
+        invoice_lines = xml.findall("cac:InvoiceLine", namespaces=NS)
+        self.assertEqual(
+            [
+                line.findtext("cbc:LineExtensionAmount", namespaces=NS)
+                for line in invoice_lines
+            ],
+            ["40.00", "60.00"],
+        )
+        self.assertEqual(
+            [
+                line.findtext("cac:TaxTotal/cbc:TaxAmount", namespaces=NS)
+                for line in invoice_lines
+            ],
+            ["2.00", "3.00"],
+        )
+        self.assertEqual(
+            (
+                issue.id,
+                issue.payload,
+                issue.xml_content,
+                issue.xml_hash,
+                issue.idempotency_key,
+            ),
+            original,
+        )
+        self.assertEqual(invoice.preview_l10n_ae_pint(), original[2])
+        repeated_report = invoice.validate_l10n_ae_pint()
+        self.assertTrue(repeated_report["valid"], repeated_report)
+        self.assertEqual(
+            (
+                issue.id,
+                issue.payload,
+                issue.xml_content,
+                issue.xml_hash,
+                issue.idempotency_key,
+            ),
+            original,
+        )
+        self.assertEqual(invoice.line_ids.sorted("id").read(ledger_fields), ledger)
+        self.assertEqual(
+            invoice.read(["create_date", "write_date"]), invoice_timestamps
+        )
+        self.assertEqual(issue.read(["create_date", "write_date"]), issue_timestamps)
+        for field_name in (
+            "l10n_ae_invoicing_period_start",
+            "l10n_ae_invoicing_period_end",
+        ):
+            with self.assertRaisesRegex(UserError, "frozen UAE"):
+                invoice.write({field_name: "2019-02-01"})
+        self.assertEqual(
+            (
+                invoice.l10n_ae_invoicing_period_start.isoformat(),
+                invoice.l10n_ae_invoicing_period_end.isoformat(),
+            ),
+            ("2019-01-01", "2019-01-31"),
+        )
+        self.assertEqual(issue.submission_state, "queued")
+        self.assertFalse(issue.attempt_ids)
+        self.assertFalse(issue.event_ids)
+
     def test_combined_free_zone_export_preserves_eight_bits_and_beneficiary(self):
         invoice = self.init_invoice(
             "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
