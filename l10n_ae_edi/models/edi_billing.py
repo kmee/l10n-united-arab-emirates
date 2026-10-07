@@ -18,6 +18,7 @@ BILLING_HEADER_FIELDS = {
     "journal_id",
     "currency_id",
     "invoice_date",
+    "taxable_supply_date",
     "date",
     "invoice_date_due",
     "invoice_payment_term_id",
