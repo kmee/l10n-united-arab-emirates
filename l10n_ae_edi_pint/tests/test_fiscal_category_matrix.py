@@ -45,6 +45,48 @@ class TestUaeFiscalCategoryMatrix(AccountTestInvoicingCommon):
                 }
             )
 
+    def test_new_uae_chart_initializes_the_native_pint_categories(self):
+        company = self.env["res.company"].create({
+            "name": "Synthetic fresh UAE PINT chart",
+            "country_id": self.env.ref("base.ae").id,
+            "currency_id": self.env.ref("base.AED").id,
+        })
+        self.env["account.chart.template"].try_loading("ae", company, install_demo=False)
+        # Independently transcribed native identities/category table from the
+        # public LGPL-3 Odoo PR262200; this is configuration, not eligibility
+        # proof for VAT-only imports or the complete reverse-charge calculation.
+        expected = {
+            "uae_sale_tax_5_dubai": "S",
+            "uae_sale_tax_5_abu_dhabi": "S",
+            "uae_sale_tax_5_sharjah": "S",
+            "uae_sale_tax_5_ajman": "S",
+            "uae_sale_tax_5_umm_al_quwain": "S",
+            "uae_sale_tax_5_ras_al_khaima": "S",
+            "uae_sale_tax_5_fujairah": "S",
+            "uae_sale_tax_0": "Z",
+            "uae_export_tax": "Z",
+            "uae_sale_tax_exempted": "E",
+            "uae_sale_tax_tourist_refund": "S",
+            "uae_purchase_tax_5": "S",
+            "uae_import_tax": "S",
+            "uae_purchase_tax_0": "Z",
+            "uae_purchase_tax_exempted": "E",
+            "uae_purchase_postponed_tax": "AE",
+            "uae_purchase_tax_reverse_charge": "AE",
+            "uae_out_of_scope": "O",
+        }
+        actual = {}
+        for xmlid in expected:
+            tax = self.env.ref(f"account.{company.id}_{xmlid}")
+            self.assertEqual(tax.company_id, company)
+            actual[xmlid] = tax.ubl_cii_tax_category_code
+            self.assertFalse(tax.ubl_cii_tax_exemption_reason_code)
+        self.assertEqual(actual, expected)
+        imported_vat = self.env.ref(f"account.{company.id}_uae_import_tax")
+        self.assertEqual((imported_vat.amount, imported_vat.amount_type), (100, "division"))
+        standard = self.env.ref(f"account.{company.id}_uae_sale_tax_5_dubai")
+        self.assertEqual((standard.amount, standard.amount_type), (5, "percent"))
+
     def test_native_zero_rate_sales_tax_prepares_z_without_an_exemption_reason(self):
         company = self.env.company
         tax = self.env.ref(f"account.{company.id}_uae_sale_tax_0")
