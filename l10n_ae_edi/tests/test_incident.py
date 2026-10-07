@@ -544,6 +544,10 @@ class TestUaeIncident(AccountTestInvoicingCommon):
                 .with_context(**forged_context)
                 .sudo(elevated)
             )
+            self.assertEqual(
+                forged_default.default_get(["incident_id"]),
+                {"incident_id": system_b.id},
+            )
             with (
                 self.subTest(foreign_default=elevated),
                 self.cr.savepoint(),
