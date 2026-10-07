@@ -139,6 +139,81 @@ class TestUaeProductClassification(AccountTestInvoicingCommon):
         self.assertFalse(issue.attempt_ids)
         self.assertFalse(issue.event_ids)
 
+    def test_goods_and_service_preserves_distinct_hs_and_sac(self):
+        # BTAE-13 and IBR-186 require both identifiers, not a shared code.
+        product = self.env["product.product"].create(
+            {
+                "name": "Synthetic goods and service",
+                "type": "service",
+                "list_price": 100,
+                "l10n_ae_is_good_and_service": True,
+                "l10n_ae_classification_code": "999999",
+                "l10n_ae_service_accounting_code": "SYNTHETIC-SAC-B",
+                "l10n_ae_service_accounting_version": "SYNTHETIC-SAC-2026",
+            }
+        )
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {"name": "Synthetic both sandbox", "fiscal_uuid_policy": "controlled_local"}
+        )
+        invoice = self.init_invoice("out_invoice", amounts=[100], taxes=self.tax_sale_a)
+        invoice.invoice_line_ids.product_id = product
+        invoice.l10n_ae_binding_id = binding
+        invoice = invoice.with_user(self.simple_accountman)
+        invoice.action_post()
+        ledger = invoice.line_ids.read(["debit", "credit", "balance", "tax_ids"])
+        invoice.action_l10n_ae_prepare()
+        issue = invoice.l10n_ae_transmission_id
+        item = etree.fromstring(issue.xml_content.encode()).find(
+            "cac:InvoiceLine/cac:Item", NS
+        )
+        self.assertEqual(
+            item.xpath(
+                "cac:CommodityClassification/cbc:CommodityCode/text()", namespaces=NS
+            ),
+            ["B"],
+        )
+        hs = item.find("cac:CommodityClassification/cbc:ItemClassificationCode", NS)
+        self.assertEqual((hs.text, hs.attrib), ("999999", {"listID": "HS"}))
+        sac = item.find("cac:AdditionalItemIdentification/cbc:ID", NS)
+        self.assertEqual(sac.text, "SYNTHETIC-SAC-B")
+        self.assertEqual(
+            sac.attrib, {"schemeID": "SAC", "schemeVersionID": "SYNTHETIC-SAC-2026"}
+        )
+        self.assertEqual(
+            json.loads(issue.payload)["lines"][0]["item_classification"],
+            {
+                "type": "B",
+                "hs_code": "999999",
+                "sac_code": "SYNTHETIC-SAC-B",
+                "sac_scheme_version": "SYNTHETIC-SAC-2026",
+            },
+        )
+        report = invoice.validate_l10n_ae_pint()
+        self.assertTrue(report["valid"], report)
+        original = issue.read(["payload", "payload_hash", "xml_content", "xml_hash"])
+        product.write(
+            {
+                "l10n_ae_is_good_and_service": False,
+                "l10n_ae_classification_code": "111111",
+                "l10n_ae_service_accounting_code": "SYNTHETIC-LATER-B",
+            }
+        )
+        invoice.action_l10n_ae_prepare()
+        self.assertEqual(invoice.l10n_ae_transmission_id, issue)
+        self.assertEqual(
+            issue.read(["payload", "payload_hash", "xml_content", "xml_hash"]), original
+        )
+        self.assertEqual(invoice.preview_l10n_ae_pint(), original[0]["xml_content"])
+        self.assertEqual(
+            invoice.line_ids.read(["debit", "credit", "balance", "tax_ids"]), ledger
+        )
+        self.assertEqual(
+            (invoice.amount_untaxed, invoice.amount_tax, invoice.amount_total),
+            (100, 5, 105),
+        )
+        self.assertFalse(issue.attempt_ids)
+        self.assertFalse(issue.event_ids)
+
     def test_goods_product_preserves_hs_without_emitting_service_identifiers(self):
         # G requires IBT-158 with the UAE HS scheme (IBR-184/188).
         # 999999 is synthetic test input, not an approved goods classification.
