@@ -5,7 +5,7 @@ import json
 from lxml import etree
 
 from odoo.exceptions import UserError
-from odoo.tests import tagged
+from odoo.tests import Form, tagged
 
 from odoo.addons.account.tests.common import AccountTestInvoicingCommon
 
@@ -366,3 +366,60 @@ class TestUaeProductClassification(AccountTestInvoicingCommon):
             (100, 5, 105),
         )
         self.assertFalse(issue.attempt_ids)
+
+    def test_native_product_form_configures_service_variant_for_emission(self):
+        products = self.env["product.template"].with_user(self.simple_accountman)
+        with Form(products, view="product.product_template_only_form_view") as form:
+            form.name = "Synthetic service configured through native Form"
+            form.type = "service"
+            form.list_price = 100
+            form.l10n_ae_service_accounting_code = "SYNTHETIC-FORM-SAC"
+            form.l10n_ae_service_accounting_version = "SYNTHETIC-SAC-2026"
+        template = form.record
+        product = template.product_variant_id
+        self.assertEqual(
+            (
+                template.l10n_ae_service_accounting_code,
+                product.l10n_ae_service_accounting_code,
+                template.l10n_ae_service_accounting_version,
+                product.l10n_ae_service_accounting_version,
+            ),
+            (
+                "SYNTHETIC-FORM-SAC",
+                "SYNTHETIC-FORM-SAC",
+                "SYNTHETIC-SAC-2026",
+                "SYNTHETIC-SAC-2026",
+            ),
+        )
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {"name": "Synthetic Form sandbox", "fiscal_uuid_policy": "controlled_local"}
+        )
+        invoice = self.init_invoice("out_invoice", amounts=[100], taxes=self.tax_sale_a)
+        invoice.invoice_line_ids.product_id = product
+        invoice.l10n_ae_binding_id = binding
+        invoice = invoice.with_user(self.simple_accountman)
+        invoice.action_post()
+        invoice.action_l10n_ae_prepare()
+        issue = invoice.l10n_ae_transmission_id
+        self.assertEqual(
+            json.loads(issue.payload)["lines"][0]["item_classification"],
+            {
+                "type": "S",
+                "hs_code": None,
+                "sac_code": "SYNTHETIC-FORM-SAC",
+                "sac_scheme_version": "SYNTHETIC-SAC-2026",
+            },
+        )
+        report = invoice.validate_l10n_ae_pint()
+        self.assertTrue(report["valid"], report)
+        original = issue.read(["payload", "payload_hash", "xml_content", "xml_hash"])
+        with Form(template, view="product.product_template_only_form_view") as form:
+            form.l10n_ae_service_accounting_code = "SYNTHETIC-FORM-LATER"
+        self.assertEqual(
+            product.l10n_ae_service_accounting_code, "SYNTHETIC-FORM-LATER"
+        )
+        invoice.action_l10n_ae_prepare()
+        self.assertEqual(invoice.l10n_ae_transmission_id, issue)
+        self.assertEqual(
+            issue.read(["payload", "payload_hash", "xml_content", "xml_hash"]), original
+        )
