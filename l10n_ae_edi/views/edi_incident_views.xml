@@ -7,6 +7,13 @@
             <form string="UAE Compliance Incident" duplicate="false">
                 <header>
                     <button
+                        name="action_record_fta_confirmation"
+                        type="object"
+                        string="Record Original FTA Confirmation"
+                        groups="account.group_account_manager"
+                        invisible="state != 'draft' or incident_kind != 'registration_change' or fta_confirmation_ids"
+                    />
+                    <button
                         name="action_review_impact"
                         type="object"
                         string="Review Affected Documents"
@@ -40,7 +47,10 @@
                 <sheet>
                     <group>
                         <field name="name" readonly="state == 'open'" />
-                        <field name="incident_kind" readonly="state == 'open'" />
+                        <field
+                            name="incident_kind"
+                            readonly="state == 'open' or fta_confirmation_ids"
+                        />
                         <field
                             name="company_id"
                             readonly="1"
@@ -63,12 +73,12 @@
                         />
                         <field
                             name="fta_confirmation_received_at"
-                            readonly="state == 'open'"
+                            readonly="state == 'open' or fta_confirmation_ids"
                             invisible="incident_kind != 'registration_change'"
                         />
                         <field
                             name="fta_confirmation_reference"
-                            readonly="state == 'open'"
+                            readonly="state == 'open' or fta_confirmation_ids"
                             invisible="incident_kind != 'registration_change'"
                         />
                         <field name="reason" readonly="state == 'open'" />
@@ -126,6 +136,44 @@
                                 <field name="recorded_by_id" />
                                 <field name="recorded_at" />
                             </list>
+                        </field>
+                    </group>
+                    <group
+                        string="Original FTA Confirmation"
+                        invisible="incident_kind != 'registration_change'"
+                    >
+                        <field name="fta_confirmation_ids" nolabel="1" readonly="1">
+                            <list create="false" edit="false" delete="false">
+                                <field name="evidence_origin" />
+                                <field name="received_at" />
+                                <field name="external_reference" />
+                                <field name="document_filename" />
+                                <field name="document_sha256" />
+                                <field name="recorded_by_id" />
+                                <field name="recorded_at" />
+                            </list>
+                            <form
+                                string="Original FTA Confirmation"
+                                create="false"
+                                edit="false"
+                                delete="false"
+                            >
+                                <group>
+                                    <field name="evidence_origin" />
+                                    <field name="received_at" />
+                                    <field name="external_reference" />
+                                    <field name="source_reference" />
+                                    <field name="review_note" />
+                                    <field name="document_filename" />
+                                    <field
+                                        name="document"
+                                        filename="document_filename"
+                                    />
+                                    <field name="document_sha256" />
+                                    <field name="recorded_by_id" />
+                                    <field name="recorded_at" />
+                                </group>
+                            </form>
                         </field>
                     </group>
                     <group

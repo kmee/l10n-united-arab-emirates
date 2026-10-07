@@ -469,6 +469,35 @@ class UaeEdiIncident(models.Model):
             },
         }
 
+    def action_record_fta_confirmation(self):
+        self.ensure_one()
+        self._check_actor("write")
+        if (
+            self.state != "draft"
+            or self.incident_kind != "registration_change"
+            or self.fta_confirmation_ids
+        ):
+            raise UserError(
+                self.env._(
+                    "Select a draft registration case without a captured original."
+                )
+            )
+        if self.env["ir.config_parameter"].sudo().get_bool("database.is_neutralized"):
+            raise UserError(
+                self.env._("Confirmation recording is disabled on a neutralized copy.")
+            )
+        return {
+            "type": "ir.actions.act_window",
+            "name": self.env._("Record Original FTA Confirmation"),
+            "res_model": "l10n_ae.edi.incident.confirmation.wizard",
+            "view_mode": "form",
+            "view_id": self.env.ref(
+                "l10n_ae_edi.edi_incident_confirmation_wizard_form"
+            ).id,
+            "target": "new",
+            "context": {"default_incident_id": self.id},
+        }
+
     def record_fta_confirmation(self, evidence):
         self.ensure_one()
         self._check_actor("write")

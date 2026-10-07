@@ -14,6 +14,7 @@ access_uae_incident_notice_invoice,UAE supplied notice invoice reader,l10n_ae.ed
 access_uae_incident_manager,UAE incident manager,l10n_ae.edi.incident,account.group_account_manager,crud,
 access_uae_incident_accountant,UAE incident reader,l10n_ae.edi.incident,account.group_account_readonly,r,
 access_uae_confirmation_manager,UAE FTA confirmation manager reader,l10n_ae.edi.incident.confirmation,account.group_account_manager,r,
+access_uae_confirmation_wizard_manager,UAE FTA confirmation capture dialog,l10n_ae.edi.incident.confirmation.wizard,account.group_account_manager,crud,
 access_uae_confirmation_accountant,UAE FTA confirmation accountant reader,l10n_ae.edi.incident.confirmation,account.group_account_readonly,r,
 access_uae_confirmation_invoice,UAE FTA confirmation invoice reader,l10n_ae.edi.incident.confirmation,account.group_account_invoice,r,
 access_uae_incident_invoice,UAE incident invoice reader,l10n_ae.edi.incident,account.group_account_invoice,r,

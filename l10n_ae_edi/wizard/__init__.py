@@ -4,4 +4,5 @@ from . import account_move_reversal
 from . import edi_correction
 from . import edi_retention
 from . import edi_incident_notice
+from . import edi_incident_confirmation
 from . import edi_incident_recovery

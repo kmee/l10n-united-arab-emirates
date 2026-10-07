@@ -20,6 +20,7 @@
         "views/edi_retention_views.xml",
         "views/edi_deadline_views.xml",
         "views/edi_incident_views.xml",
+        "wizard/edi_incident_confirmation_views.xml",
         "views/edi_incident_notice_views.xml",
         "views/selfbilling_agreement_views.xml",
         "views/res_company_views.xml",
