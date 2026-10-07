@@ -221,7 +221,7 @@ class AccountEdiUblUae(models.AbstractModel):
         # The pinned core infers the price from the rounded accounting base.
         # Keep its tax-inclusive/discount logic, using raw fiscal details only
         # for pricing; the original base still supplies the accounting totals.
-        raw_base = self._l10n_ae_raw_fiscal_base_line(vals)
+        raw_base = self._l10n_ae_raw_fiscal_base_line(vals, undiscounted=True)
         price_vals = {
             **vals,
             "line_vals": {**vals["line_vals"], "base_line": raw_base},
@@ -253,11 +253,12 @@ class AccountEdiUblUae(models.AbstractModel):
         return result
 
     def _l10n_ae_preserve_line_discount(self, vals):
-        raw_base = self._l10n_ae_raw_fiscal_base_line(vals)
-        if not raw_base["discount"]:
+        discount = vals["line_vals"]["base_line"]["discount"]
+        if not discount:
             return
+        raw_base = self._l10n_ae_raw_fiscal_base_line(vals, undiscounted=True)
         currency = raw_base["currency_id"]
-        # Reuse native tax-inclusive and 100%-discount handling for the basis.
+        # Reuse native tax arithmetic for the undiscounted net basis.
         # IBR-131-AE permits an exact percentage allowance; cent rounding here
         # can violate IBR-147-AE against the preserved high-precision price.
         basis = Decimal(
@@ -267,12 +268,12 @@ class AccountEdiUblUae(models.AbstractModel):
                 )
             )
         )
-        amount = basis * Decimal(str(raw_base["discount"])) / Decimal(100)
+        amount = basis * Decimal(str(discount)) / Decimal(100)
         node = self._ubl_get_line_allowance_charge_discount_node(
             vals,
             {
                 "currency": currency,
-                "percent": raw_base["discount"],
+                "percent": discount,
                 "is_charge": amount < 0,
                 "amount": float(amount),
                 "base_amount": float(basis),
@@ -293,10 +294,15 @@ class AccountEdiUblUae(models.AbstractModel):
         else:
             vals["line_node"]["cac:AllowanceCharge"].append(node)
 
-    def _l10n_ae_raw_fiscal_base_line(self, vals):
+    def _l10n_ae_raw_fiscal_base_line(self, vals, undiscounted=False):
         # Recompute on an export-only copy with native unrounded tax arithmetic.
         # This does not change the company's policy or any accounting record.
         raw_base = dict(vals["line_vals"]["base_line"])
+        if undiscounted and raw_base["discount"] == 100:
+            # The core's zero-discount-factor fallback uses price_unit directly,
+            # which still includes VAT. Recover the original net price through
+            # native tax calculation on this copy; never change the actual line.
+            raw_base["discount"] = 0
         self.env["account.tax"]._add_tax_details_in_base_line(
             raw_base, vals["company"], rounding_method="round_globally"
         )
