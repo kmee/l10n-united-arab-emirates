@@ -6065,6 +6065,92 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
             }
         )
 
+    def test_usd_invoice_prepares_from_dated_native_rates_without_manual_quote(self):
+        usd = self.env.ref("base.USD")
+        usd.active = True
+        quote = self.env["res.currency.rate"].create(
+            {
+                "currency_id": usd.id,
+                "company_id": self.env.company.id,
+                "name": "2018-12-31",
+                "rate": 1 / 3.6725,
+            }
+        )
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {
+                "name": "Synthetic dated native FX",
+                "fiscal_uuid_policy": "controlled_local",
+            }
+        )
+        invoice = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a, currency=usd
+        )
+        invoice.l10n_ae_binding_id = binding
+        invoice = invoice.with_user(self.simple_accountman)
+        self.assertFalse(invoice.env.su)
+        invoice.action_post()
+        self.assertFalse(invoice.l10n_ae_tax_exchange_rate)
+        self.assertFalse(invoice.l10n_ae_tax_exchange_date)
+        self.assertFalse(invoice.l10n_ae_tax_exchange_source)
+        ledger = invoice.line_ids.read(
+            ["account_id", "debit", "credit", "amount_currency", "tax_ids"]
+        )
+        self.assertEqual(invoice.amount_total, 105)
+        self.assertEqual(invoice.amount_tax_signed, 18.36)
+        self.assertEqual(invoice.amount_total_signed, 385.61)
+        invoice.action_l10n_ae_prepare()
+        issue = invoice.l10n_ae_transmission_id
+        exchange = json.loads(issue.payload)["tax_exchange"]
+        self.assertEqual(exchange["rate"], "3.672500")
+        self.assertEqual(exchange["source_currency"], "USD")
+        self.assertEqual(exchange["target_currency"], "AED")
+        self.assertEqual(exchange["date"], "2018-12-31")
+        self.assertIn("Odoo", exchange["source"])
+        evidence = exchange["evidence"]
+        self.assertEqual(evidence["kind"], "odoo_currency_table")
+        self.assertEqual(evidence["conversion_date"], "2019-01-01")
+        self.assertEqual(evidence["company_currency"], "AED")
+        self.assertFalse(evidence["cbuae_origin_verified"])
+        usd_fact = next(f for f in evidence["rates"] if f["currency"] == "USD")
+        self.assertEqual(usd_fact["record_id"], quote.id)
+        self.assertEqual(usd_fact["date"], "2018-12-31")
+        self.assertEqual(usd_fact["company_id"], invoice.company_id.id)
+        self.assertEqual(usd_fact["value"], "0.2722940776038121")
+        self.assertRegex(evidence["source_sha256"], r"^[0-9a-f]{64}$")
+        tree = etree.fromstring(issue.xml_content.encode())
+        self.assertEqual(
+            tree.findtext("cac:TaxExchangeRate/cbc:CalculationRate", namespaces=NS),
+            "3.672500",
+        )
+        self.assertEqual(
+            tree.findtext(
+                "cac:InvoiceLine/cac:ItemPriceExtension/cbc:Amount", namespaces=NS
+            ),
+            "385.6125",
+        )
+        self.assertEqual(
+            tree.findtext(
+                "cac:TaxTotal/cbc:TaxAmount[@currencyID='AED']", namespaces=NS
+            ),
+            "18.36",
+        )
+        report = invoice.validate_l10n_ae_pint()
+        self.assertTrue(report["valid"], report)
+        original = issue.read(["payload", "payload_hash", "xml_content", "xml_hash"])
+        quote.rate = 1 / 3.7
+        invoice.action_l10n_ae_prepare()
+        self.assertEqual(invoice.preview_l10n_ae_pint(), original[0]["xml_content"])
+        self.assertEqual(invoice.l10n_ae_transmission_id, issue)
+        self.assertEqual(
+            issue.read(["payload", "payload_hash", "xml_content", "xml_hash"]), original
+        )
+        self.assertEqual(
+            invoice.line_ids.read(
+                ["account_id", "debit", "credit", "amount_currency", "tax_ids"]
+            ),
+            ledger,
+        )
+
     def test_usd_invoice_preserves_the_quote_and_unrounded_line_aed_amounts(self):
         usd = self.env.ref("base.USD")
         usd.active = True
