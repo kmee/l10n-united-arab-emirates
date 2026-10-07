@@ -6,6 +6,11 @@ from odoo import fields, models
 class ProductProduct(models.Model):
     _inherit = "product.product"
 
+    l10n_ae_classification_code = fields.Char(
+        string="UAE HS Code",
+        copy=False,
+        help="Reviewed HS identifier for this goods variant.",
+    )
     l10n_ae_service_accounting_code = fields.Char(
         string="UAE Service Accounting Code",
         copy=False,
@@ -27,7 +32,9 @@ class ProductProduct(models.Model):
         item_type = "S" if self.type == "service" else "G"
         return {
             "type": item_type,
-            "hs_code": None,
+            "hs_code": self.l10n_ae_classification_code or None
+            if item_type == "G"
+            else None,
             "sac_code": self.l10n_ae_service_accounting_code or None
             if item_type == "S"
             else None,
