@@ -80,6 +80,31 @@ class UaeEdiIncident(models.Model):
     restoration_ids = fields.One2many(
         "l10n_ae.edi.incident.restoration", "incident_id", readonly=True, copy=False
     )
+    affected_transmission_ids = fields.Many2many(
+        "l10n_ae.edi.transmission",
+        string="Affected Documents",
+        compute="_compute_recovery_overview",
+        compute_sudo=False,
+    )
+    affected_document_count = fields.Integer(
+        string="Reviewed Affected Documents",
+        compute="_compute_recovery_overview",
+        compute_sudo=False,
+    )
+    pending_submission_count = fields.Integer(
+        string="Pending Submissions",
+        compute="_compute_recovery_overview",
+        compute_sudo=False,
+    )
+    pending_confirmation_count = fields.Integer(
+        string="Pending Confirmations",
+        compute="_compute_recovery_overview",
+        compute_sudo=False,
+    )
+    restoration_reviewed = fields.Boolean(
+        compute="_compute_recovery_overview",
+        compute_sudo=False,
+    )
 
     _protected_fields: ClassVar[set[str]] = {
         "state",
@@ -90,6 +115,11 @@ class UaeEdiIncident(models.Model):
         "notice_ids",
         "impact_ids",
         "restoration_ids",
+        "affected_transmission_ids",
+        "affected_document_count",
+        "pending_submission_count",
+        "pending_confirmation_count",
+        "restoration_reviewed",
     }
 
     @api.depends("calendar_holidays")
@@ -110,6 +140,69 @@ class UaeEdiIncident(models.Model):
                 for line in (record.calendar_holiday_dates or "").splitlines()
                 if line.strip()
             ]
+
+    @api.depends_context("uid", "allowed_company_ids")
+    @api.depends(
+        "impact_ids.transmission_ids",
+        "impact_ids.transmission_ids.submission_state",
+        "impact_ids.transmission_ids.confirmation_state",
+        "restoration_ids",
+    )
+    def _compute_recovery_overview(self):
+        for record in self:
+            # Native onchange forms use a NewId with the existing incident as origin.
+            origin = record._origin
+            facts = (
+                origin.get_recovery_backlog()
+                if origin.id
+                else {
+                    "affected_count": 0,
+                    "submission_pending_count": 0,
+                    "confirmation_pending_count": 0,
+                    "restoration_reviewed": False,
+                    "transmissions": [],
+                }
+            )
+            record.affected_document_count = facts["affected_count"]
+            record.pending_submission_count = facts["submission_pending_count"]
+            record.pending_confirmation_count = facts["confirmation_pending_count"]
+            record.restoration_reviewed = facts["restoration_reviewed"]
+            record.affected_transmission_ids = self.env[
+                "l10n_ae.edi.transmission"
+            ].browse([row["id"] for row in facts["transmissions"]])
+
+    def _recovery_review_action(self, model_name, view_ref, title):
+        self.ensure_one()
+        self._check_actor("write")
+        if self.state != "open" or self.incident_kind != "system_failure":
+            raise UserError(self.env._("Select an open reviewed system failure."))
+        if self.env["ir.config_parameter"].sudo().get_bool("database.is_neutralized"):
+            raise UserError(
+                self.env._("Recovery review is disabled on a neutralized copy.")
+            )
+        return {
+            "type": "ir.actions.act_window",
+            "name": title,
+            "res_model": model_name,
+            "view_mode": "form",
+            "view_id": self.env.ref(view_ref).id,
+            "target": "new",
+            "context": {"default_incident_id": self.id},
+        }
+
+    def action_review_impact(self):
+        return self._recovery_review_action(
+            "l10n_ae.edi.incident.impact.wizard",
+            "l10n_ae_edi.edi_incident_impact_wizard_form",
+            self.env._("Review Affected Documents"),
+        )
+
+    def action_review_restoration(self):
+        return self._recovery_review_action(
+            "l10n_ae.edi.incident.restoration.wizard",
+            "l10n_ae_edi.edi_incident_restoration_wizard_form",
+            self.env._("Review Service Restoration"),
+        )
 
     def _check_actor(self, operation):
         principal = self.env.user.with_user(self.env.uid)

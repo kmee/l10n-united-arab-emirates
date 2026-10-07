@@ -7,6 +7,20 @@
             <form string="UAE Compliance Incident" duplicate="false">
                 <header>
                     <button
+                        name="action_review_impact"
+                        type="object"
+                        string="Review Affected Documents"
+                        groups="account.group_account_manager"
+                        invisible="state != 'open' or incident_kind != 'system_failure'"
+                    />
+                    <button
+                        name="action_review_restoration"
+                        type="object"
+                        string="Review Service Restoration"
+                        groups="account.group_account_manager"
+                        invisible="state != 'open' or incident_kind != 'system_failure'"
+                    />
+                    <button
                         name="action_open"
                         type="object"
                         string="Open Reviewed Incident"
@@ -109,6 +123,68 @@
                                 <field name="recipient_role" />
                                 <field name="sent_at" />
                                 <field name="external_reference" />
+                                <field name="recorded_by_id" />
+                                <field name="recorded_at" />
+                            </list>
+                        </field>
+                    </group>
+                    <group
+                        string="Recovery Review"
+                        invisible="state != 'open' or incident_kind != 'system_failure'"
+                    >
+                        <field name="restoration_reviewed" readonly="1" />
+                        <field name="affected_document_count" readonly="1" />
+                        <field name="pending_submission_count" readonly="1" />
+                        <field name="pending_confirmation_count" readonly="1" />
+                    </group>
+                    <p
+                        class="text-muted"
+                        invisible="state != 'open' or incident_kind != 'system_failure'"
+                    >
+                        This overview covers reviewed affected documents. Restored service does not confirm delivery or tax reporting. Refresh the form after queue reconciliation to review the current results.
+                    </p>
+                    <field
+                        name="affected_transmission_ids"
+                        readonly="1"
+                        invisible="state != 'open' or incident_kind != 'system_failure'"
+                    >
+                        <list create="false" edit="false" delete="false">
+                            <field name="move_id" />
+                            <field name="submission_state" />
+                            <field name="confirmation_state" />
+                            <field name="validation_c2_state" optional="show" />
+                            <field name="delivery_c3_state" optional="show" />
+                            <field name="reporting_c2_state" optional="show" />
+                            <field name="reporting_c3_state" optional="show" />
+                            <field name="next_attempt_at" optional="show" />
+                            <field name="dispatch_review_required" optional="show" />
+                            <field name="event_review_required" optional="hide" />
+                            <field name="binding_id" optional="hide" />
+                            <field name="idempotency_key" optional="hide" />
+                        </list>
+                    </field>
+                    <group
+                        string="Reviewed Impact Batches"
+                        invisible="state != 'open' or incident_kind != 'system_failure'"
+                    >
+                        <field name="impact_ids" readonly="1" nolabel="1">
+                            <list create="false" edit="false" delete="false">
+                                <field name="source_reference" />
+                                <field name="review_note" />
+                                <field name="recorded_by_id" />
+                                <field name="recorded_at" />
+                            </list>
+                        </field>
+                    </group>
+                    <group
+                        string="Service Restoration Reviews"
+                        invisible="state != 'open' or incident_kind != 'system_failure'"
+                    >
+                        <field name="restoration_ids" readonly="1" nolabel="1">
+                            <list create="false" edit="false" delete="false">
+                                <field name="evidence_origin" />
+                                <field name="restored_at" />
+                                <field name="source_reference" />
                                 <field name="recorded_by_id" />
                                 <field name="recorded_at" />
                             </list>
