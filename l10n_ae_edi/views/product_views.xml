@@ -16,10 +16,10 @@
                     <p
                     >Use the reviewed service accounting code and its scheme version. No code is supplied automatically.</p>
                     <p
-                        invisible="is_product_variant or product_variant_count == 1"
+                        invisible="not id or is_product_variant or product_variant_count == 1"
                     >Configure classification on each individual variant.</p>
                     <group
-                        invisible="not is_product_variant and product_variant_count != 1"
+                        invisible="not is_product_variant and id and product_variant_count != 1"
                     >
                         <field name="l10n_ae_service_accounting_code" />
                         <field name="l10n_ae_service_accounting_version" />
