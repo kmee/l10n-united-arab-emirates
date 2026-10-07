@@ -44,6 +44,93 @@ class TestUaeIncident(AccountTestInvoicingCommon):
     def setUpClass(cls):
         super().setUpClass()
 
+    @freeze_time("2026-12-01 12:00:00")
+    def test_draft_incident_cannot_open_without_approved_calendar_version(self):
+        manager = new_test_user(
+            self.env,
+            login="synthetic-required-calendar-manager",
+            groups="account.group_account_manager",
+            company_ids=self.env.company.ids,
+            company_id=self.env.company.id,
+        )
+        incident = (
+            self.env["l10n_ae.edi.incident"]
+            .with_user(manager)
+            .create(
+                {
+                    "name": "Synthetic complete inline calendar without approved version",
+                    "affected_roles": "issuer",
+                    "occurrence_at": "2026-11-30 21:30:00",
+                    "detected_at": "2026-12-01 08:00:00",
+                    "reason": "Synthetic failure",
+                    "responsible_id": manager.id,
+                    "calendar_start": "2026-12-01",
+                    "calendar_end": "2026-12-10",
+                    "calendar_holidays": ["2026-12-02", "2026-12-03"],
+                    "calendar_source": "Typed synthetic calendar source",
+                    "calendar_version": "typed-synthetic-v1",
+                    "source_reference": "Reviewed MD243 art12 and date exclusion",
+                    "review_note": "Dubai Dec1; Dec4 and Dec7 are working days1 and2",
+                }
+            )
+        )
+        before = incident.read(
+            [
+                "state",
+                "write_date",
+                "calendar_version_id",
+                "calendar_source_sha256",
+                "notification_due_date",
+                "opened_by_id",
+                "opened_at",
+                "activity_ids",
+            ]
+        )
+        with (
+            self.cr.savepoint(),
+            self.assertRaisesRegex(ValidationError, "reviewed calendar version"),
+        ):
+            incident.action_open()
+        self.assertEqual(
+            incident.read(
+                [
+                    "state",
+                    "write_date",
+                    "calendar_version_id",
+                    "calendar_source_sha256",
+                    "notification_due_date",
+                    "opened_by_id",
+                    "opened_at",
+                    "activity_ids",
+                ]
+            ),
+            before,
+        )
+        calendar = (
+            self.env["l10n_ae.edi.calendar"]
+            .with_user(manager)
+            .create(
+                {
+                    "name": "Synthetic reviewed calendar",
+                    "version": "synthetic-reviewed-v1",
+                    "calendar_start": "2026-12-01",
+                    "calendar_end": "2026-12-10",
+                    "calendar_holidays": ["2026-12-02", "2026-12-03"],
+                    "source_reference": "Synthetic source; no official holiday claim",
+                    "source_snapshot": "Synthetic Dec2/3 exclusions; Saturday/Sunday weekend.",
+                    "review_note": "Arithmetic fixture only",
+                }
+            )
+        )
+        self.assertTrue(calendar.action_approve())
+        incident.write({"calendar_version_id": calendar.id})
+        self.assertTrue(incident.action_open())
+        self.assertEqual(incident.notification_due_date, date(2026, 12, 7))
+        self.assertEqual(len(incident.activity_ids), 1)
+        opened_before = incident.read()
+        self.assertTrue(incident.action_open())
+        self.assertEqual(incident.read(), opened_before)
+
     def test_calendar_rejects_non_list_holiday_inputs(self):
         manager = new_test_user(
             self.env,
