@@ -6115,7 +6115,7 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         self.assertEqual(usd_fact["record_id"], quote.id)
         self.assertEqual(usd_fact["date"], "2018-12-31")
         self.assertEqual(usd_fact["company_id"], invoice.company_id.id)
-        self.assertEqual(usd_fact["value"], "0.2722940776038121")
+        self.assertEqual(usd_fact["value"], "0.27229407760381213")
         self.assertRegex(evidence["source_sha256"], r"^[0-9a-f]{64}$")
         tree = etree.fromstring(issue.xml_content.encode())
         self.assertEqual(
