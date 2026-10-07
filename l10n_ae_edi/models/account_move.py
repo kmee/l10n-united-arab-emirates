@@ -755,7 +755,8 @@ class AccountMove(models.Model):
                 "city": record.city or None,
                 "zip": record.zip or None,
                 "country": record.country_id.code or None,
-                "subdivision": record.state_id.name or None,
+                "subdivision": record._l10n_ae_country_subentity(),
+                "subdivision_name": record.state_id.name or None,
                 "endpoint_scheme": record.routing_scheme or None
                 if "routing_scheme" in record._fields
                 else None,

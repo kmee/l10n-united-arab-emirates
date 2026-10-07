@@ -1,6 +1,7 @@
 # Copyright 2026 KMEE
 # License AGPL-3.0 or later (https://www.gnu.org/licenses/agpl).
 from odoo import api, fields, models
+from odoo.exceptions import UserError
 from odoo.tools import LazyTranslate
 
 _lt = LazyTranslate(__name__)
@@ -45,6 +46,30 @@ class ResPartner(models.Model):
                 "sequence": 10,
             }
         return result
+
+    def _l10n_ae_country_subentity(self):
+        self.ensure_one()
+        if self.country_code != "AE":
+            return self.state_id.name or None
+        # Native Odoo state codes remain shared with accounting/localizations.
+        # PINT-AE IBR-128 uses these identifiers in CountrySubentity itself.
+        code = {
+            "AZ": "AUH",
+            "AJ": "AJM",
+            "DU": "DXB",
+            "FU": "FUJ",
+            "RK": "RAK",
+            "SH": "SHJ",
+            "UQ": "UAQ",
+        }.get(self.state_id.code)
+        if not code or self.state_id.country_id != self.country_id:
+            raise UserError(
+                self.env._(
+                    "IBR-128-AE: Review the UAE emirate on the address of %s.",
+                    self.display_name,
+                )
+            )
+        return code
 
     def _l10n_ae_legal_registration_number(self):
         self.ensure_one()
