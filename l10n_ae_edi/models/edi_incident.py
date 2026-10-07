@@ -71,6 +71,9 @@ class UaeEdiIncident(models.Model):
         "res.users", readonly=True, copy=False, ondelete="restrict"
     )
     opened_at = fields.Datetime(readonly=True, copy=False)
+    notice_ids = fields.One2many(
+        "l10n_ae.edi.incident.notice", "incident_id", readonly=True
+    )
 
     _protected_fields: ClassVar[set[str]] = {
         "state",
@@ -78,6 +81,7 @@ class UaeEdiIncident(models.Model):
         "opened_by_id",
         "opened_at",
         "timezone",
+        "notice_ids",
     }
 
     @api.depends("calendar_holidays")
@@ -143,6 +147,7 @@ class UaeEdiIncident(models.Model):
                 notification_due_date=False,
                 opened_by_id=False,
                 opened_at=False,
+                notice_ids=[],
             )
             prepared.append(vals)
         return super().create(prepared)
@@ -298,6 +303,28 @@ class UaeEdiIncident(models.Model):
             }
         )
         return True
+
+    def record_notice(self, evidence):
+        self.ensure_one()
+        self._check_actor("write")
+        if self.env["ir.config_parameter"].sudo().get_bool("database.is_neutralized"):
+            raise UserError(
+                self.env._(
+                    "Operational notice recording is disabled on a neutralized copy."
+                )
+            )
+        self.env.cr.execute(
+            "SELECT id FROM l10n_ae_edi_incident WHERE id = %s FOR UPDATE", (self.id,)
+        )
+        self.invalidate_recordset()
+        notice = self.env["l10n_ae.edi.incident.notice"]._record(self, evidence)
+        notice.check_access("read")
+        return {
+            "id": notice.id,
+            "document_sha256": notice.document_sha256,
+            "notice_purpose": notice.notice_purpose,
+            "evidence_origin": notice.evidence_origin,
+        }
 
     @api.ondelete(at_uninstall=False)
     def _unlink_except_opened_incident(self):

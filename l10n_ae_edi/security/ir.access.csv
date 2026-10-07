@@ -1,4 +1,7 @@
 id,name,model_id,group_id/id,operation,domain
+access_uae_incident_notice_manager,UAE supplied notice manager reader,l10n_ae.edi.incident.notice,account.group_account_manager,r,
+access_uae_incident_notice_accountant,UAE supplied notice accountant reader,l10n_ae.edi.incident.notice,account.group_account_readonly,r,
+access_uae_incident_notice_invoice,UAE supplied notice invoice reader,l10n_ae.edi.incident.notice,account.group_account_invoice,r,
 access_uae_incident_manager,UAE incident manager,l10n_ae.edi.incident,account.group_account_manager,crud,
 access_uae_incident_accountant,UAE incident reader,l10n_ae.edi.incident,account.group_account_readonly,r,
 access_uae_incident_invoice,UAE incident invoice reader,l10n_ae.edi.incident,account.group_account_invoice,r,
