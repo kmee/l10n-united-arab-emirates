@@ -1,5 +1,6 @@
 # Copyright 2026 KMEE
 # License AGPL-3.0 or later (https://www.gnu.org/licenses/agpl).
+import base64
 from datetime import date
 
 from freezegun import freeze_time
@@ -121,6 +122,153 @@ class TestUaeIncident(AccountTestInvoicingCommon):
         with self.cr.savepoint(), self.assertRaises(UserError):
             incident.write({"fta_confirmation_received_at": "2026-12-08 08:00:00"})
         self.assertEqual(incident.notification_due_date, date(2026, 12, 10))
+
+    @freeze_time("2026-12-08 12:00:00")
+    def test_notice_artifacts_keep_asp_and_taxpayer_evidence_separate(self):
+        manager = new_test_user(
+            self.env,
+            login="synthetic-incident-notice-manager",
+            groups="account.group_account_manager",
+            company_ids=self.env.company.ids,
+            company_id=self.env.company.id,
+        )
+        reader = new_test_user(
+            self.env,
+            login="synthetic-incident-notice-reader",
+            groups="account.group_account_readonly",
+            company_ids=self.env.company.ids,
+            company_id=self.env.company.id,
+        )
+        incident = (
+            self.env["l10n_ae.edi.incident"]
+            .with_user(manager)
+            .create(
+                {
+                    "name": "Synthetic incident notice evidence",
+                    "company_id": self.env.company.id,
+                    "affected_roles": "both",
+                    "occurrence_at": "2026-11-30 21:30:00",
+                    "detected_at": "2026-12-01 08:00:00",
+                    "reason": "Synthetic electronic issue and receipt outage",
+                    "responsible_id": manager.id,
+                    "calendar_start": "2026-12-01",
+                    "calendar_end": "2026-12-10",
+                    "calendar_holidays": ["2026-12-02", "2026-12-03"],
+                    "calendar_source": "Reviewed synthetic federal holidays",
+                    "calendar_version": "synthetic-federal-2026",
+                    "source_reference": "MD243 Art12; reviewed Art49 day exclusion",
+                    "review_note": "Dubai Dec1 anchor; Dec4 day1, Dec7 day2",
+                }
+            )
+        )
+        incident.action_open()
+        basis = incident.read(
+            [
+                "state",
+                "notification_due_date",
+                "opened_by_id",
+                "opened_at",
+                "write_date",
+            ]
+        )
+        activity_ids = incident.activity_ids.ids
+        asp_content = b"Controlled ASP service interruption notice\n"
+        asp_digest = "62a1082c4b3b708df91fd7185e220e2cf7efa52ae97e549e9bc29d9ce63e6d8d"
+        asp_evidence = {
+            "evidence_key": "synthetic-asp-fta-1",
+            "evidence_origin": "simulated",
+            "sender_role": "asp",
+            "sender_name": "Controlled ASP",
+            "recipient_role": "fta",
+            "recipient_name": "Controlled FTA recipient",
+            "recipient_address": "fta-recipient@example.invalid",
+            "channel": "email",
+            "sent_at": "2026-12-04 08:00:00",
+            "external_reference": "synthetic-asp-notice-1",
+            "review_note": "Controlled artifact; not proof of taxpayer duty discharge",
+            "document_filename": "synthetic-asp-notice.txt",
+            "document": base64.b64encode(asp_content).decode(),
+        }
+        for elevated in (False, True):
+            with (
+                self.subTest(elevated=elevated),
+                self.cr.savepoint(),
+                self.assertRaises(AccessError),
+            ):
+                incident.with_user(reader).sudo(elevated).record_notice(asp_evidence)
+        asp_result = incident.record_notice(asp_evidence)
+        asp_notice = (
+            self.env["l10n_ae.edi.incident.notice"]
+            .with_user(manager)
+            .browse(asp_result["id"])
+        )
+        self.assertEqual(asp_result["document_sha256"], asp_digest)
+        self.assertEqual(asp_notice.document.content, asp_content)
+        self.assertEqual(asp_notice.sender_role, "asp")
+        self.assertEqual(asp_notice.notice_purpose, "asp_service_disruption")
+        self.assertFalse(asp_notice.taxpayer_roles)
+        self.assertEqual(asp_notice.evidence_origin, "simulated")
+        self.assertEqual(asp_notice.recorded_by_id, manager)
+        self.assertEqual(
+            asp_notice.recorded_at, fields.Datetime.to_datetime("2026-12-08 12:00:00")
+        )
+        self.assertEqual(incident.record_notice(asp_evidence), asp_result)
+        with self.cr.savepoint(), self.assertRaises(UserError):
+            incident.record_notice({**asp_evidence, "external_reference": "Changed"})
+        taxpayer_content = b"Controlled taxpayer issuer and recipient notice\n"
+        taxpayer_digest = (
+            "0f31a00f2ba51212cd9edf0a806bacae1b466cc13b2bf2fbb3bb71e2d3b07e49"
+        )
+        taxpayer_evidence = {
+            **asp_evidence,
+            "evidence_key": "synthetic-taxpayer-fta-1",
+            "sender_role": "taxpayer",
+            "sender_name": "Controlled UAE taxpayer",
+            "taxpayer_roles": "both",
+            "sent_at": "2026-12-07 10:00:00",
+            "external_reference": "synthetic-taxpayer-notice-1",
+            "review_note": "Controlled artifact reviewed for both taxpayer roles",
+            "document_filename": "synthetic-taxpayer-notice.txt",
+            "document": base64.b64encode(taxpayer_content).decode(),
+        }
+        taxpayer_result = incident.record_notice(taxpayer_evidence)
+        taxpayer_notice = asp_notice.browse(taxpayer_result["id"])
+        self.assertNotEqual(asp_notice, taxpayer_notice)
+        self.assertEqual(taxpayer_notice.document.content, taxpayer_content)
+        self.assertEqual(taxpayer_notice.document_sha256, taxpayer_digest)
+        self.assertEqual(taxpayer_notice.sender_role, "taxpayer")
+        self.assertEqual(taxpayer_notice.notice_purpose, "taxpayer_system_failure")
+        self.assertEqual(taxpayer_notice.taxpayer_roles, "both")
+        self.assertEqual(incident.record_notice(taxpayer_evidence), taxpayer_result)
+        self.assertEqual(
+            set(incident.notice_ids.ids), {asp_notice.id, taxpayer_notice.id}
+        )
+        for notice in (asp_notice, taxpayer_notice):
+            self.assertEqual(notice.company_id, incident.company_id)
+            self.assertEqual(
+                notice.with_user(reader).document.content, notice.document.content
+            )
+            with self.cr.savepoint(), self.assertRaises(UserError):
+                notice.write({"document_filename": "changed.txt"})
+            with self.cr.savepoint(), self.assertRaises(UserError):
+                notice.unlink()
+        with self.cr.savepoint(), self.assertRaises(UserError):
+            self.env["l10n_ae.edi.incident.notice"].with_user(manager).create(
+                {"incident_id": incident.id, "document": taxpayer_evidence["document"]}
+            )
+        self.assertEqual(
+            incident.read(
+                [
+                    "state",
+                    "notification_due_date",
+                    "opened_by_id",
+                    "opened_at",
+                    "write_date",
+                ]
+            ),
+            basis,
+        )
+        self.assertEqual(incident.activity_ids.ids, activity_ids)
 
     @freeze_time("2026-12-01 12:00:00")
     def test_manager_opens_failure_with_reviewed_calendar_and_one_internal_alert(self):
