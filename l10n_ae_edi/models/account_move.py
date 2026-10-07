@@ -1020,6 +1020,7 @@ class AccountMove(models.Model):
         ):
             raise UserError(
                 self.env._(
+                    "Reconcile the frozen UAE transmission before correction. "
                     "Correct only a queued sandbox issue with no transport "
                     "attempt or remote facts."
                 )
