@@ -38,3 +38,11 @@ class ProductTemplate(models.Model):
 
     def _inverse_l10n_ae_service_accounting_version(self):
         self._set_product_variant_field("l10n_ae_service_accounting_version")
+
+    def _get_related_fields_variant_template(self):
+        # Native create reapplies these proxy values after creating the variant.
+        # Without this hook an inverse runs too early and loses new Form input.
+        return super()._get_related_fields_variant_template() + [
+            "l10n_ae_service_accounting_code",
+            "l10n_ae_service_accounting_version",
+        ]
