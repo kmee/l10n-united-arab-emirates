@@ -5,7 +5,7 @@ from datetime import date
 from freezegun import freeze_time
 
 from odoo import fields
-from odoo.exceptions import AccessError, UserError
+from odoo.exceptions import AccessError, UserError, ValidationError
 from odoo.tests import Form, tagged
 from odoo.tests.common import new_test_user
 
@@ -66,6 +66,61 @@ class TestUaeIncident(AccountTestInvoicingCommon):
         with self.assertRaises(AssertionError):
             reviewed.calendar_holiday_dates = "2026-12-04"
         self.assertEqual(incident.calendar_holidays, ["2026-12-02", "2026-12-03"])
+
+    @freeze_time("2026-12-08 12:00:00")
+    def test_registration_notice_due_from_receiving_fta_confirmation(self):
+        manager = new_test_user(
+            self.env,
+            login="synthetic-registration-notice-manager",
+            groups="account.group_account_manager",
+            company_ids=self.env.company.ids,
+            company_id=self.env.company.id,
+        )
+        incident = (
+            self.env["l10n_ae.edi.incident"]
+            .with_user(manager)
+            .create(
+                {
+                    "name": "Synthetic FTA registration amendment confirmation",
+                    "incident_kind": "registration_change",
+                    "company_id": self.env.company.id,
+                    "fta_confirmation_received_at": "2026-11-30 21:30:00",
+                    "reason": "Synthetic confirmation of changed business address",
+                    "responsible_id": manager.id,
+                    "calendar_start": "2026-12-01",
+                    "calendar_end": "2026-12-10",
+                    "calendar_holidays": ["2026-12-02", "2026-12-03"],
+                    "calendar_source": "Reviewed synthetic federal holidays",
+                    "calendar_version": "synthetic-federal-2026",
+                    "source_reference": "MD243 Art5.3; reviewed Art49 day exclusion",
+                    "review_note": "Dubai Dec1 receipt; Dec4,7,8,9,10 are days1-5",
+                }
+            )
+        )
+        with self.cr.savepoint(), self.assertRaises(ValidationError):
+            incident.action_open()
+        self.assertEqual(incident.state, "draft")
+        self.assertFalse(incident.notification_due_date)
+        self.assertFalse(incident.activity_ids)
+        incident.fta_confirmation_reference = "Synthetic FTA confirmation receipt A"
+        self.assertTrue(incident.action_open())
+        self.assertEqual(incident.notification_due_date, date(2026, 12, 10))
+        self.assertFalse(incident.occurrence_at)
+        self.assertFalse(incident.detected_at)
+        self.assertEqual(
+            incident.fta_confirmation_received_at,
+            fields.Datetime.to_datetime("2026-11-30 21:30:00"),
+        )
+        activities = incident.activity_ids
+        self.assertEqual(len(activities), 1)
+        self.assertEqual(activities.user_id, manager)
+        self.assertEqual(activities.date_deadline, date(2026, 12, 10))
+        self.assertEqual(activities.summary, "Review UAE registration amendment notice")
+        self.assertTrue(incident.action_open())
+        self.assertEqual(incident.activity_ids.ids, activities.ids)
+        with self.cr.savepoint(), self.assertRaises(UserError):
+            incident.write({"fta_confirmation_received_at": "2026-12-08 08:00:00"})
+        self.assertEqual(incident.notification_due_date, date(2026, 12, 10))
 
     @freeze_time("2026-12-01 12:00:00")
     def test_manager_opens_failure_with_reviewed_calendar_and_one_internal_alert(self):
