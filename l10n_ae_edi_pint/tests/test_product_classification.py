@@ -426,3 +426,44 @@ class TestUaeProductClassification(AccountTestInvoicingCommon):
         self.assertEqual(
             issue.read(["payload", "payload_hash", "xml_content", "xml_hash"]), original
         )
+
+    def test_native_product_form_configures_mixed_variant_with_both_identifiers(self):
+        self.simple_accountman.group_ids |= self.env.ref(
+            "product.group_product_manager"
+        )
+        products = self.env["product.template"].with_user(self.simple_accountman)
+        with Form(products, view="product.product_template_only_form_view") as form:
+            form.name = "Synthetic mixed item configured through native Form"
+            form.type = "consu"
+            form.list_price = 100
+            form.l10n_ae_is_good_and_service = True
+            form.l10n_ae_classification_code = "999999"
+            form.l10n_ae_service_accounting_code = "SYNTHETIC-FORM-BOTH"
+            form.l10n_ae_service_accounting_version = "SYNTHETIC-SAC-2026"
+        template = form.record
+        product = template.product_variant_id
+        self.assertTrue(template.l10n_ae_is_good_and_service)
+        self.assertTrue(product.l10n_ae_is_good_and_service)
+        self.assertEqual(template.l10n_ae_classification_code, "999999")
+        self.assertEqual(product.l10n_ae_classification_code, "999999")
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {"name": "Synthetic mixed Form", "fiscal_uuid_policy": "controlled_local"}
+        )
+        invoice = self.init_invoice("out_invoice", amounts=[100], taxes=self.tax_sale_a)
+        invoice.invoice_line_ids.product_id = product
+        invoice.l10n_ae_binding_id = binding
+        invoice = invoice.with_user(self.simple_accountman)
+        invoice.action_post()
+        invoice.action_l10n_ae_prepare()
+        issue = invoice.l10n_ae_transmission_id
+        self.assertEqual(
+            json.loads(issue.payload)["lines"][0]["item_classification"],
+            {
+                "type": "B",
+                "hs_code": "999999",
+                "sac_code": "SYNTHETIC-FORM-BOTH",
+                "sac_scheme_version": "SYNTHETIC-SAC-2026",
+            },
+        )
+        report = invoice.validate_l10n_ae_pint()
+        self.assertTrue(report["valid"], report)
