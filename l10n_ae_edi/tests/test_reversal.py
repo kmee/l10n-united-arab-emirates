@@ -62,8 +62,13 @@ class TestUaeCreditNoteWizard(AccountTestInvoicingCommon):
         with self.assertRaisesRegex(UserError, "official UAE credit note reason"):
             credit.action_l10n_ae_validate()
         self.env.company.l10n_ae_edi_auto_prepare = True
+        credit.action_post()
+        self.assertEqual(credit.state, "posted")
+        self.assertEqual(credit.l10n_ae_preparation_state, "review")
+        self.assertIn(
+            "official UAE credit note reason", credit.l10n_ae_preparation_error
+        )
         with self.assertRaisesRegex(UserError, "official UAE credit note reason"):
-            credit.action_post()
-        self.assertEqual(credit.state, "draft")
+            credit.action_l10n_ae_prepare()
         self.assertEqual((original.state, original.amount_total), ("posted", 105))
         self.assertFalse(credit.l10n_ae_transmission_id)

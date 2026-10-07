@@ -300,7 +300,7 @@ class TestUaeInvoicePreparation(AccountTestInvoicingCommon):
         self.assertEqual(bill.state, "posted")
         self.assertFalse(bill.l10n_ae_transmission_id)
 
-    def test_missing_provider_rolls_back_posting_and_intent(self):
+    def test_missing_provider_preserves_posting_with_preparation_review(self):
         self.env.company.write(
             {
                 "l10n_ae_edi_auto_prepare": True,
@@ -308,13 +308,14 @@ class TestUaeInvoicePreparation(AccountTestInvoicingCommon):
             }
         )
         invoice = self.init_invoice("out_invoice", amounts=[100], taxes=self.tax_sale_a)
-        with (
-            self.assertRaisesRegex(UserError, "Select an active ASP"),
-            self.cr.savepoint(),
-        ):
-            invoice.action_post()
-        self.assertEqual(invoice.state, "draft")
-        self.assertFalse(invoice.l10n_ae_transmission_id)
+        invoice.action_post()
+        self.assertEqual(invoice.state, "posted")
+        self.assertEqual(invoice.l10n_ae_preparation_state, "review")
+        self.assertIn("Select an active ASP", invoice.l10n_ae_preparation_error)
+        self.assertFalse(invoice.l10n_ae_transmission_ids)
+        self.assertFalse(invoice.l10n_ae_fiscal_uuid)
+        with self.assertRaisesRegex(UserError, "Select an active ASP"):
+            invoice.action_l10n_ae_prepare()
 
     def test_explicit_invoice_provider_takes_precedence_over_company_default(self):
         override = self.env["l10n_ae.edi.binding"].create(
