@@ -179,6 +179,70 @@ class TestUaeInvoicePreparation(AccountTestInvoicingCommon):
         self.assertEqual((invoice.amount_total, other.amount_total), (105, 105))
         self.assertEqual(invoice.l10n_ae_transmission_id.payload, payload)
 
+    def test_native_posting_batch_isolates_invalid_uae_data_and_allows_repair(self):
+        self.env.company.write(
+            {
+                "l10n_ae_edi_auto_prepare": True,
+                "l10n_ae_edi_binding_id": self.binding.id,
+            }
+        )
+        invoices = self.env["account.move"]
+        for amount in (100, 200, 300):
+            invoices |= self.init_invoice(
+                "out_invoice", amounts=[amount], taxes=self.tax_sale_a
+            )
+        invalid = invoices[1]
+        invalid.l10n_ae_free_zone = True
+        actor = invoices.with_user(self.simple_accountman)
+        actor.action_post()
+
+        rows = actor.read(
+            [
+                "state",
+                "amount_total",
+                "l10n_ae_transmission_id",
+                "l10n_ae_preparation_state",
+                "l10n_ae_preparation_error",
+                "l10n_ae_preparation_review_at",
+            ]
+        )
+        self.assertEqual([row["state"] for row in rows], ["posted"] * 3)
+        self.assertEqual([row["amount_total"] for row in rows], [105, 210, 315])
+        self.assertEqual(
+            [row["l10n_ae_preparation_state"] for row in rows],
+            ["ready", "review", "ready"],
+        )
+        self.assertFalse(rows[1]["l10n_ae_transmission_id"])
+        self.assertIn("IBR-007-AE", rows[1]["l10n_ae_preparation_error"])
+        self.assertTrue(rows[1]["l10n_ae_preparation_review_at"])
+        self.assertFalse(rows[0]["l10n_ae_preparation_error"])
+        self.assertFalse(rows[2]["l10n_ae_preparation_error"])
+        issues = actor.mapped("l10n_ae_transmission_ids")
+        self.assertEqual(len(issues), 2)
+        self.assertEqual(issues.mapped("submission_state"), ["queued", "queued"])
+        self.assertFalse(issues.mapped("attempt_ids"))
+        self.assertFalse(invalid.l10n_ae_transmission_ids)
+        ledger = actor.line_ids.read(
+            ["balance", "amount_currency", "account_id", "tax_ids"]
+        )
+
+        repaired = actor[1]
+        repaired.l10n_ae_beneficiary_id = "SYNTHETIC-BENEFICIARY"
+        repaired.action_l10n_ae_prepare()
+        repaired.action_l10n_ae_prepare()
+        self.assertEqual(repaired.l10n_ae_preparation_state, "ready")
+        self.assertFalse(repaired.l10n_ae_preparation_error)
+        self.assertFalse(repaired.l10n_ae_preparation_review_at)
+        self.assertEqual(len(repaired.l10n_ae_transmission_ids), 1)
+        self.assertEqual(repaired.l10n_ae_transmission_id.submission_state, "queued")
+        self.assertFalse(repaired.l10n_ae_transmission_id.attempt_ids)
+        self.assertEqual(
+            actor.line_ids.read(
+                ["balance", "amount_currency", "account_id", "tax_ids"]
+            ),
+            ledger,
+        )
+
     def test_posting_with_automatic_queue_creates_one_frozen_intent(self):
         invoice = self.init_invoice("out_invoice", amounts=[100], taxes=self.tax_sale_a)
         invoice.l10n_ae_binding_id = self.binding
