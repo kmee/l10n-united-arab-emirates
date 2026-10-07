@@ -40,6 +40,7 @@ class TestUaeInvoiceIdentity(AccountTestInvoicingCommon):
             invoice.action_l10n_ae_validate()
 
     def test_confirmed_identity_allows_local_validation(self):
+        self.env.company.partner_id.state_id = self.env.ref("base.state_ae_du")
         self.env.company.write(
             {"l10n_ae_tin": "1000000001", "l10n_ae_tin_confirmed": True}
         )
