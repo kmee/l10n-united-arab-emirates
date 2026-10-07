@@ -92,6 +92,7 @@ class TestUaeProductClassification(AccountTestInvoicingCommon):
         )
         invoice = self.init_invoice("out_invoice", amounts=[100], taxes=tax)
         invoice.invoice_line_ids.product_id = product
+        self.assertEqual(invoice.invoice_line_ids.tax_ids, tax)
         invoice.l10n_ae_binding_id = binding
         invoice = invoice.with_user(self.simple_accountman)
         self.assertFalse(invoice.env.su)
