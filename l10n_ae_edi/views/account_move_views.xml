@@ -245,6 +245,12 @@
                             readonly="True"
                         />
                         <field
+                            name="l10n_ae_effective_cbuae_review_id"
+                            readonly="True"
+                            invisible="not l10n_ae_effective_cbuae_review_id"
+                            options="{'no_create': True}"
+                        />
+                        <field
                             name="l10n_ae_effective_tax_exchange_diagnostic"
                             readonly="True"
                             invisible="not l10n_ae_effective_tax_exchange_diagnostic"
