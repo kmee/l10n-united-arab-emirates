@@ -635,6 +635,12 @@ class UaeEdiInbox(models.Model):
                 "./{*}InvoicePeriod/{*}EndDate"
             )
             or False,
+            # Explicit absence also belongs to the original; never default a
+            # received cadence from local payment-term configuration.
+            "l10n_ae_billing_frequency_code": tree.findtext(
+                "./{*}InvoicePeriod/{*}DescriptionCode"
+            )
+            or False,
             "l10n_ae_disclosed_agent": transaction_flags[5] == "1",
             "l10n_ae_ecommerce": transaction_flags[6] == "1",
             "l10n_ae_principal_id": principal_id,
