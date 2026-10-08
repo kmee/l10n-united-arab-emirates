@@ -159,6 +159,9 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         invoice_write_date = invoice.write_date
         self.assertFalse(invoice.ubl_cii_xml_id)
         self.assertFalse(invoice.invoice_pdf_report_id)
+        # Changing live master data must not reinterpret a frozen original when
+        # opening Send. The original still carries its reviewed DXB address.
+        invoice.partner_id.state_id = False
         artifacts_before = (
             self.env["ir.attachment"]
             .search([("res_model", "=", "account.move"), ("res_id", "=", invoice.id)])
@@ -168,6 +171,9 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
             self.env["account.move.send.wizard"]
             .with_user(self.simple_accountman)
             .create({"move_id": invoice.id})
+        )
+        self.assertFalse(
+            [key for key in (wizard.alerts or {}) if key.startswith("l10n_ae_edi_")]
         )
         self.assertFalse(wizard.sending_methods)
         wizard.write({"invoice_edi_format": "facturx"})
@@ -217,6 +223,99 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
             ),
             1,
         )
+
+    def test_native_send_preserves_core_alerts_and_distinct_review_groups(self):
+        self.env.company.l10n_ae_edi_auto_prepare = False
+        self.partner_a.write({"invoice_sending_method": "email", "email": False})
+        zone = self.init_invoice("out_invoice", amounts=[25], taxes=self.tax_sale_a)
+        zone.l10n_ae_free_zone = True
+        agent = self.init_invoice("out_invoice", amounts=[25], taxes=self.tax_sale_a)
+        agent.l10n_ae_disclosed_agent = True
+        credit = self.init_invoice("out_refund", amounts=[25], taxes=self.tax_sale_a)
+        credit.l10n_ae_credit_reason = False
+        invoices = (zone | agent | credit).with_user(self.simple_accountman)
+        invoices.action_post()
+        action = invoices.action_send_and_print()
+        wizard = (
+            self.env[action["res_model"]]
+            .with_user(self.simple_accountman)
+            .with_context(**action["context"])
+            .create({})
+        )
+        core = wizard.alerts["account_missing_email"]
+        self.assertEqual(core["level"], "warning")
+        self.assertEqual(core["action"]["res_model"], "res.partner")
+        self.assertEqual(core["action"]["res_id"], self.partner_a.id)
+        uae = [v for k, v in wizard.alerts.items() if k.startswith("l10n_ae_edi_")]
+        self.assertEqual(len(uae), 3)
+        for invoice, diagnostic in (
+            (zone, "IBR-007-AE"),
+            (agent, "IBR-137-AE"),
+            (credit, "Select the official UAE credit note reason"),
+        ):
+            alert = next(a for a in uae if diagnostic in a["message"])
+            self.assertEqual(alert["level"], "warning")
+            self.assertEqual(alert["action"]["res_id"], invoice.id)
+            self.assertEqual(alert["action"]["res_model"], "account.move")
+        self.assertFalse(invoices.l10n_ae_transmission_ids)
+        self.assertFalse(any(invoices.mapped("l10n_ae_fiscal_uuid")))
+        self.assertFalse(any(invoices.mapped("sending_data")))
+
+    def test_native_pdf_only_generate_keeps_review_without_fiscal_emission(self):
+        self.env.company.l10n_ae_edi_auto_prepare = False
+        self.partner_a.invoice_sending_method = "manual"
+        invoice = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a
+        ).with_user(self.simple_accountman)
+        invoice.l10n_ae_free_zone = True
+        invoice.action_post()
+        self.assertEqual(
+            (invoice.amount_untaxed, invoice.amount_tax, invoice.amount_total),
+            (100, 5, 105),
+        )
+        ledger_fields = [
+            "account_id",
+            "debit",
+            "credit",
+            "amount_currency",
+            "currency_id",
+            "create_date",
+            "write_date",
+        ]
+        ledger = invoice.line_ids.read(ledger_fields)
+        action = invoice.action_send_and_print()
+        wizard = (
+            self.env[action["res_model"]]
+            .with_user(self.simple_accountman)
+            .with_context(**action["context"])
+            .create({"move_id": invoice.id, "invoice_edi_format": False})
+        )
+        self.assertFalse(wizard.env.su)
+        self.assertFalse(wizard.sending_methods)
+        self.assertFalse(wizard.invoice_edi_format)
+        alert = next(
+            v for k, v in wizard.alerts.items() if k.startswith("l10n_ae_edi_")
+        )
+        self.assertEqual(alert["level"], "warning")
+        self.assertIn("IBR-007-AE", alert["message"])
+        wizard.action_send_and_print()
+        self.assertTrue(invoice.invoice_pdf_report_id)
+        self.assertTrue(invoice.invoice_pdf_report_id.raw.content.startswith(b"%PDF-"))
+        self.assertFalse(invoice.ubl_cii_xml_id)
+        self.assertFalse(invoice.l10n_ae_transmission_ids)
+        self.assertFalse(invoice.l10n_ae_fiscal_uuid)
+        self.assertEqual(invoice.line_ids.read(ledger_fields), ledger)
+        # Choosing PINT-AE after printing still refuses the fiscal diagnostic.
+        pint = (
+            self.env[action["res_model"]]
+            .with_user(self.simple_accountman)
+            .create({"move_id": invoice.id, "invoice_edi_format": "kmee_ae_pint"})
+        )
+        with self.cr.savepoint(), self.assertRaisesRegex(UserError, "IBR-007-AE"):
+            pint.action_send_and_print()
+        self.assertFalse(invoice.ubl_cii_xml_id)
+        self.assertFalse(invoice.l10n_ae_transmission_ids)
+        self.assertEqual(invoice.line_ids.read(ledger_fields), ledger)
 
     def test_emitted_commercial_invoice_preserves_package_across_official_cycle(self):
         # Independent worksheet: one AED100 supply, category O/0%, VAT0,
