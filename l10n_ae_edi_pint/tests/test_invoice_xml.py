@@ -32,6 +32,92 @@ NS = {
 
 @tagged("post_install", "-at_install")
 class TestUaeInvoiceXml(AccountTestInvoicingCommon):
+    def test_native_cash_method_freezes_instruction_and_preserves_ledger(
+        self,
+    ):
+        self.env.company.l10n_ae_edi_auto_prepare = False
+        cash = self.company_data["default_journal_cash"]
+        method = cash.inbound_payment_method_line_ids.filtered(
+            lambda line: line.code == "manual"
+        )[:1]
+        self.assertTrue(method)
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {
+                "name": "Synthetic native cash instruction",
+                "fiscal_uuid_policy": "controlled_local",
+            }
+        )
+        invoice = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a
+        ).with_user(self.simple_accountman)
+        self.assertFalse(invoice.env.su)
+        with Form(invoice) as form:
+            form.preferred_payment_method_line_id = method
+            form.payment_reference = "SYNTH-CASH-2026"
+            form.l10n_ae_binding_id = binding
+        invoice.action_post()
+        self.assertEqual(invoice.state, "posted")
+        self.assertEqual(
+            (invoice.amount_untaxed, invoice.amount_tax, invoice.amount_total),
+            (100, 5, 105),
+        )
+        ledger_fields = [
+            "account_id",
+            "partner_id",
+            "currency_id",
+            "debit",
+            "credit",
+            "balance",
+            "amount_currency",
+            "tax_ids",
+            "create_date",
+            "write_date",
+        ]
+        ledger = invoice.line_ids.sorted("id").read(ledger_fields)
+        invoice.action_l10n_ae_validate()
+        invoice.action_l10n_ae_prepare()
+        issue = invoice.l10n_ae_transmission_id
+        tree = etree.fromstring(issue.xml_content.encode())
+        means = tree.findall("cac:PaymentMeans", namespaces=NS)
+        self.assertEqual(len(means), 1)
+        self.assertEqual(means[0].findtext("cbc:PaymentMeansCode", namespaces=NS), "10")
+        self.assertEqual(
+            means[0].findtext("cbc:PaymentID", namespaces=NS), "SYNTH-CASH-2026"
+        )
+        self.assertIsNone(means[0].find("cac:PayeeFinancialAccount", namespaces=NS))
+        self.assertEqual(
+            json.loads(issue.payload)["payment_means"],
+            {
+                "code": "10",
+                "name": "In cash",
+                "payment_reference": "SYNTH-CASH-2026",
+                "method_line_id": method.id,
+                "method_code": "manual",
+                "journal_id": cash.id,
+                "journal_type": "cash",
+                "account_id": None,
+                "account_identifier": None,
+            },
+        )
+        immutable = [
+            "payload",
+            "payload_hash",
+            "xml_content",
+            "xml_hash",
+            "idempotency_key",
+        ]
+        frozen = issue.read(immutable)
+        self.assertTrue(invoice.validate_l10n_ae_pint()["valid"])
+        cash.name = "Synthetic renamed cash journal"
+        invoice.action_l10n_ae_prepare()
+        self.assertEqual(invoice.preview_l10n_ae_pint(), frozen[0]["xml_content"])
+        self.assertTrue(invoice.validate_l10n_ae_pint()["valid"])
+        self.assertEqual(invoice.l10n_ae_transmission_id, issue)
+        self.assertEqual(issue.read(immutable), frozen)
+        self.assertEqual(invoice.line_ids.sorted("id").read(ledger_fields), ledger)
+        self.assertFalse(issue.attempt_ids)
+        self.assertFalse(issue.event_ids)
+
     def test_native_batch_send_groups_category_review_without_emitting(self):
         self.env.company.l10n_ae_edi_auto_prepare = False
         self.partner_a.invoice_sending_method = "manual"
