@@ -321,6 +321,111 @@ class TestCbuaePublication(AccountTestInvoicingCommon):
                     before,
                 )
 
+    def test_import_requires_reviewer_exact_mapping_complete_source_and_no_collision(
+        self,
+    ):
+        manager = self.simple_accountman
+        company = self.company_data["company"]
+        usd = self.env.ref("base.USD")
+        usd.active = True
+        model = self.env["l10n_ae.cbuae.publication"].with_user(manager)
+        draft = model.create({"requested_date": "2026-08-26"})
+        publication = model.create({"requested_date": "2026-08-26"})
+        response = Response()
+        response.status_code = 200
+        response.url = (
+            "https://centralbank.ae/umbraco/Surface/Exchange/"
+            "GetExchangeRateAllCurrencyDate?dateTime=2026-08-26"
+        )
+        response.headers["Content-Type"] = "text/html"
+        response._content = (
+            Path(__file__).parent / "cassettes/cbuae/cbuae-2026-08-26.html"
+        ).read_bytes()
+        response._content_consumed = True
+        with patch("requests.get", return_value=response):
+            publication.action_capture()
+        values = {
+            "publication_id": publication.id,
+            "source_label": "US Dollar",
+            "currency_id": usd.id,
+            "review_note": "Reviewed exact USD mapping.",
+        }
+        reviews = self.env["l10n_ae.cbuae.rate.review"].with_user(manager)
+        good = reviews.create(values)
+        reader = new_test_user(
+            self.env,
+            login="cbuae-import-reader",
+            groups="account.group_account_readonly",
+            company_id=company.id,
+            company_ids=company.ids,
+        )
+        other = self.env["res.company"].create(
+            {
+                "name": "Other CBUAE import company",
+                "country_id": self.env.ref("base.ae").id,
+            }
+        )
+        isolated = new_test_user(
+            self.env,
+            login="cbuae-import-other-manager",
+            groups="account.group_account_manager",
+            company_id=other.id,
+            company_ids=other.ids,
+        )
+        before = (
+            self.env["res.currency.rate"]
+            .search([])
+            .read(["name", "rate", "company_id", "currency_id", "write_date"])
+        )
+        self.assertTrue(good.with_user(reader).read(["source_label"]))
+        for user in (reader, isolated):
+            for elevated in (False, True):
+                with self.subTest(user=user.login, elevated=elevated):
+                    actor = (
+                        good.with_user(user)
+                        .with_context(allowed_company_ids=user.company_ids.ids)
+                        .sudo(elevated)
+                    )
+                    with self.assertRaises(AccessError):
+                        actor.action_import()
+                    with self.assertRaises(AccessError):
+                        actor.env["l10n_ae.cbuae.rate.review"].create(values)
+        manager.active = False
+        with self.assertRaises(AccessError):
+            good.sudo().action_import()
+        manager.active = True
+        for changes in (
+            {"publication_id": draft.id},
+            {"source_label": "USD"},
+            {"source_label": " US Dollar"},
+            {"review_note": "   "},
+        ):
+            with self.subTest(changes=changes):
+                refused = reviews.create({**values, **changes})
+                with self.assertRaises(UserError):
+                    refused.action_import()
+                self.assertFalse(refused.native_rate_id)
+                self.assertFalse(refused.import_facts)
+        usd.active = False
+        with self.assertRaises(UserError):
+            good.action_import()
+        usd.active = True
+        self.assertEqual(
+            self.env["res.currency.rate"]
+            .search([])
+            .read(["name", "rate", "company_id", "currency_id", "write_date"]),
+            before,
+        )
+        good.action_import()
+        collision = reviews.create(values)
+        preserved = good.native_rate_id.read(["rate", "write_uid", "write_date"])
+        with self.assertRaisesRegex(UserError, "overwritten"):
+            collision.action_import()
+        self.assertFalse(collision.native_rate_id)
+        self.assertEqual(
+            good.native_rate_id.read(["rate", "write_uid", "write_date"]), preserved
+        )
+
     def test_manager_captures_dated_original_without_importing_currency_rates(self):
         publication_model = self.env["l10n_ae.cbuae.publication"].with_user(
             self.simple_accountman
