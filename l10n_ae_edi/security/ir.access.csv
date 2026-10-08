@@ -1,4 +1,6 @@
 id,name,model_id,group_id/id,operation,domain
+access_cbuae_publication_manager,CBUAE publication manager,l10n_ae.cbuae.publication,account.group_account_manager,crud,
+access_cbuae_publication_reader,CBUAE publication reader,l10n_ae.cbuae.publication,account.group_account_readonly,r,
 access_uae_calendar_manager,UAE calendar reviewer,l10n_ae.edi.calendar,account.group_account_manager,crud,
 access_uae_calendar_reader,UAE calendar reader,l10n_ae.edi.calendar,account.group_account_readonly,r,
 access_uae_calendar_invoice,UAE calendar invoice reader,l10n_ae.edi.calendar,account.group_account_invoice,r,
