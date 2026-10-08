@@ -1,12 +1,13 @@
 # Copyright 2026 KMEE
 # License AGPL-3.0 or later (https://www.gnu.org/licenses/agpl).
 import hashlib
-import time
+import re
 from datetime import date
+from decimal import Decimal, InvalidOperation
 from typing import ClassVar
 
 import requests
-from lxml import html
+from lxml import etree, html
 
 from odoo import api, fields, models
 from odoo.exceptions import AccessError, UserError
@@ -133,6 +134,107 @@ class CbuaePublication(models.Model):
             )
             self.invalidate_recordset()
 
+    def _parse_publication(self, body, values):
+        tree = html.fromstring(body, parser=html.HTMLParser(no_network=True))
+        sections = tree.xpath("//section[@id='section2']")
+        if len(sections) != 1:
+            raise ValueError(self.env._("CBUAE source table structure changed."))
+        section = sections[0]
+        headings = section.xpath(".//p[contains(concat(' ', @class, ' '), ' h1 ')]")
+        if len(headings) != 1 or " ".join(headings[0].text_content().split()) != (
+            "Exchange rates against UAE Dirham for VAT related obligations"
+        ):
+            raise ValueError(self.env._("CBUAE source heading changed."))
+        tables = section.xpath(".//table")
+        if len(tables) != 1:
+            raise ValueError(self.env._("CBUAE source table structure changed."))
+        table = tables[0]
+        headers = [cell.text_content().strip() for cell in table.xpath("./thead/tr/th")]
+        if headers != ["", "Currency", "Rates"]:
+            raise ValueError(self.env._("CBUAE source table headers changed."))
+        rows = table.xpath("./tbody/tr")
+        if not rows:
+            raise ValueError(
+                self.env._(
+                    "Dated CBUAE publication is unavailable; review the original."
+                )
+            )
+        stamps = section.xpath(".//p[contains(., 'Last updated:')]")
+        if len(stamps) != 1:
+            raise ValueError(self.env._("CBUAE publication timestamp is ambiguous."))
+        stamp = " ".join(stamps[0].text_content().split()).removeprefix(
+            "Last updated: "
+        )
+        values["publication_stamp"] = stamp
+        match = re.fullmatch(
+            r"([A-Za-z]+) ([0-9]{1,2}) ([A-Za-z]+) ([0-9]{4}) "
+            r"([0-9]{2}):([0-9]{2}):([0-9]{2}) (AM|PM)",
+            stamp,
+        )
+        months = (
+            "January",
+            "February",
+            "March",
+            "April",
+            "May",
+            "June",
+            "July",
+            "August",
+            "September",
+            "October",
+            "November",
+            "December",
+        )
+        weekdays = (
+            "Monday",
+            "Tuesday",
+            "Wednesday",
+            "Thursday",
+            "Friday",
+            "Saturday",
+            "Sunday",
+        )
+        if not match or match[3] not in months:
+            raise ValueError(self.env._("CBUAE publication timestamp changed."))
+        publication_date = date(
+            int(match[4]), months.index(match[3]) + 1, int(match[2])
+        )
+        values["publication_date"] = publication_date
+        if (
+            match[1] != weekdays[publication_date.weekday()]
+            or not 1 <= int(match[5]) <= 12
+            or int(match[6]) > 59
+            or int(match[7]) > 59
+        ):
+            raise ValueError(self.env._("CBUAE publication timestamp is inconsistent."))
+        if publication_date != self.requested_date:
+            raise ValueError(
+                self.env._("CBUAE publication date differs from the requested date.")
+            )
+        quotes = {}
+        for row in rows:
+            cells = row.xpath("./td")
+            if len(cells) != 3 or cells[0].text_content().strip():
+                raise ValueError(self.env._("CBUAE quote row structure changed."))
+            label = cells[1].text_content().strip()
+            literal = cells[2].text_content().strip()
+            if not label or len(label) > 128 or label in quotes:
+                raise ValueError(
+                    self.env._("CBUAE quote labels are missing or duplicated.")
+                )
+            if len(literal) > 64 or not re.fullmatch(
+                r"[0-9]+(?:\.[0-9]+)?(?:[Ee][+-]?[0-9]+)?", literal
+            ):
+                raise ValueError(self.env._("CBUAE quote is not a positive decimal."))
+            try:
+                quote = Decimal(literal)
+            except InvalidOperation as exc:
+                raise ValueError(self.env._("CBUAE quote decimal is invalid.")) from exc
+            if not quote.is_finite() or quote <= 0:
+                raise ValueError(self.env._("CBUAE quote must be positive and finite."))
+            quotes[label] = literal
+        values["quotes"] = quotes
+
     def action_capture(self):
         self.ensure_one()
         self._check_actor("write")
@@ -148,59 +250,31 @@ class CbuaePublication(models.Model):
             url, timeout=(5, 15), allow_redirects=False, stream=True
         ) as response:
             body = b"".join(response.iter_content(chunk_size=8192))
-            tree = html.fromstring(body)
-            stamp_nodes = tree.xpath("//p[contains(., 'Last updated:')]")
-            if not tree.xpath("//table/tbody/tr"):
-                super().write(
-                    {
-                        "state": "error",
-                        "diagnostic": self.env._(
-                            "Dated CBUAE publication is unavailable; "
-                            "review the original."
-                        ),
-                        "source_url": response.url,
-                        "retrieved_at": fields.Datetime.now(),
-                        "http_status": response.status_code,
-                        "content_type": response.headers.get("Content-Type"),
-                        "source_body": BinaryBytes(body),
-                        "source_sha256": hashlib.sha256(body).hexdigest(),
-                    }
-                )
-                self.flush_recordset()
-                return True
-            stamp_node = stamp_nodes[0]
-            stamp = " ".join(stamp_node.text_content().split()).removeprefix(
-                "Last updated: "
-            )
-            stamp_parts = time.strptime(stamp, "%A %d %B %Y %I:%M:%S %p")
-            publication_date = date(
-                stamp_parts.tm_year, stamp_parts.tm_mon, stamp_parts.tm_mday
-            )
-            quotes = {
-                row.xpath("./td[2]")[0].text_content().strip(): row.xpath("./td[3]")[0]
-                .text_content()
-                .strip()
-                for row in tree.xpath("//table/tbody/tr")
+            values = {
+                "state": "captured",
+                "diagnostic": False,
+                "source_url": response.url,
+                "retrieved_at": fields.Datetime.now(),
+                "http_status": response.status_code,
+                "content_type": response.headers.get("Content-Type", ""),
+                "source_body": BinaryBytes(body),
+                "source_sha256": hashlib.sha256(body).hexdigest(),
             }
-            same_date = publication_date == self.requested_date
-            super().write(
-                {
-                    "state": "captured" if same_date else "error",
-                    "diagnostic": False
-                    if same_date
-                    else self.env._(
-                        "CBUAE publication date differs from the requested date."
-                    ),
-                    "source_url": response.url,
-                    "retrieved_at": fields.Datetime.now(),
-                    "http_status": response.status_code,
-                    "content_type": response.headers.get("Content-Type"),
-                    "source_body": BinaryBytes(body),
-                    "source_sha256": hashlib.sha256(body).hexdigest(),
-                    "publication_stamp": stamp,
-                    "publication_date": publication_date,
-                    "quotes": quotes if same_date else False,
-                }
-            )
+            try:
+                if response.status_code != 200 or response.url != url:
+                    raise ValueError(
+                        self.env._("CBUAE HTTP status or URL requires review.")
+                    )
+                if (
+                    values["content_type"].split(";", 1)[0].strip().lower()
+                    != "text/html"
+                ):
+                    raise ValueError(
+                        self.env._("CBUAE HTTP content type requires review.")
+                    )
+                self._parse_publication(body, values)
+            except (ValueError, etree.ParserError) as exc:
+                values.update(state="error", diagnostic=str(exc), quotes=False)
+            super().write(values)
             self.flush_recordset()
         return True
