@@ -171,6 +171,7 @@ class ControlledInboxWorker:
             try:
                 with self.registry.cursor() as cursor:
                     binding = self._binding(cursor, binding_id)
+                    binding._require_receiving_capabilities()
                     if self._receiving_route(binding) != (tin, provider, route):
                         raise UserError(
                             binding.env._(
