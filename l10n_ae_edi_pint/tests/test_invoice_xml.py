@@ -114,9 +114,7 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         self.assertFalse(credit.l10n_ae_transmission_id)
         self.assertFalse(credit.l10n_ae_fiscal_uuid)
         self.assertFalse(credit.l10n_ae_binding_id)
-        self.assertEqual(
-            str(credit.invoice_line_ids.deferred_start_date), "2026-01-01"
-        )
+        self.assertEqual(str(credit.invoice_line_ids.deferred_start_date), "2026-01-01")
         self.assertEqual(str(credit.invoice_line_ids.deferred_end_date), "2026-01-31")
         with Form(credit) as form:
             with form.invoice_line_ids.edit(0) as line:
