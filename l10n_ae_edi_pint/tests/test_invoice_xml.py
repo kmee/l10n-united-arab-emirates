@@ -45,6 +45,7 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
                 "partner_id": self.env.company.partner_id.id,
                 "company_id": self.env.company.id,
                 "account_number": "SYNTH UNUSED ACCOUNT 01",
+                "allow_out_payment": True,
             }
         )
         invoice = self.init_invoice(
