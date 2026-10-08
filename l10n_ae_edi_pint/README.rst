@@ -127,14 +127,19 @@ The repository `scenario based user
 manual <https://github.com/kmee/l10n-uae/blob/20.0-add-uae-edi/docs/user/scenarios-pt_BR.md>`__
 distinguishes tested user journeys from workflows still to implement.
 
-For foreign-currency emission, enter the reviewed AED-per-document-unit
-quote, its date and source in **UAE E-Invoicing** before checking or
-posting. The quote must be positive, use a decimal point and have at
-most six decimal places. The frozen evidence preserves it and the
-converted AED line/header values. A mismatch against an AED ledger
-blocks preparation for accounting review. The rate source/date are human
-references; automatic CBUAE acquisition and full tax-point/rounding
-policy remain pending.
+For foreign-currency emission, the default is Odoo's dated native
+currency conversion for the invoice conversion date. The frozen issue
+records its AED-per-document-unit rate, conversion/source dates and the
+actual dated Odoo currency-rate records used; the source is identified
+as Odoo currency rates and its CBUAE origin is explicitly unverified.
+Use the three **Reviewed AED Exchange Rate**, **AED Exchange Rate Date**
+and **AED Exchange Rate Source** fields together to supply a reviewed
+override. A partial override requires review; clear all three to return
+to the native conversion. The effective conversion and frozen evidence
+preserve the quote and converted AED line/header values. A mismatch
+against the AED ledger, a missing/undated source, or a different
+VAT-point date blocks preparation for accounting review. The source
+field is a human reference and does not verify CBUAE publication.
 
 For a received foreign-currency bill, review **Amounts Declared by the
 Sender** in the UAE tab. Document currency, declared exchange rate,
@@ -266,6 +271,15 @@ qualifications, deferred-line mapping and full document/FX/received
 matrices remain pending. The pinned executable rule uses DescriptionCode
 despite the upstream semantic page's Description binding; research
 records that discrepancy.
+
+For API billing cadence, ``submit_document`` uses the selected payment
+term's reviewed frequency when ``l10n_ae_billing_frequency_code`` is
+omitted. An explicit value overrides it; ``false`` or ``null`` clears
+it. Its response puts the accounting ID at ``accounting.move_id``;
+``get_document`` returns the issue in ``document``. Received
+self-billing keeps the original cadence and full OTH Note on its
+protected draft; an absent cadence is not inferred from local payment
+terms. See scenarios 61–62.
 
 Known issues / Roadmap
 ======================
