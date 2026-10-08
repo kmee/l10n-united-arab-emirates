@@ -25,12 +25,17 @@ class CbuaePublication(models.Model):
         readonly=True,
     )
     state = fields.Selection(
-        [("draft", "Not Captured"), ("captured", "Requires Review")],
+        [
+            ("draft", "Not Captured"),
+            ("captured", "Requires Review"),
+            ("error", "Capture Requires Review"),
+        ],
         default="draft",
         required=True,
         readonly=True,
         copy=False,
     )
+    diagnostic = fields.Text(readonly=True, copy=False)
     source_url = fields.Char(readonly=True, copy=False)
     retrieved_at = fields.Datetime(readonly=True, copy=False)
     http_status = fields.Integer(readonly=True, copy=False)
@@ -54,7 +59,25 @@ class CbuaePublication(models.Model):
         ) as response:
             body = b"".join(response.iter_content(chunk_size=8192))
             tree = html.fromstring(body)
-            stamp_node = tree.xpath("//p[contains(., 'Last updated:')]")[0]
+            stamp_nodes = tree.xpath("//p[contains(., 'Last updated:')]")
+            if not tree.xpath("//table/tbody/tr"):
+                self.write(
+                    {
+                        "state": "error",
+                        "diagnostic": self.env._(
+                            "Dated CBUAE publication is unavailable; "
+                            "review the original."
+                        ),
+                        "source_url": response.url,
+                        "retrieved_at": fields.Datetime.now(),
+                        "http_status": response.status_code,
+                        "content_type": response.headers.get("Content-Type"),
+                        "source_body": BinaryBytes(body),
+                        "source_sha256": hashlib.sha256(body).hexdigest(),
+                    }
+                )
+                return True
+            stamp_node = stamp_nodes[0]
             stamp = " ".join(stamp_node.text_content().split()).removeprefix(
                 "Last updated: "
             )
