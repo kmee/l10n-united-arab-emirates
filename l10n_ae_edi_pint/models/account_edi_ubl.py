@@ -51,6 +51,17 @@ class AccountEdiUblUae(models.AbstractModel):
         categories = document.findall(
             "{*}InvoiceLine/{*}Item/{*}ClassifiedTaxCategory"
         ) + document.findall("{*}CreditNoteLine/{*}Item/{*}ClassifiedTaxCategory")
+        for category in categories:
+            if (category.findtext("{*}ID") or "").strip() == "N":
+                nominal_rate = Decimal(category.findtext("{*}Percent") or "0")
+                if not nominal_rate.is_finite() or nominal_rate <= 0:
+                    raise UserError(
+                        self.env._(
+                            "IBR-111-AE: category N requires a reviewed positive "
+                            "nominal VAT rate. Review the additional VAT metadata; "
+                            "the native tax calculation will not be changed."
+                        )
+                    )
         transaction_type = document.findtext("{*}ProfileExecutionID") or ""
         if (
             len(transaction_type) == 8
