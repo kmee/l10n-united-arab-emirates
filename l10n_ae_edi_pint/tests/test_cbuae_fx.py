@@ -65,7 +65,10 @@ class TestUaeCbuaeFx(TestUaeInvoiceXml):
         # the imported source was reviewed for USD on this native currency ID.
         self.env.ref("base.ZAR").write({"name": "ZZX"})
         usd.write({"name": "ZAR"})
-        original.line_ids.flush_recordset()
+        # Complete the native master edit, as the HTTP request would do, before
+        # measuring any UAE replay. Stored native recomputations can change the
+        # accounting-line write actor; values and the frozen issue must survive.
+        self.env.flush_all()
         after_rename = original.line_ids.sorted("id").read(ledger_fields)
         for before, after in zip(ledger, after_rename, strict=True):
             self.assertEqual(
