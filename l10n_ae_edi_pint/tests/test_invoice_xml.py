@@ -32,6 +32,109 @@ NS = {
 
 @tagged("post_install", "-at_install")
 class TestUaeInvoiceXml(AccountTestInvoicingCommon):
+    def test_unclassified_native_method_reviews_then_freezes_online_service(self):
+        journal = self.company_data["default_journal_credit"]
+        method = journal.inbound_payment_method_line_ids.filtered(
+            lambda line: line.code == "manual"
+        )[:1]
+        self.assertTrue(method)
+        self.assertFalse(method.l10n_ae_edi_payment_means_code)
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {
+                "name": "Synthetic unclassified native instrument",
+                "fiscal_uuid_policy": "controlled_local",
+            }
+        )
+        self.env.company.write(
+            {"l10n_ae_edi_auto_prepare": True, "l10n_ae_edi_binding_id": binding.id}
+        )
+        invoice = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a
+        ).with_user(self.simple_accountman)
+        self.assertFalse(invoice.env.su)
+        with Form(invoice) as form:
+            form.preferred_payment_method_line_id = method
+            form.partner_bank_id = self.env["res.partner.bank"]
+            form.payment_reference = "SYNTH-ONLINE-REVIEW-2026"
+            form.l10n_ae_binding_id = binding
+        with self.assertRaisesRegex(UserError, "UAE Payment Instrument"):
+            invoice.action_l10n_ae_validate()
+        invoice.action_post()
+        self.assertEqual(invoice.state, "posted")
+        self.assertEqual(invoice.l10n_ae_preparation_state, "review")
+        self.assertIn("UAE Payment Instrument", invoice.l10n_ae_preparation_error)
+        self.assertFalse(invoice.l10n_ae_transmission_id)
+        self.assertFalse(invoice.l10n_ae_fiscal_uuid)
+        self.assertEqual(
+            (invoice.amount_untaxed, invoice.amount_tax, invoice.amount_total),
+            (100, 5, 105),
+        )
+        ledger_fields = [
+            "account_id",
+            "partner_id",
+            "currency_id",
+            "debit",
+            "credit",
+            "balance",
+            "amount_currency",
+            "tax_ids",
+            "create_date",
+            "write_date",
+        ]
+        ledger = invoice.line_ids.sorted("id").read(ledger_fields)
+        with self.assertRaisesRegex(UserError, "UAE Payment Instrument"):
+            invoice.action_l10n_ae_prepare()
+        index = journal.inbound_payment_method_line_ids.ids.index(method.id)
+        with (
+            Form(journal.with_user(self.simple_accountman)) as form,
+            form.inbound_payment_method_line_ids.edit(index) as line,
+        ):
+            line.l10n_ae_edi_payment_means_code = "68"
+        self.assertEqual(
+            (method.code, method.payment_type, journal.type),
+            ("manual", "inbound", "credit"),
+        )
+        invoice.action_l10n_ae_validate()
+        invoice.action_l10n_ae_prepare()
+        issue = invoice.l10n_ae_transmission_id
+        tree = etree.fromstring(issue.xml_content.encode())
+        means = tree.findall("cac:PaymentMeans", namespaces=NS)
+        self.assertEqual(len(means), 1)
+        self.assertEqual(means[0].findtext("cbc:PaymentMeansCode", namespaces=NS), "68")
+        self.assertEqual(
+            means[0].findtext("cbc:PaymentID", namespaces=NS),
+            "SYNTH-ONLINE-REVIEW-2026",
+        )
+        for group in ("PayeeFinancialAccount", "CardAccount", "PaymentMandate"):
+            self.assertIsNone(means[0].find(f"cac:{group}", namespaces=NS))
+        snapshot = json.loads(issue.payload)["payment_means"]
+        self.assertEqual(snapshot["code"], "68")
+        self.assertEqual(snapshot["configured_code"], "68")
+        self.assertEqual(snapshot["method_line_id"], method.id)
+        self.assertEqual(snapshot["method_code"], "manual")
+        self.assertEqual(snapshot["journal_type"], "credit")
+        self.assertIsNone(snapshot["account_identifier"])
+        self.assertTrue(invoice.validate_l10n_ae_pint()["valid"])
+        immutable = [
+            "payload",
+            "payload_hash",
+            "xml_content",
+            "xml_hash",
+            "idempotency_key",
+        ]
+        frozen = issue.read(immutable)
+        with (
+            Form(journal.with_user(self.simple_accountman)) as form,
+            form.inbound_payment_method_line_ids.edit(index) as line,
+        ):
+            line.l10n_ae_edi_payment_means_code = False
+        invoice.action_l10n_ae_prepare()
+        self.assertEqual(invoice.preview_l10n_ae_pint(), frozen[0]["xml_content"])
+        self.assertTrue(invoice.validate_l10n_ae_pint()["valid"])
+        self.assertEqual(issue.read(immutable), frozen)
+        self.assertEqual(invoice.line_ids.sorted("id").read(ledger_fields), ledger)
+        self.assertFalse(issue.attempt_ids or issue.event_ids)
+
     def test_reviewed_native_journal_cheque_instruction_preserves_original(self):
         self.env.company.l10n_ae_edi_auto_prepare = False
         journal = self.company_data["default_journal_bank"]
