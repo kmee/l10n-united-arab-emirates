@@ -170,10 +170,16 @@ class TestUaeSelfBillingInbound(AccountTestInvoicingCommon):
         self.assertFalse(credit.env.su)
         self.assertEqual(credit.move_type, "in_refund")
         self.assertTrue(credit.l10n_ae_margin_scheme)
-        self.assertEqual(credit.l10n_ae_selfbilling_agreement_id, buyer_agreement)
+        # A new credit deliberately requires fresh agreement/binding review.
+        self.assertFalse(credit.l10n_ae_selfbilling_agreement_id)
         self.assertEqual(credit.reversed_entry_id, original)
         credit.invoice_line_ids.write({"quantity": 0.25})
-        credit.l10n_ae_binding_id = source_binding
+        credit.write(
+            {
+                "l10n_ae_binding_id": source_binding.id,
+                "l10n_ae_selfbilling_agreement_id": buyer_agreement.id,
+            }
+        )
         credit.action_post()
         ledger_fields = [
             "account_id",
