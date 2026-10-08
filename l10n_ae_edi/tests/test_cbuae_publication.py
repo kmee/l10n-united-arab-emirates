@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 from requests import Response
 
+from odoo.exceptions import UserError
 from odoo.tests import Form, tagged
 
 from odoo.addons.account.tests.common import AccountTestInvoicingCommon
@@ -147,3 +148,56 @@ class TestCbuaePublication(AccountTestInvoicingCommon):
             rates.read(["name", "rate", "company_id", "currency_id", "write_date"]),
             before,
         )
+
+    def test_completed_capture_cannot_be_forged_overwritten_deleted_or_refetched(self):
+        model = self.env["l10n_ae.cbuae.publication"].with_user(self.simple_accountman)
+        original = (
+            Path(__file__).parent / "cassettes/cbuae/cbuae-2026-08-26.html"
+        ).read_bytes()
+        response = Response()
+        response.status_code = 200
+        response.url = "https://centralbank.ae/umbraco/Surface/Exchange/GetExchangeRateAllCurrencyDate?dateTime=2026-08-26"
+        response.headers["Content-Type"] = "text/html; charset=utf-8"
+        response._content = original
+        response._content_consumed = True
+        publication = model.create({"requested_date": "2026-08-26"})
+        with patch("requests.get", return_value=response):
+            publication.action_capture()
+        fields = [
+            "state",
+            "requested_date",
+            "company_id",
+            "source_sha256",
+            "retrieved_at",
+            "write_uid",
+            "write_date",
+            "quotes",
+        ]
+        before = publication.read(fields)
+        for values in (
+            {"source_sha256": "forged"},
+            {"quotes": {"US Dollar": "99"}},
+            {"state": "draft"},
+            {"requested_date": "2026-08-28"},
+            {"company_id": publication.company_id.id},
+        ):
+            with self.subTest(values=values), self.assertRaises(UserError):
+                publication.write(values)
+        with self.assertRaises(UserError):
+            publication.unlink()
+        with self.assertRaises(UserError):
+            model.create({"requested_date": "2026-08-26", "source_sha256": "forged"})
+        with patch("requests.get") as http:
+            publication.action_capture()
+            http.assert_not_called()
+        self.assertEqual(publication.read(fields), before)
+        self.assertEqual(publication.source_body.content, original)
+        draft = model.with_context(
+            default_state="captured", default_source_sha256="forged"
+        ).create({"requested_date": "2026-08-28"})
+        self.assertEqual(draft.state, "draft")
+        self.assertFalse(draft.source_sha256)
+        draft.write({"requested_date": "2026-08-26"})
+        duplicate = publication.copy()
+        self.assertEqual(duplicate.state, "draft")
+        self.assertFalse(duplicate.source_body)
