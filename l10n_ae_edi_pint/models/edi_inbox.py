@@ -496,10 +496,13 @@ class UaeEdiInbox(models.Model):
             and not is_credit
             and type_code == "380"
         )
-        summary_document = (
-            transaction_flags in ("00010000", "10010000")
-            and not selfbilling
-            and type_code == ("381" if is_credit else "380")
+        summary_document = transaction_flags in (
+            "00010000",
+            "10010000",
+        ) and type_code == (
+            ("261" if is_credit else "389")
+            if selfbilling
+            else ("381" if is_credit else "380")
         )
         margin_document = transaction_flags in (
             "00100000",
