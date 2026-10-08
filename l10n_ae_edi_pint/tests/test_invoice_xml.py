@@ -32,6 +32,191 @@ NS = {
 
 @tagged("post_install", "-at_install")
 class TestUaeInvoiceXml(AccountTestInvoicingCommon):
+    def test_summary_native_partial_credit_preserves_reviewed_period_and_original(self):
+        if not {"deferred_start_date", "deferred_end_date"}.issubset(
+            self.env["account.move.line"]._fields
+        ):
+            self.skipTest("Native deferred-date fields are not installed.")
+        self.env.company.write(
+            {
+                "l10n_ae_edi_auto_prepare": False,
+                "generate_deferred_revenue_entries_method": "manual",
+            }
+        )
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {
+                "name": "Synthetic native Summary partial credit",
+                "fiscal_uuid_policy": "controlled_local",
+            }
+        )
+        term = self.env["account.payment.term"].create(
+            {
+                "name": "Synthetic Summary credit monthly sixty-day term",
+                "company_id": self.env.company.id,
+                "l10n_ae_billing_frequency_code": "MTH",
+                "line_ids": [
+                    (0, 0, {"value": "percent", "value_amount": 100, "nb_days": 60})
+                ],
+            }
+        )
+        original = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a
+        ).with_user(self.simple_accountman)
+        self.assertFalse(original.env.su)
+        original.write(
+            {
+                "invoice_date": "2026-01-31",
+                "invoice_payment_term_id": term.id,
+                "l10n_ae_billing_frequency_code": "MTH",
+                "l10n_ae_summary": True,
+                "l10n_ae_binding_id": binding.id,
+                "preferred_payment_method_line_id": False,
+                "partner_bank_id": False,
+            }
+        )
+        original.invoice_line_ids.write(
+            {"deferred_start_date": "2026-01-01", "deferred_end_date": "2026-01-31"}
+        )
+        original.action_post()
+        original.action_l10n_ae_validate()
+        original.action_l10n_ae_prepare()
+        self.assertTrue(original.validate_l10n_ae_pint()["valid"])
+        immutable = [
+            "payload",
+            "payload_hash",
+            "xml_content",
+            "xml_hash",
+            "idempotency_key",
+        ]
+        original_issue = original.l10n_ae_transmission_id
+        original_frozen = original_issue.read(immutable)
+        wizard = (
+            self.env["account.move.reversal"]
+            .with_user(self.simple_accountman)
+            .with_context(active_model="account.move", active_ids=original.ids)
+            .create(
+                {
+                    "move_ids": [(6, 0, original.ids)],
+                    "journal_id": original.journal_id.id,
+                    "date": "2026-02-01",
+                    "reason": "Synthetic reviewed January partial Summary credit",
+                    "l10n_ae_credit_reason": "DL8.61.1.C",
+                }
+            )
+        )
+        wizard.refund_moves()
+        credit = wizard.new_move_ids
+        self.assertEqual(credit.move_type, "out_refund")
+        self.assertEqual(credit.reversed_entry_id, original)
+        self.assertTrue(credit.l10n_ae_summary)
+        self.assertFalse(credit.l10n_ae_invoicing_period_start)
+        self.assertFalse(credit.l10n_ae_invoicing_period_end)
+        self.assertFalse(credit.l10n_ae_transmission_id)
+        self.assertFalse(credit.l10n_ae_fiscal_uuid)
+        self.assertFalse(credit.l10n_ae_binding_id)
+        self.assertEqual(
+            str(credit.invoice_line_ids.deferred_start_date), "2026-01-01"
+        )
+        self.assertEqual(str(credit.invoice_line_ids.deferred_end_date), "2026-01-31")
+        with Form(credit) as form:
+            with form.invoice_line_ids.edit(0) as line:
+                line.price_unit = 40
+            form.l10n_ae_binding_id = binding
+            form.l10n_ae_billing_frequency_code = "MTH"
+            form.preferred_payment_method_line_id = self.env[
+                "account.payment.method.line"
+            ]
+            form.partner_bank_id = self.env["res.partner.bank"]
+        credit.invoice_line_ids.write({"deferred_end_date": "2026-01-15"})
+        credit.action_post()
+        self.assertEqual(
+            (original.amount_untaxed, original.amount_tax, original.amount_total),
+            (100, 5, 105),
+        )
+        self.assertEqual(
+            (credit.amount_untaxed, credit.amount_tax, credit.amount_total), (40, 2, 42)
+        )
+        self.assertEqual((original.amount_residual, credit.amount_residual), (63, 0))
+        ledger_fields = [
+            "account_id",
+            "partner_id",
+            "currency_id",
+            "date",
+            "date_maturity",
+            "debit",
+            "credit",
+            "balance",
+            "amount_currency",
+            "tax_ids",
+            "create_date",
+            "write_date",
+        ]
+        # Native reversal reconciliation is accounting behavior. UAE replay is
+        # compared with the complete ledgers after that native action.
+        ledgers = [
+            move.line_ids.sorted("id").read(ledger_fields)
+            for move in (original, credit)
+        ]
+        credit.action_l10n_ae_validate()
+        credit.action_l10n_ae_prepare()
+        issue = credit.l10n_ae_transmission_id
+        self.assertNotEqual(issue, original_issue)
+        self.assertNotEqual(credit.l10n_ae_fiscal_uuid, original.l10n_ae_fiscal_uuid)
+        tree = etree.fromstring(issue.xml_content.encode())
+        expected = {
+            "cbc:CreditNoteTypeCode": "381",
+            "cbc:ProfileExecutionID": "00010000",
+            "cac:InvoicePeriod/cbc:StartDate": "2026-01-01",
+            "cac:InvoicePeriod/cbc:EndDate": "2026-01-15",
+            "cac:InvoicePeriod/cbc:DescriptionCode": "MTH",
+            "cac:BillingReference/cac:InvoiceDocumentReference/cbc:ID": original.name,
+            "cac:BillingReference/cac:InvoiceDocumentReference/cbc:IssueDate": (
+                "2026-01-31"
+            ),
+            "cac:DiscrepancyResponse/cbc:ResponseCode": "DL8.61.1.C",
+            "cac:LegalMonetaryTotal/cbc:TaxExclusiveAmount": "40.00",
+            "cac:TaxTotal/cbc:TaxAmount": "2.00",
+            "cac:LegalMonetaryTotal/cbc:TaxInclusiveAmount": "42.00",
+            "cac:LegalMonetaryTotal/cbc:PrepaidAmount": "42.00",
+            "cac:LegalMonetaryTotal/cbc:PayableAmount": "0.00",
+        }
+        for path, value in expected.items():
+            self.assertEqual(tree.findtext(path, namespaces=NS), value, path)
+        payload = json.loads(issue.payload)
+        self.assertEqual(
+            payload["invoicing_period_origin"],
+            {
+                "source": "native_deferred_lines",
+                "lines": [
+                    {
+                        "id": credit.invoice_line_ids.id,
+                        "start_date": "2026-01-01",
+                        "end_date": "2026-01-15",
+                    }
+                ],
+            },
+        )
+        self.assertTrue(credit.validate_l10n_ae_pint()["valid"])
+        frozen = issue.read(immutable)
+        with self.assertRaisesRegex(UserError, "frozen UAE"):
+            credit.invoice_line_ids.write({"deferred_end_date": "2026-01-31"})
+        term.l10n_ae_billing_frequency_code = "WKY"
+        for move in (original, credit):
+            move.action_l10n_ae_prepare()
+            self.assertTrue(move.validate_l10n_ae_pint()["valid"])
+        self.assertEqual(issue.read(immutable), frozen)
+        self.assertEqual(original_issue.read(immutable), original_frozen)
+        self.assertEqual(str(original.invoice_line_ids.deferred_end_date), "2026-01-31")
+        self.assertEqual(
+            [
+                move.line_ids.sorted("id").read(ledger_fields)
+                for move in (original, credit)
+            ],
+            ledgers,
+        )
+        self.assertFalse(issue.attempt_ids or original_issue.attempt_ids)
+        self.assertFalse(issue.event_ids or original_issue.event_ids)
+
     def test_explicit_period_wins_without_merging_native_dates_or_freezing_them(self):
         if not {"deferred_start_date", "deferred_end_date"}.issubset(
             self.env["account.move.line"]._fields
