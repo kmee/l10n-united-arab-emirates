@@ -32,6 +32,136 @@ NS = {
 
 @tagged("post_install", "-at_install")
 class TestUaeInvoiceXml(AccountTestInvoicingCommon):
+    def test_summary_uses_native_deferred_lines_without_inventing_due_dates(self):
+        if not {"deferred_start_date", "deferred_end_date"}.issubset(
+            self.env["account.move.line"]._fields
+        ):
+            self.skipTest("Native deferred-date fields are not installed.")
+        self.env.company.write(
+            {
+                "l10n_ae_edi_auto_prepare": False,
+                "generate_deferred_revenue_entries_method": "manual",
+            }
+        )
+        term = self.env["account.payment.term"].create(
+            {
+                "name": "Synthetic deferred Summary sixty-day payment",
+                "company_id": self.env.company.id,
+                "line_ids": [
+                    (0, 0, {"value": "percent", "value_amount": 100, "nb_days": 60})
+                ],
+            }
+        )
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {
+                "name": "Synthetic native Summary period",
+                "fiscal_uuid_policy": "controlled_local",
+            }
+        )
+        invoice = self.init_invoice(
+            "out_invoice", amounts=[100, 200], taxes=self.tax_sale_a
+        ).with_user(self.simple_accountman)
+        self.assertFalse(invoice.env.su)
+        invoice.write(
+            {
+                "invoice_date": "2026-01-31",
+                "invoice_payment_term_id": term.id,
+                "l10n_ae_summary": True,
+                "l10n_ae_binding_id": binding.id,
+                "preferred_payment_method_line_id": False,
+                "partner_bank_id": False,
+            }
+        )
+        first, second = invoice.invoice_line_ids.sorted("id")
+        first.write(
+            {"deferred_start_date": "2026-01-01", "deferred_end_date": "2026-01-15"}
+        )
+        second.write(
+            {"deferred_start_date": "2026-01-16", "deferred_end_date": "2026-01-31"}
+        )
+        self.assertFalse(invoice.l10n_ae_invoicing_period_start)
+        self.assertFalse(invoice.l10n_ae_invoicing_period_end)
+        invoice.action_post()
+        self.assertEqual(invoice.state, "posted")
+        self.assertEqual(str(invoice.invoice_date_due), "2026-04-01")
+        self.assertEqual(
+            (invoice.amount_untaxed, invoice.amount_tax, invoice.amount_total),
+            (300, 15, 315),
+        )
+        self.assertFalse(invoice.deferred_move_ids)
+        ledger_fields = [
+            "account_id",
+            "partner_id",
+            "currency_id",
+            "date",
+            "date_maturity",
+            "debit",
+            "credit",
+            "balance",
+            "amount_currency",
+            "tax_ids",
+            "create_date",
+            "write_date",
+        ]
+        ledger = invoice.line_ids.sorted("id").read(ledger_fields)
+        invoice.action_l10n_ae_validate()
+        invoice.action_l10n_ae_prepare()
+        issue = invoice.l10n_ae_transmission_id
+        tree = etree.fromstring(issue.xml_content.encode())
+        periods = tree.findall("cac:InvoicePeriod", NS)
+        self.assertEqual(len(periods), 1)
+        self.assertEqual(
+            periods[0].findtext("cbc:StartDate", namespaces=NS), "2026-01-01"
+        )
+        self.assertEqual(
+            periods[0].findtext("cbc:EndDate", namespaces=NS), "2026-01-31"
+        )
+        self.assertEqual(tree.findtext("cbc:DueDate", namespaces=NS), "2026-04-01")
+        self.assertEqual(
+            tree.findtext("cac:LegalMonetaryTotal/cbc:PayableAmount", namespaces=NS),
+            "315.00",
+        )
+        payload = json.loads(issue.payload)
+        self.assertEqual(
+            payload["invoicing_period"],
+            {"start_date": "2026-01-01", "end_date": "2026-01-31"},
+        )
+        self.assertEqual(
+            payload["invoicing_period_origin"],
+            {
+                "source": "native_deferred_lines",
+                "lines": [
+                    {
+                        "id": first.id,
+                        "start_date": "2026-01-01",
+                        "end_date": "2026-01-15",
+                    },
+                    {
+                        "id": second.id,
+                        "start_date": "2026-01-16",
+                        "end_date": "2026-01-31",
+                    },
+                ],
+            },
+        )
+        self.assertTrue(invoice.validate_l10n_ae_pint()["valid"])
+        immutable = [
+            "payload",
+            "payload_hash",
+            "xml_content",
+            "xml_hash",
+            "idempotency_key",
+        ]
+        frozen = issue.read(immutable)
+        with self.assertRaisesRegex(UserError, "frozen UAE"):
+            first.write({"deferred_end_date": "2026-02-15"})
+        invoice.action_l10n_ae_prepare()
+        self.assertEqual(invoice.preview_l10n_ae_pint(), frozen[0]["xml_content"])
+        self.assertTrue(invoice.validate_l10n_ae_pint()["valid"])
+        self.assertEqual(issue.read(immutable), frozen)
+        self.assertEqual(invoice.line_ids.sorted("id").read(ledger_fields), ledger)
+        self.assertFalse(issue.attempt_ids or issue.event_ids)
+
     def test_other_eight_reviewed_term_codes_render_valid_code_only_periods(self):
         # Published IBR-005-AE literals, complementing the Monthly/Other
         # journeys. These are ordinary AED380 representations, not all flows.
