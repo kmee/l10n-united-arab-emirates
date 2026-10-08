@@ -9,6 +9,7 @@ from odoo.exceptions import UserError
 from odoo.tests import tagged
 
 from odoo.addons.account.tests.common import AccountTestInvoicingCommon
+from odoo.addons.l10n_ae_edi.tests.common import review_controlled_binding
 
 NS = {
     "cbc": "urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2",
@@ -67,6 +68,12 @@ class TestUaeSalesAdvance(AccountTestInvoicingCommon):
                 "name": "Sales advance simulation",
                 "fiscal_uuid_policy": "controlled_local",
             }
+        )
+        review_controlled_binding(
+            cls.binding,
+            cls.simple_accountman,
+            capabilities=("submit", "lookup", "report", "billing_invoice"),
+            note="Synthetic controlled contract for UAE sales-advance issue tests.",
         )
 
     def _create_invoice(self, order, method, amount=0):
