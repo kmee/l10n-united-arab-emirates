@@ -32,6 +32,7 @@ class CbuaeRateReview(models.Model):
     reviewed_at = fields.Datetime(readonly=True, copy=False)
     anchor_rate_id = fields.Many2one("res.currency.rate", readonly=True, copy=False)
     anchor_rate_literal = fields.Char(readonly=True, copy=False)
+    import_facts = fields.Json(readonly=True, copy=False)
 
     _import_fields: ClassVar[set[str]] = {
         "native_rate_id",
@@ -40,6 +41,7 @@ class CbuaeRateReview(models.Model):
         "reviewed_at",
         "anchor_rate_id",
         "anchor_rate_literal",
+        "import_facts",
     }
 
     def _check_actor(self, operation):
@@ -196,6 +198,26 @@ class CbuaeRateReview(models.Model):
                 "reviewed_at": fields.Datetime.now(),
                 "anchor_rate_id": anchor.id,
                 "anchor_rate_literal": anchor_literal,
+                "import_facts": {
+                    "currency_code": self.currency_id.name,
+                    "publication_date": fields.Date.to_string(
+                        publication.publication_date
+                    ),
+                    "technical_rate": str(imported.rate),
+                    "anchor": {
+                        "kind": "native_row" if anchor else "native_implicit_unit",
+                        "id": anchor.id,
+                        "date": fields.Date.to_string(anchor.name) if anchor else False,
+                        "company_id": anchor.company_id.id,
+                        "technical_rate": anchor_literal,
+                        "write_uid": anchor.write_uid.id,
+                        "write_date": (
+                            fields.Datetime.to_string(anchor.write_date)
+                            if anchor
+                            else False
+                        ),
+                    },
+                },
             }
         )
         self.flush_recordset()
