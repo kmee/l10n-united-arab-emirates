@@ -2,13 +2,60 @@
 # License AGPL-3.0 or later (https://www.gnu.org/licenses/agpl).
 
 import hashlib
+import re
 
 from odoo import api, models
-from odoo.exceptions import UserError
+from odoo.exceptions import AccessError, MissingError, UserError
 
 
 class AccountMoveSend(models.AbstractModel):
     _inherit = "account.move.send"
+
+    @api.model
+    def _get_alerts(self, moves, moves_data):
+        alerts = super()._get_alerts(moves, moves_data)
+        moves.check_access("read")
+        groups = {}
+        for move in moves.filtered(
+            lambda invoice: (
+                invoice.company_id.country_id.code == "AE"
+                and not invoice.l10n_ae_transmission_id
+                and not invoice.l10n_ae_received_document
+                and (
+                    invoice.move_type in ("out_invoice", "out_refund")
+                    or invoice.is_self_billing
+                    and invoice.move_type in ("in_invoice", "in_refund")
+                )
+            )
+        ):
+            try:
+                move.action_l10n_ae_validate()
+            except (AccessError, MissingError):
+                raise
+            except UserError as error:
+                message = str(error)
+                rule = re.search(r"\bIBR-\d{3}-AE\b", message, re.IGNORECASE)
+                key = (
+                    rule.group().lower().replace("-", "_")
+                    if rule
+                    else hashlib.sha256(message.encode("utf-8")).hexdigest()
+                )
+                group = groups.setdefault(
+                    key, {"moves": self.env["account.move"], "messages": []}
+                )
+                group["moves"] |= move
+                if message not in group["messages"]:
+                    group["messages"].append(message)
+        for key, group in groups.items():
+            alerts["l10n_ae_edi_" + key] = {
+                # PDF-only Generate is still available. The formatter retains
+                # its mandatory checks if PINT-AE is selected for generation.
+                "level": "warning",
+                "message": "\n".join(group["messages"]),
+                "action_text": self.env._("View Invoices"),
+                "action": group["moves"]._get_records_action(),
+            }
+        return alerts
 
     @api.model
     def _get_default_sending_settings(self, move, from_cron=False, **custom_settings):
