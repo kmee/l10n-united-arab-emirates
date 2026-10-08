@@ -2,6 +2,7 @@
 # License AGPL-3.0 or later (https://www.gnu.org/licenses/agpl).
 import hashlib
 import json
+import logging
 
 from lxml import etree
 
@@ -12,9 +13,281 @@ from odoo.tests.common import new_test_user
 
 from odoo.addons.account.tests.common import AccountTestInvoicingCommon
 
+_logger = logging.getLogger(__name__)
+
 
 @tagged("post_install", "-at_install")
 class TestUaeSelfBillingInbound(AccountTestInvoicingCommon):
+    def test_summary_selfbilling_partial_credit_roundtrip_preserves_each_period(self):
+        # Reviewed January services:100 +5 VAT; partial credit40 +2 VAT.
+        # Native reversal reconciles42, leaving63 on the buyer's payable.
+        source, supplier_agreement, receiver_binding = self._selfbilling_fixture()
+        self.buyer.l10n_ae_edi_auto_prepare = False
+        buyer_manager = new_test_user(
+            self.env,
+            login="uae-summary-selfbilling-buyer",
+            groups="account.group_account_manager",
+            company_id=self.buyer.id,
+            company_ids=[Command.set(self.buyer.ids)],
+        )
+        supplier_manager = new_test_user(
+            self.env,
+            login="uae-summary-selfbilling-supplier",
+            groups="account.group_account_manager",
+            company_id=self.env.company.id,
+            company_ids=[Command.set(self.env.company.ids)],
+        )
+        source_binding = self.env["l10n_ae.edi.binding"].create(
+            {
+                "name": "Synthetic Summary self-billing issuer",
+                "company_id": self.buyer.id,
+                "fiscal_uuid_policy": "controlled_local",
+            }
+        )
+        local_term = self.env["account.payment.term"].create(
+            {
+                "name": "Synthetic receiving weekly term",
+                "company_id": self.env.company.id,
+                "l10n_ae_billing_frequency_code": "WKY",
+                "line_ids": [Command.create({"value": "percent", "value_amount": 100})],
+            }
+        )
+        self.buyer.partner_id.with_company(
+            self.env.company
+        ).property_payment_term_id = local_term
+        original = source.with_user(buyer_manager).with_company(self.buyer)
+        buyer_agreement = original.l10n_ae_selfbilling_agreement_id
+        original.write(
+            {
+                "invoice_date": "2026-01-31",
+                "l10n_ae_fiscal_uuid": False,
+                "l10n_ae_binding_id": source_binding.id,
+                "l10n_ae_summary": True,
+                "l10n_ae_invoicing_period_start": "2026-01-01",
+                "l10n_ae_invoicing_period_end": "2026-01-31",
+                "l10n_ae_billing_frequency_code": "MTH",
+                "preferred_payment_method_line_id": False,
+                "partner_bank_id": False,
+            }
+        )
+        self.assertFalse(original.env.su)
+        original.action_post()
+        original.action_l10n_ae_validate()
+        original.action_l10n_ae_prepare()
+        original_report = original.validate_l10n_ae_pint()
+        self.assertTrue(original_report["valid"], original_report)
+        original_issue = original.l10n_ae_transmission_id
+        immutable = [
+            "payload",
+            "payload_hash",
+            "xml_content",
+            "xml_hash",
+            "idempotency_key",
+        ]
+        original_frozen = original_issue.read(immutable)
+        reversal = (
+            self.env["account.move.reversal"]
+            .with_user(buyer_manager)
+            .with_company(self.buyer)
+            .with_context(active_model="account.move", active_ids=original.ids)
+            .create(
+                {
+                    "move_ids": [Command.set(original.ids)],
+                    "journal_id": original.journal_id.id,
+                    "date": "2026-02-01",
+                    "reason": "Synthetic reviewed first-half January adjustment",
+                    "l10n_ae_credit_reason": "DL8.61.1.C",
+                }
+            )
+        )
+        reversal.refund_moves()
+        credit = reversal.new_move_ids
+        self.assertEqual((credit.move_type, credit.state), ("in_refund", "draft"))
+        self.assertEqual(credit.reversed_entry_id, original)
+        self.assertFalse(credit.l10n_ae_selfbilling_agreement_id)
+        self.assertFalse(credit.l10n_ae_binding_id)
+        self.assertFalse(credit.l10n_ae_fiscal_uuid)
+        self.assertFalse(credit.l10n_ae_transmission_id)
+        credit.invoice_line_ids.write({"price_unit": 40})
+        credit.write(
+            {
+                "l10n_ae_binding_id": source_binding.id,
+                "l10n_ae_selfbilling_agreement_id": buyer_agreement.id,
+                "l10n_ae_summary": True,
+                "l10n_ae_invoicing_period_start": "2026-01-01",
+                "l10n_ae_invoicing_period_end": "2026-01-15",
+                "l10n_ae_billing_frequency_code": "MTH",
+                "preferred_payment_method_line_id": False,
+                "partner_bank_id": False,
+            }
+        )
+        credit.action_post()
+        self.assertEqual((original.amount_residual, credit.amount_residual), (63, 0))
+        ledger_fields = [
+            "account_id",
+            "partner_id",
+            "currency_id",
+            "date",
+            "date_maturity",
+            "debit",
+            "credit",
+            "balance",
+            "amount_currency",
+            "tax_ids",
+            "create_date",
+            "write_date",
+        ]
+        buyer_ledgers = [
+            move.line_ids.sorted("id").read(ledger_fields)
+            for move in (original, credit)
+        ]
+        credit.action_l10n_ae_validate()
+        credit.action_l10n_ae_prepare()
+        credit_report = credit.validate_l10n_ae_pint()
+        self.assertTrue(credit_report["valid"], credit_report)
+        credit_issue = credit.l10n_ae_transmission_id
+        self.assertNotEqual(credit_issue, original_issue)
+        self.assertNotEqual(credit.l10n_ae_fiscal_uuid, original.l10n_ae_fiscal_uuid)
+        credit_frozen = credit_issue.read(immutable)
+        documents = (
+            (original, original_issue, "389", "2026-01-31", (100, 5, 105)),
+            (credit, credit_issue, "261", "2026-01-15", (40, 2, 42)),
+        )
+        for move, issue, type_code, end_date, amounts in documents:
+            tree = etree.fromstring(issue.xml_content.encode())
+            self.assertEqual(
+                tree.findtext(
+                    "./{*}CreditNoteTypeCode"
+                    if move == credit
+                    else "./{*}InvoiceTypeCode"
+                ),
+                type_code,
+            )
+            self.assertEqual(
+                tree.findtext("./{*}CustomizationID"),
+                "urn:peppol:pint:selfbilling-1@ae-1",
+            )
+            self.assertEqual(
+                tree.findtext("./{*}ProfileID"), "urn:peppol:bis:selfbilling"
+            )
+            self.assertEqual(tree.findtext("./{*}ProfileExecutionID"), "00010000")
+            self.assertEqual(
+                tree.findtext("./{*}InvoicePeriod/{*}StartDate"), "2026-01-01"
+            )
+            self.assertEqual(tree.findtext("./{*}InvoicePeriod/{*}EndDate"), end_date)
+            self.assertEqual(
+                tree.findtext("./{*}InvoicePeriod/{*}DescriptionCode"), "MTH"
+            )
+            self.assertEqual(
+                tree.findtext("./{*}AccountingSupplierParty/{*}Party/{*}EndpointID"),
+                "1000000001",
+            )
+            self.assertEqual(
+                tree.findtext("./{*}AccountingCustomerParty/{*}Party/{*}EndpointID"),
+                "1000000006",
+            )
+            self.assertEqual(
+                (move.amount_untaxed, move.amount_tax, move.amount_total), amounts
+            )
+        tree = etree.fromstring(credit_issue.xml_content.encode())
+        expected = {
+            "./{*}BillingReference/{*}InvoiceDocumentReference/{*}ID": original.name,
+            "./{*}BillingReference/{*}InvoiceDocumentReference/{*}IssueDate": (
+                "2026-01-31"
+            ),
+            "./{*}DiscrepancyResponse/{*}ResponseCode": "DL8.61.1.C",
+            "./{*}LegalMonetaryTotal/{*}TaxExclusiveAmount": "40.00",
+            "./{*}TaxTotal/{*}TaxAmount": "2.00",
+            "./{*}LegalMonetaryTotal/{*}TaxInclusiveAmount": "42.00",
+            "./{*}LegalMonetaryTotal/{*}PrepaidAmount": "42.00",
+            "./{*}LegalMonetaryTotal/{*}PayableAmount": "0.00",
+        }
+        for path, value in expected.items():
+            self.assertEqual(tree.findtext(path), value, path)
+        _logger.info(
+            "UAE_SUMMARY_SELFBILL_INPUTS=%s",
+            json.dumps(
+                {
+                    "invoice_xml": original_issue.xml_content,
+                    "credit_xml": credit_issue.xml_content,
+                    "invoice_report": original_report,
+                    "credit_report": credit_report,
+                }
+            ),
+        )
+        inboxes = (
+            self.env["l10n_ae.edi.inbox"]
+            .with_user(supplier_manager)
+            .with_company(self.env.company)
+        )
+        received = []
+        for move, issue, type_code, end_date, amounts in documents:
+            content = issue.xml_content.encode()
+            inbox = inboxes.receive_controlled_document(
+                receiver_binding.id, "summary-selfbilling-" + type_code, content
+            )
+            self.assertTrue(inbox.action_process(), inbox.diagnostic)
+            sale = inbox.move_id
+            self.assertFalse(sale.env.su)
+            self.assertEqual(
+                (sale.move_type, sale.state),
+                ("out_refund" if move == credit else "out_invoice", "draft"),
+            )
+            self.assertEqual(sale.company_id, self.env.company)
+            self.assertEqual(sale.partner_id, self.buyer.partner_id)
+            self.assertEqual(sale.l10n_ae_selfbilling_agreement_id, supplier_agreement)
+            self.assertEqual(sale.l10n_ae_received_process, "selfbilling")
+            self.assertTrue(sale.l10n_ae_summary and sale.l10n_ae_received_document)
+            self.assertEqual(str(sale.l10n_ae_invoicing_period_start), "2026-01-01")
+            self.assertEqual(str(sale.l10n_ae_invoicing_period_end), end_date)
+            self.assertEqual(sale.l10n_ae_billing_frequency_code, "MTH")
+            self.assertEqual(
+                (sale.amount_untaxed, sale.amount_tax, sale.amount_total), amounts
+            )
+            self.assertFalse(sale.l10n_ae_transmission_ids)
+            self.assertEqual(inbox.original_xml.content, content)
+            self.assertEqual(inbox.xml_hash, hashlib.sha256(content).hexdigest())
+            received.append(
+                (inbox, sale, sale.line_ids.sorted("id").read(ledger_fields))
+            )
+        refund = received[1][1]
+        self.assertEqual(refund.reversed_entry_id, received[0][1])
+        self.assertEqual(refund.l10n_ae_credit_reason, "DL8.61.1.C")
+        self.assertEqual(
+            (
+                refund.l10n_ae_received_prepaid_amount,
+                refund.l10n_ae_received_payable_amount,
+            ),
+            (42, 0),
+        )
+        local_term.l10n_ae_billing_frequency_code = "DLY"
+        for inbox, sale, ledger in received:
+            with self.assertRaisesRegex(UserError, "received UAE"):
+                sale.write({"l10n_ae_invoicing_period_end": "2026-02-28"})
+            replay = inboxes.receive_controlled_document(
+                receiver_binding.id, inbox.remote_id, inbox.original_xml.content
+            )
+            self.assertEqual(replay, inbox)
+            self.assertTrue(replay.action_process(), replay.diagnostic)
+            self.assertEqual(replay.move_id, sale)
+            self.assertEqual(sale.l10n_ae_billing_frequency_code, "MTH")
+            self.assertEqual(sale.line_ids.sorted("id").read(ledger_fields), ledger)
+            self.assertFalse(sale.l10n_ae_transmission_ids)
+        for move in (original, credit):
+            move.action_l10n_ae_prepare()
+            self.assertTrue(move.validate_l10n_ae_pint()["valid"])
+        self.assertEqual(original_issue.read(immutable), original_frozen)
+        self.assertEqual(credit_issue.read(immutable), credit_frozen)
+        self.assertEqual(
+            [
+                move.line_ids.sorted("id").read(ledger_fields)
+                for move in (original, credit)
+            ],
+            buyer_ledgers,
+        )
+        self.assertFalse(original_issue.attempt_ids or credit_issue.attempt_ids)
+        self.assertFalse(original_issue.event_ids or credit_issue.event_ids)
+
     def test_received_frequency_absence_is_not_inferred_from_local_term(self):
         source, _agreement, binding = self._selfbilling_fixture()
         source.l10n_ae_billing_frequency_code = False
