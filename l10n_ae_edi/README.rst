@@ -127,15 +127,17 @@ wizard and review partial lines. The resulting vendor credit retains the
 self-billing journal, official reason and original reference. Select an
 eligible **UAE Self-Billing Agreement** again for its company,
 commercial supplier and date: the wizard does not copy it. Missing
-agreement blocks check/post with automatic preparation before
-UUID/transmission. Supplier contacts use their commercial entity's
+agreement blocks Check and Prepare before UUID/transmission. With
+automatic preparation enabled, native Post retains posted accounting and
+records Requires Review. Supplier contacts use their commercial entity's
 agreements. Confirm the purchase fiscal position and line VAT with the
 tax specialist if the expected tax is unavailable.
 
 For a reviewed commercial sale or credit, select **Commercial Document**
 and the taxes determined by the tax specialist. With the PINT addon
 installed, **IBR-122-AE** blocks standard VAT at **Check UAE Data** and
-automatic preparation on **Confirm**, retaining the draft without a
+**Prepare UAE E-Invoice**. Automatic preparation on **Confirm** retains
+posted accounting and records **Requires Review**, without a
 UUID/transmission. Review the line taxes; the system does not change
 their classification automatically. Formal PINT validation remains
 required. The native credit wizard preserves the commercial category,
@@ -213,6 +215,16 @@ writes are refused. Select the actual product in invoice lines before
 preparation. Later product edits do not rewrite the prepared payload,
 XML or ledger. See scenario47 in the PT/EN manuals for the service
 journey and its controlled-provider limits.
+
+For a reviewed **Summary Invoice**, either explicit **Invoice Period
+Start** or **Invoice Period End** owns the period as a unit. Neither is
+filled from accounting dates. If both are absent and native deferred
+line dates are installed, complete dated economic lines can supply the
+enclosing interval. These dates become protected fiscal sources after
+preparation. Other native deferral dates remain ordinary accounting
+data. Due dates and payment installments never supply missing period
+dates. See scenario63 in the PT/EN manuals for the Enterprise journey;
+Community supports explicit reviewed header dates.
 
 Known issues / Roadmap
 ======================
