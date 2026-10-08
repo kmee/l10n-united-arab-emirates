@@ -36,6 +36,83 @@ class TestUaeInvoicePreparation(AccountTestInvoicingCommon):
             {"name": "Synthetic sandbox ASP"}
         )
 
+    def test_native_batch_frequency_defaults_preserve_explicit_values_and_clears(self):
+        term = self.env["account.payment.term"].create(
+            {
+                "name": "Synthetic monthly term for API defaults",
+                "company_id": self.env.company.id,
+                "l10n_ae_billing_frequency_code": "MTH",
+                "line_ids": [Command.create({"value": "percent", "value_amount": 100})],
+            }
+        )
+        manager_moves = self.env["account.move"].with_user(self.simple_accountman)
+        self.assertFalse(manager_moves.env.su)
+        purchase_journal = self.company_data["default_journal_purchase"]
+        purchase_journal.is_self_billing = True
+        rows = []
+        expected = ["MTH", "WKY", False, False] * 4
+        for move_type in ("out_invoice", "out_refund", "in_invoice", "in_refund"):
+            for explicit in (
+                {},
+                {"l10n_ae_billing_frequency_code": "WKY"},
+                {"l10n_ae_billing_frequency_code": False},
+                {"l10n_ae_billing_frequency_code": None},
+            ):
+                rows.append(
+                    {
+                        "move_type": move_type,
+                        "partner_id": self.partner_a.id,
+                        "invoice_payment_term_id": term.id,
+                        "journal_id": (
+                            purchase_journal.id
+                            if move_type.startswith("in_")
+                            else self.company_data["default_journal_sale"].id
+                        ),
+                        **explicit,
+                    }
+                )
+        batch = manager_moves.create(rows)
+        self.assertEqual(
+            [move.l10n_ae_billing_frequency_code for move in batch], expected
+        )
+        self.assertTrue(
+            all(
+                move.is_self_billing
+                for move in batch
+                if move.move_type.startswith("in_")
+            )
+        )
+        self.assertFalse(batch.mapped("l10n_ae_transmission_ids"))
+        self.assertFalse(any(move.l10n_ae_invoicing_period_start for move in batch))
+        self.assertFalse(any(move.l10n_ae_invoicing_period_end for move in batch))
+        for default in ("WKY", False, None):
+            move = manager_moves.with_context(
+                default_move_type="out_invoice",
+                default_invoice_payment_term_id=term.id,
+                default_l10n_ae_billing_frequency_code=default,
+            ).create({"partner_id": self.partner_a.id})
+            self.assertEqual(move.l10n_ae_billing_frequency_code, default or False)
+        for move_type in ("out_receipt", "in_receipt", "entry"):
+            move = manager_moves.create(
+                {
+                    "move_type": move_type,
+                    "partner_id": self.partner_a.id,
+                    "invoice_payment_term_id": term.id,
+                }
+            )
+            self.assertFalse(move.l10n_ae_billing_frequency_code)
+        self.partner_a.property_payment_term_id = term
+        inherited = manager_moves.with_context(default_move_type="out_invoice").create(
+            {"partner_id": self.partner_a.id}
+        )
+        self.assertEqual(inherited.invoice_payment_term_id, term)
+        self.assertEqual(inherited.l10n_ae_billing_frequency_code, "MTH")
+        term.l10n_ae_billing_frequency_code = "DLY"
+        self.assertEqual(
+            [move.l10n_ae_billing_frequency_code for move in batch], expected
+        )
+        self.assertEqual(inherited.l10n_ae_billing_frequency_code, "MTH")
+
     def test_frozen_invoice_line_price_cannot_be_rewritten(self):
         invoice = self.init_invoice(
             "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
