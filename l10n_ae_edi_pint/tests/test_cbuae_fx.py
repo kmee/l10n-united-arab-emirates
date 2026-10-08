@@ -118,6 +118,7 @@ class TestUaeCbuaeFx(TestUaeInvoiceXml):
         self.assertEqual(provenance["source"]["http_status"], 200)
         self.assertTrue(provenance["source"]["retrieved_at"])
         self.assertTrue(provenance["source"]["complete"])
+        self.assertEqual(invoice.l10n_ae_effective_cbuae_review_id, review)
         selected = next(f for f in evidence["rates"] if f["currency"] == "USD")
         self.assertEqual(selected["record_id"], review.native_rate_id.id)
         self.assertTrue(invoice.validate_l10n_ae_pint()["valid"])
@@ -133,6 +134,7 @@ class TestUaeCbuaeFx(TestUaeInvoiceXml):
         invoice.action_l10n_ae_prepare()
         self.assertEqual(invoice.preview_l10n_ae_pint(), frozen[0]["xml_content"])
         self.assertEqual(issue.read(immutable), frozen)
+        self.assertEqual(invoice.l10n_ae_effective_cbuae_review_id, review)
         self.assertEqual(invoice.line_ids.sorted("id").read(ledger_fields), ledger)
 
     def test_changed_aed_anchor_requires_review_without_aborting_post(self):
@@ -324,6 +326,7 @@ class TestUaeCbuaeFx(TestUaeInvoiceXml):
         self.assertEqual(following.amount_tax_signed, 20)
         self.assertEqual(following.amount_total_signed, 420)
         self.assertFalse(exchange["evidence"].get("cbuae_provenance"))
+        self.assertFalse(following.l10n_ae_effective_cbuae_review_id)
         self.assertFalse(exchange["evidence"]["cbuae_origin_verified"])
         self.assertEqual(
             next(f for f in exchange["evidence"]["rates"] if f["currency"] == "USD")[
