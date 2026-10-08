@@ -3,11 +3,13 @@
 import hashlib
 import time
 from datetime import date
+from typing import ClassVar
 
 import requests
 from lxml import html
 
-from odoo import fields, models
+from odoo import api, fields, models
+from odoo.exceptions import UserError
 from odoo.tools.binary import BinaryBytes
 
 
@@ -46,9 +48,67 @@ class CbuaePublication(models.Model):
     publication_date = fields.Date(readonly=True, copy=False)
     quotes = fields.Json(readonly=True, copy=False)
 
+    _captured_fields: ClassVar[set[str]] = {
+        "state",
+        "diagnostic",
+        "source_url",
+        "retrieved_at",
+        "http_status",
+        "content_type",
+        "source_body",
+        "source_sha256",
+        "publication_stamp",
+        "publication_date",
+        "quotes",
+    }
+
+    @api.model_create_multi
+    def create(self, vals_list):
+        prepared = []
+        for values in vals_list:
+            if self._captured_fields.intersection(values):
+                raise UserError(self.env._("Use the CBUAE capture action."))
+            vals = dict(values)
+            vals.update(dict.fromkeys(self._captured_fields, False))
+            vals["state"] = "draft"
+            prepared.append(vals)
+        return super().create(prepared)
+
+    def write(self, vals):
+        self.check_access("write")
+        self._lock_capture()
+        if self._captured_fields.union({"company_id"}).intersection(vals):
+            raise UserError(
+                self.env._("CBUAE capture identity and evidence are protected.")
+            )
+        if self.filtered(lambda record: record.state != "draft"):
+            raise UserError(self.env._("Completed CBUAE acquisitions are immutable."))
+        return super().write(vals)
+
+    @api.ondelete(at_uninstall=False)
+    def _unlink_except_completed_capture(self):
+        self.check_access("unlink")
+        self._lock_capture()
+        if self.filtered(lambda record: record.state != "draft"):
+            raise UserError(
+                self.env._("Completed CBUAE acquisitions cannot be deleted.")
+            )
+
+    def _lock_capture(self):
+        if self:
+            self.env.cr.execute(
+                "SELECT id FROM l10n_ae_cbuae_publication WHERE id IN %s "
+                "ORDER BY id FOR UPDATE",
+                (tuple(self.ids),),
+            )
+            self.invalidate_recordset()
+
     def action_capture(self):
         self.ensure_one()
         self.check_access("write")
+        self._lock_capture()
+        if self.state != "draft":
+            return True
         url = (
             "https://centralbank.ae/umbraco/Surface/Exchange/"
             "GetExchangeRateAllCurrencyDate?dateTime="
@@ -61,7 +121,7 @@ class CbuaePublication(models.Model):
             tree = html.fromstring(body)
             stamp_nodes = tree.xpath("//p[contains(., 'Last updated:')]")
             if not tree.xpath("//table/tbody/tr"):
-                self.write(
+                super().write(
                     {
                         "state": "error",
                         "diagnostic": self.env._(
@@ -92,7 +152,7 @@ class CbuaePublication(models.Model):
                 for row in tree.xpath("//table/tbody/tr")
             }
             same_date = publication_date == self.requested_date
-            self.write(
+            super().write(
                 {
                     "state": "captured" if same_date else "error",
                     "diagnostic": False
