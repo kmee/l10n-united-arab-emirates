@@ -1672,6 +1672,14 @@ class AccountMove(models.Model):
             "rates": rate_facts,
         }
         if cbuae_provenance:
+            if self.currency_id.name != cbuae_provenance["currency_code"]:
+                raise UserError(
+                    self.env._(
+                        "The selected currency code differs from its reviewed "
+                        "CBUAE import. Review the currency identity before "
+                        "preparing this e-invoice."
+                    )
+                )
             reviewed_rate = Decimal(cbuae_provenance["quote_literal"]).quantize(
                 quantum, rounding=ROUND_HALF_UP
             )
