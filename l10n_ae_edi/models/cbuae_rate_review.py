@@ -2,9 +2,10 @@
 # License AGPL-3.0 or later (https://www.gnu.org/licenses/agpl).
 from datetime import timedelta
 from decimal import Decimal
+from typing import ClassVar
 
-from odoo import fields, models
-from odoo.exceptions import UserError
+from odoo import api, fields, models
+from odoo.exceptions import AccessError, UserError
 
 
 class CbuaeRateReview(models.Model):
@@ -32,16 +33,94 @@ class CbuaeRateReview(models.Model):
     anchor_rate_id = fields.Many2one("res.currency.rate", readonly=True, copy=False)
     anchor_rate_literal = fields.Char(readonly=True, copy=False)
 
+    _import_fields: ClassVar[set[str]] = {
+        "native_rate_id",
+        "quote_literal",
+        "reviewed_by",
+        "reviewed_at",
+        "anchor_rate_id",
+        "anchor_rate_literal",
+    }
+
+    def _check_actor(self, operation):
+        principal = self.env.user.with_user(self.env.uid)
+        if (
+            not principal.active
+            or principal.share
+            or not principal.has_group("account.group_account_manager")
+        ):
+            raise AccessError(
+                self.env._("An active CBUAE company reviewer is required.")
+            )
+        self.with_user(self.env.uid).check_access(operation)
+        for review in self:
+            review.publication_id._check_actor("read")
+
+    def _lock_review(self):
+        if self:
+            self.env.cr.execute(
+                "SELECT id FROM l10n_ae_cbuae_rate_review WHERE id IN %s "
+                "ORDER BY id FOR UPDATE",
+                (tuple(self.ids),),
+            )
+            self.invalidate_recordset()
+
+    @api.model_create_multi
+    def create(self, vals_list):
+        self._check_actor("create")
+        prepared = []
+        for values in vals_list:
+            if self._import_fields.union({"company_id"}).intersection(values):
+                raise UserError(self.env._("Use the reviewed CBUAE import action."))
+            vals = dict(values)
+            publication_id = vals.get(
+                "publication_id",
+                self.default_get(["publication_id"]).get("publication_id"),
+            )
+            publication = (
+                self.env["l10n_ae.cbuae.publication"].browse(publication_id).exists()
+            )
+            if len(publication) != 1:
+                raise UserError(self.env._("Select a retained CBUAE publication."))
+            publication._check_actor("read")
+            vals["publication_id"] = publication.id
+            vals.update(dict.fromkeys(self._import_fields, False))
+            prepared.append(vals)
+        return super().create(prepared)
+
+    def write(self, vals):
+        self._check_actor("write")
+        self._lock_review()
+        self._check_actor("write")
+        if self._import_fields.union({"company_id"}).intersection(vals):
+            raise UserError(self.env._("CBUAE import evidence is protected."))
+        if self.filtered("native_rate_id"):
+            raise UserError(self.env._("Imported CBUAE reviews are immutable."))
+        if "publication_id" in vals:
+            publication = (
+                self.env["l10n_ae.cbuae.publication"]
+                .browse(vals["publication_id"])
+                .exists()
+            )
+            if len(publication) != 1:
+                raise UserError(self.env._("Select a retained CBUAE publication."))
+            publication._check_actor("read")
+        return super().write(vals)
+
+    @api.ondelete(at_uninstall=False)
+    def _unlink_except_imported_review(self):
+        self._check_actor("unlink")
+        self._lock_review()
+        self._check_actor("unlink")
+        if self.filtered("native_rate_id"):
+            raise UserError(self.env._("Imported CBUAE reviews cannot be deleted."))
+
     def action_import(self):
         self.ensure_one()
-        self.with_user(self.env.uid).check_access("write")
+        self._check_actor("write")
+        self._lock_review()
+        self._check_actor("write")
         publication = self.publication_id
-        publication._check_actor("read")
-        self.env.cr.execute(
-            "SELECT id FROM l10n_ae_cbuae_rate_review WHERE id = %s FOR UPDATE",
-            (self.id,),
-        )
-        self.invalidate_recordset()
         if self.native_rate_id:
             return True
         company = self.company_id
