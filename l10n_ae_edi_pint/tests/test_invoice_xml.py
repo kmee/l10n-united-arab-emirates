@@ -7753,7 +7753,11 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         ]
         for move_type, category, root, code, process in cases:
             with self.subTest(code=code):
-                invoice = self.init_invoice(move_type, amounts=[100], taxes=False)
+                # Codes380/381 require an actual item VAT category outside E/O
+                # (IBR-151-AE). Keep commercial/self-billing type boundaries
+                # separate; a taxless380/381 is not a valid positive fixture.
+                taxes = self.tax_sale_a if code in {"380", "381"} else False
+                invoice = self.init_invoice(move_type, amounts=[100], taxes=taxes)
                 if process == "selfbilling":
                     invoice.journal_id.is_self_billing = True
                     invoice.l10n_ae_selfbilling_agreement_id = self.env[
@@ -7773,6 +7777,14 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
                 invoice.action_post()
                 xml = etree.fromstring(invoice.preview_l10n_ae_pint().encode())
                 self.assertEqual(etree.QName(xml).localname, root)
+                if code in {"380", "381"}:
+                    self.assertEqual(
+                        xml.findtext(
+                            f"cac:{root}Line/cac:Item/cac:ClassifiedTaxCategory/cbc:ID",
+                            namespaces=NS,
+                        ),
+                        "S",
+                    )
                 node = "InvoiceTypeCode" if root == "Invoice" else "CreditNoteTypeCode"
                 self.assertEqual(xml.findtext(f"cbc:{node}", namespaces=NS), code)
                 self.assertEqual(
