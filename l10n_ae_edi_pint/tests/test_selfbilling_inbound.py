@@ -12,6 +12,10 @@ from odoo.tests import tagged
 from odoo.tests.common import new_test_user
 
 from odoo.addons.account.tests.common import AccountTestInvoicingCommon
+from odoo.addons.l10n_ae_edi.tests.common import (
+    CONTROLLED_CAPABILITIES,
+    review_controlled_binding,
+)
 
 _logger = logging.getLogger(__name__)
 
@@ -39,12 +43,17 @@ class TestUaeSelfBillingInbound(AccountTestInvoicingCommon):
             company_id=self.env.company.id,
             company_ids=[Command.set(self.env.company.ids)],
         )
-        source_binding = self.env["l10n_ae.edi.binding"].create(
-            {
-                "name": "Synthetic Summary self-billing issuer",
-                "company_id": self.buyer.id,
-                "fiscal_uuid_policy": "controlled_local",
-            }
+        source_binding = review_controlled_binding(
+            self.env["l10n_ae.edi.binding"].create(
+                {
+                    "name": "Synthetic Summary self-billing issuer",
+                    "company_id": self.buyer.id,
+                    "fiscal_uuid_policy": "controlled_local",
+                }
+            ),
+            buyer_manager,
+            capabilities=CONTROLLED_CAPABILITIES,
+            note="Synthetic reviewed controlled contract fixture.",
         )
         local_term = self.env["account.payment.term"].create(
             {
@@ -527,12 +536,17 @@ class TestUaeSelfBillingInbound(AccountTestInvoicingCommon):
             company_id=self.buyer.id,
             company_ids=[Command.set(self.buyer.ids)],
         )
-        source_binding = self.env["l10n_ae.edi.binding"].create(
-            {
-                "name": "Synthetic Margin self-billing issuer",
-                "company_id": self.buyer.id,
-                "fiscal_uuid_policy": "controlled_local",
-            }
+        source_binding = review_controlled_binding(
+            self.env["l10n_ae.edi.binding"].create(
+                {
+                    "name": "Synthetic Margin self-billing issuer",
+                    "company_id": self.buyer.id,
+                    "fiscal_uuid_policy": "controlled_local",
+                }
+            ),
+            buyer_manager,
+            capabilities=CONTROLLED_CAPABILITIES,
+            note="Synthetic reviewed controlled contract fixture.",
         )
         receiver_binding = self.env["l10n_ae.edi.binding"].create(
             {"name": "Synthetic Margin supplier receiver"}
@@ -754,11 +768,16 @@ class TestUaeSelfBillingInbound(AccountTestInvoicingCommon):
                 "l10n_ae_edi_additional_vat_rate": 5,
             }
         )
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {
-                "name": "Synthetic margin credit issuer",
-                "fiscal_uuid_policy": "controlled_local",
-            }
+        binding = review_controlled_binding(
+            self.env["l10n_ae.edi.binding"].create(
+                {
+                    "name": "Synthetic margin credit issuer",
+                    "fiscal_uuid_policy": "controlled_local",
+                }
+            ),
+            self.simple_accountman,
+            capabilities=CONTROLLED_CAPABILITIES,
+            note="Synthetic reviewed controlled contract fixture.",
         )
         original = self.init_invoice(
             "out_invoice",
@@ -947,11 +966,16 @@ class TestUaeSelfBillingInbound(AccountTestInvoicingCommon):
                 "l10n_ae_edi_additional_vat_rate": 5,
             }
         )
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {
-                "name": "Synthetic margin credit issuer",
-                "fiscal_uuid_policy": "controlled_local",
-            }
+        binding = review_controlled_binding(
+            self.env["l10n_ae.edi.binding"].create(
+                {
+                    "name": "Synthetic margin credit issuer",
+                    "fiscal_uuid_policy": "controlled_local",
+                }
+            ),
+            self.simple_accountman,
+            capabilities=CONTROLLED_CAPABILITIES,
+            note="Synthetic reviewed controlled contract fixture.",
         )
         original = self.init_invoice(
             "out_invoice",

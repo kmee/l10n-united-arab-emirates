@@ -19,6 +19,10 @@ from odoo.tests import Form, tagged
 from odoo.tests.common import new_test_user
 
 from odoo.addons.account.tests.common import AccountTestInvoicingCommon
+from odoo.addons.l10n_ae_edi.tests.common import (
+    CONTROLLED_CAPABILITIES,
+    review_controlled_binding,
+)
 
 from ..tools.validation import OfflinePintValidator
 
@@ -43,11 +47,19 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
                 "generate_deferred_revenue_entries_method": "manual",
             }
         )
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {
-                "name": "Synthetic native Summary partial credit",
-                "fiscal_uuid_policy": "controlled_local",
-            }
+        binding = review_controlled_binding(
+            self.env["l10n_ae.edi.binding"].create(
+                {
+                    "name": "Synthetic native Summary partial credit",
+                    "fiscal_uuid_policy": "controlled_local",
+                }
+            ),
+            self.simple_accountman,
+            capabilities=CONTROLLED_CAPABILITIES,
+            note=(
+                "Synthetic controlled contract for test_summary_native_partial_credit"
+                "_preserves_reviewed_period_and_original."
+            ),
         )
         term = self.env["account.payment.term"].create(
             {
@@ -226,11 +238,19 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
                 "generate_deferred_revenue_entries_method": "manual",
             }
         )
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {
-                "name": "Synthetic explicit period precedence",
-                "fiscal_uuid_policy": "controlled_local",
-            }
+        binding = review_controlled_binding(
+            self.env["l10n_ae.edi.binding"].create(
+                {
+                    "name": "Synthetic explicit period precedence",
+                    "fiscal_uuid_policy": "controlled_local",
+                }
+            ),
+            self.simple_accountman,
+            capabilities=CONTROLLED_CAPABILITIES,
+            note=(
+                "Synthetic controlled contract for test_explicit_period_wins_without_"
+                "merging_native_dates_or_freezing_them."
+            ),
         )
         # Explicit dates are independent reviewed facts. Do not combine one
         # explicit endpoint with the accounting recognition period in January.
@@ -349,11 +369,19 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
                 ],
             }
         )
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {
-                "name": "Synthetic native Summary period",
-                "fiscal_uuid_policy": "controlled_local",
-            }
+        binding = review_controlled_binding(
+            self.env["l10n_ae.edi.binding"].create(
+                {
+                    "name": "Synthetic native Summary period",
+                    "fiscal_uuid_policy": "controlled_local",
+                }
+            ),
+            self.simple_accountman,
+            capabilities=CONTROLLED_CAPABILITIES,
+            note=(
+                "Synthetic controlled contract for test_summary_uses_native_deferred_"
+                "lines_without_inventing_due_dates."
+            ),
         )
         invoice = self.init_invoice(
             "out_invoice", amounts=[100, 200], taxes=self.tax_sale_a
@@ -464,11 +492,19 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         # journeys. These are ordinary AED380 representations, not all flows.
         codes = ("DLY", "WKY", "Q15", "Q45", "Q60", "QTR", "YRL", "HYR")
         self.env.company.l10n_ae_edi_auto_prepare = False
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {
-                "name": "Synthetic published billing codes",
-                "fiscal_uuid_policy": "controlled_local",
-            }
+        binding = review_controlled_binding(
+            self.env["l10n_ae.edi.binding"].create(
+                {
+                    "name": "Synthetic published billing codes",
+                    "fiscal_uuid_policy": "controlled_local",
+                }
+            ),
+            self.simple_accountman,
+            capabilities=CONTROLLED_CAPABILITIES,
+            note=(
+                "Synthetic controlled contract for test_other_eight_reviewed_term_cod"
+                "es_render_valid_code_only_periods."
+            ),
         )
         for code in codes:
             with self.subTest(code=code):
@@ -579,8 +615,19 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
                 ],
             }
         )
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {"name": "Synthetic API monthly", "fiscal_uuid_policy": "controlled_local"}
+        binding = review_controlled_binding(
+            self.env["l10n_ae.edi.binding"].create(
+                {
+                    "name": "Synthetic API monthly",
+                    "fiscal_uuid_policy": "controlled_local",
+                }
+            ),
+            self.simple_accountman,
+            capabilities=CONTROLLED_CAPABILITIES,
+            note=(
+                "Synthetic controlled contract for test_api_invoice_defaults_reviewed"
+                "_monthly_term_without_supply_dates."
+            ),
         )
         invoice = (
             self.env["account.move"]
@@ -666,11 +713,19 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         self.assertFalse(issue.attempt_ids or issue.event_ids)
 
     def test_other_billing_frequency_reviews_explanation_without_replacing_terms(self):
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {
-                "name": "Synthetic other billing cadence",
-                "fiscal_uuid_policy": "controlled_local",
-            }
+        binding = review_controlled_binding(
+            self.env["l10n_ae.edi.binding"].create(
+                {
+                    "name": "Synthetic other billing cadence",
+                    "fiscal_uuid_policy": "controlled_local",
+                }
+            ),
+            self.simple_accountman,
+            capabilities=CONTROLLED_CAPABILITIES,
+            note=(
+                "Synthetic controlled contract for test_other_billing_frequency_revie"
+                "ws_explanation_without_replacing_terms."
+            ),
         )
         self.env.company.write(
             {
@@ -787,11 +842,19 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
             form.l10n_ae_billing_frequency_code = "MTH"
             term = form.save()
         self.assertEqual(term.company_id, self.env.company)
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {
-                "name": "Synthetic monthly billing frequency",
-                "fiscal_uuid_policy": "controlled_local",
-            }
+        binding = review_controlled_binding(
+            self.env["l10n_ae.edi.binding"].create(
+                {
+                    "name": "Synthetic monthly billing frequency",
+                    "fiscal_uuid_policy": "controlled_local",
+                }
+            ),
+            self.simple_accountman,
+            capabilities=CONTROLLED_CAPABILITIES,
+            note=(
+                "Synthetic controlled contract for test_reviewed_monthly_term_preserv"
+                "es_supply_period_and_native_due_date."
+            ),
         )
         invoice = self.init_invoice(
             "out_invoice", amounts=[100], taxes=self.tax_sale_a
@@ -906,11 +969,19 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
                 "allow_out_payment": True,
             }
         )
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {
-                "name": "Synthetic reviewed nine-code representation",
-                "fiscal_uuid_policy": "controlled_local",
-            }
+        binding = review_controlled_binding(
+            self.env["l10n_ae.edi.binding"].create(
+                {
+                    "name": "Synthetic reviewed nine-code representation",
+                    "fiscal_uuid_policy": "controlled_local",
+                }
+            ),
+            self.simple_accountman,
+            capabilities=CONTROLLED_CAPABILITIES,
+            note=(
+                "Synthetic controlled contract for test_reviewed_nine_codes_render_na"
+                "tive_aed_invoice_instructions."
+            ),
         )
         immutable = [
             "payload",
@@ -1029,11 +1100,19 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         )[:1]
         self.assertTrue(method)
         self.assertFalse(method.l10n_ae_edi_payment_means_code)
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {
-                "name": "Synthetic unclassified native instrument",
-                "fiscal_uuid_policy": "controlled_local",
-            }
+        binding = review_controlled_binding(
+            self.env["l10n_ae.edi.binding"].create(
+                {
+                    "name": "Synthetic unclassified native instrument",
+                    "fiscal_uuid_policy": "controlled_local",
+                }
+            ),
+            self.simple_accountman,
+            capabilities=CONTROLLED_CAPABILITIES,
+            note=(
+                "Synthetic controlled contract for test_unclassified_native_method_re"
+                "views_then_freezes_online_service."
+            ),
         )
         self.env.company.write(
             {"l10n_ae_edi_auto_prepare": True, "l10n_ae_edi_binding_id": binding.id}
@@ -1140,11 +1219,19 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
             line.l10n_ae_edi_payment_means_code = "20"
         self.assertEqual(method.code, "manual")
         self.assertEqual(method.payment_type, "inbound")
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {
-                "name": "Synthetic reviewed cheque instruction",
-                "fiscal_uuid_policy": "controlled_local",
-            }
+        binding = review_controlled_binding(
+            self.env["l10n_ae.edi.binding"].create(
+                {
+                    "name": "Synthetic reviewed cheque instruction",
+                    "fiscal_uuid_policy": "controlled_local",
+                }
+            ),
+            self.simple_accountman,
+            capabilities=CONTROLLED_CAPABILITIES,
+            note=(
+                "Synthetic controlled contract for test_reviewed_native_journal_chequ"
+                "e_instruction_preserves_original."
+            ),
         )
         invoice = self.init_invoice(
             "out_invoice", amounts=[100], taxes=self.tax_sale_a
@@ -1219,11 +1306,19 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
 
     def test_no_selected_method_freezes_undefined_payment_instruction(self):
         self.env.company.l10n_ae_edi_auto_prepare = False
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {
-                "name": "Synthetic undefined payment instruction",
-                "fiscal_uuid_policy": "controlled_local",
-            }
+        binding = review_controlled_binding(
+            self.env["l10n_ae.edi.binding"].create(
+                {
+                    "name": "Synthetic undefined payment instruction",
+                    "fiscal_uuid_policy": "controlled_local",
+                }
+            ),
+            self.simple_accountman,
+            capabilities=CONTROLLED_CAPABILITIES,
+            note=(
+                "Synthetic controlled contract for test_no_selected_method_freezes_un"
+                "defined_payment_instruction."
+            ),
         )
         account = self.env["res.partner.bank"].create(
             {
@@ -1334,11 +1429,19 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
                 "allow_out_payment": True,
             }
         )
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {
-                "name": "Synthetic credit recipient review",
-                "fiscal_uuid_policy": "controlled_local",
-            }
+        binding = review_controlled_binding(
+            self.env["l10n_ae.edi.binding"].create(
+                {
+                    "name": "Synthetic credit recipient review",
+                    "fiscal_uuid_policy": "controlled_local",
+                }
+            ),
+            self.simple_accountman,
+            capabilities=CONTROLLED_CAPABILITIES,
+            note=(
+                "Synthetic controlled contract for test_native_partial_credit_freezes"
+                "_selected_customer_payment_account."
+            ),
         )
         self.env.company.l10n_ae_edi_binding_id = binding
         original = self.init_invoice(
@@ -1483,11 +1586,19 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
             lambda line: line.code == "manual"
         )[:1]
         self.assertTrue(method)
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {
-                "name": "Synthetic native transfer instruction",
-                "fiscal_uuid_policy": "controlled_local",
-            }
+        binding = review_controlled_binding(
+            self.env["l10n_ae.edi.binding"].create(
+                {
+                    "name": "Synthetic native transfer instruction",
+                    "fiscal_uuid_policy": "controlled_local",
+                }
+            ),
+            self.simple_accountman,
+            capabilities=CONTROLLED_CAPABILITIES,
+            note=(
+                "Synthetic controlled contract for test_native_transfer_requires_reci"
+                "pient_account_and_freezes_review."
+            ),
         )
         self.env.company.write(
             {"l10n_ae_edi_auto_prepare": True, "l10n_ae_edi_binding_id": binding.id}
@@ -1599,11 +1710,19 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
             lambda line: line.code == "manual"
         )[:1]
         self.assertTrue(method)
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {
-                "name": "Synthetic native cash instruction",
-                "fiscal_uuid_policy": "controlled_local",
-            }
+        binding = review_controlled_binding(
+            self.env["l10n_ae.edi.binding"].create(
+                {
+                    "name": "Synthetic native cash instruction",
+                    "fiscal_uuid_policy": "controlled_local",
+                }
+            ),
+            self.simple_accountman,
+            capabilities=CONTROLLED_CAPABILITIES,
+            note=(
+                "Synthetic controlled contract for test_native_cash_method_freezes_in"
+                "struction_and_preserves_ledger."
+            ),
         )
         invoice = self.init_invoice(
             "out_invoice", amounts=[100], taxes=self.tax_sale_a
@@ -1760,8 +1879,16 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         )
 
     def test_prepared_native_send_refuses_explicit_conflicting_format(self):
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {"name": "Synthetic native-send conflict sandbox"}
+        binding = review_controlled_binding(
+            self.env["l10n_ae.edi.binding"].create(
+                {"name": "Synthetic native-send conflict sandbox"}
+            ),
+            self.simple_accountman,
+            capabilities=CONTROLLED_CAPABILITIES,
+            note=(
+                "Synthetic controlled contract for test_prepared_native_send_refuses_"
+                "explicit_conflicting_format."
+            ),
         )
         invoice = self.init_invoice(
             "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
@@ -1976,8 +2103,16 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
                 "ubl_cii_tax_category_code": "O",
             }
         )
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {"name": "Synthetic emitted corpus sandbox"}
+        binding = review_controlled_binding(
+            self.env["l10n_ae.edi.binding"].create(
+                {"name": "Synthetic emitted corpus sandbox"}
+            ),
+            self.simple_accountman,
+            capabilities=CONTROLLED_CAPABILITIES,
+            note=(
+                "Synthetic controlled contract for test_emitted_commercial_invoice_pr"
+                "eserves_package_across_official_cycle."
+            ),
         )
         invoice = self.init_invoice("out_invoice", amounts=[100], taxes=tax)
         invoice.write(
@@ -2151,8 +2286,16 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
                 "ubl_cii_tax_category_code": "O",
             }
         )
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {"name": "Synthetic new-document version cycle"}
+        binding = review_controlled_binding(
+            self.env["l10n_ae.edi.binding"].create(
+                {"name": "Synthetic new-document version cycle"}
+            ),
+            self.simple_accountman,
+            capabilities=CONTROLLED_CAPABILITIES,
+            note=(
+                "Synthetic controlled contract for test_new_commercial_issue_keeps_b_"
+                "package_when_deployment_returns_to_a."
+            ),
         )
         packages = [
             ("kmee-pint-ae-1.0.3-ubl-2.1", "/opt/uae-addons/.runtime/normative-1.0.3"),
@@ -2346,8 +2489,16 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
     def test_emitted_tax_credit_exposes_real_official_payment_rule_delta(self):
         # Independent worksheet, no reconciliation: original100+5=105;
         # partial consideration credit40+2=42. Both stay fully open.
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {"name": "Synthetic emitted tax-credit corpus"}
+        binding = review_controlled_binding(
+            self.env["l10n_ae.edi.binding"].create(
+                {"name": "Synthetic emitted tax-credit corpus"}
+            ),
+            self.simple_accountman,
+            capabilities=CONTROLLED_CAPABILITIES,
+            note=(
+                "Synthetic controlled contract for test_emitted_tax_credit_exposes_re"
+                "al_official_payment_rule_delta."
+            ),
         )
         packages = [
             ("kmee-pint-ae-1.0.3-ubl-2.1", "/opt/uae-addons/.runtime/normative-1.0.3"),
@@ -3249,8 +3400,16 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
             "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
         )
         invoice.l10n_ae_fiscal_uuid = "16161616-1616-4616-8616-161616161616"
-        invoice.l10n_ae_binding_id = self.env["l10n_ae.edi.binding"].create(
-            {"name": "Company-sensitive pinned package review"}
+        invoice.l10n_ae_binding_id = review_controlled_binding(
+            self.env["l10n_ae.edi.binding"].create(
+                {"name": "Company-sensitive pinned package review"}
+            ),
+            self.simple_accountman,
+            capabilities=CONTROLLED_CAPABILITIES,
+            note=(
+                "Synthetic controlled contract for test_pinned_identity_cache_respect"
+                "s_selected_company_access."
+            ),
         )
         invoice.action_l10n_ae_prepare()
         other_company = self.env["res.company"].create(
@@ -3281,8 +3440,16 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         self.assertFalse(unprepared.l10n_ae_normative_ruleset)
         self.assertFalse(unprepared.l10n_ae_normative_manifest_sha256)
         invoice.l10n_ae_fiscal_uuid = "15151515-1515-4515-8515-151515151515"
-        invoice.l10n_ae_binding_id = self.env["l10n_ae.edi.binding"].create(
-            {"name": "Native pinned package review"}
+        invoice.l10n_ae_binding_id = review_controlled_binding(
+            self.env["l10n_ae.edi.binding"].create(
+                {"name": "Native pinned package review"}
+            ),
+            self.simple_accountman,
+            capabilities=CONTROLLED_CAPABILITIES,
+            note=(
+                "Synthetic controlled contract for test_native_form_preserves_readonl"
+                "y_prepared_package_identity."
+            ),
         )
         invoice.action_l10n_ae_prepare()
         issue = invoice.l10n_ae_transmission_id
@@ -3315,8 +3482,16 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
             "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
         )
         invoice.l10n_ae_fiscal_uuid = "13131313-1313-4313-8313-131313131313"
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {"name": "Synthetic normative rollback binding"}
+        binding = review_controlled_binding(
+            self.env["l10n_ae.edi.binding"].create(
+                {"name": "Synthetic normative rollback binding"}
+            ),
+            self.simple_accountman,
+            capabilities=CONTROLLED_CAPABILITIES,
+            note=(
+                "Synthetic controlled contract for test_prepared_packages_survive_con"
+                "figuration_swap_and_rollback."
+            ),
         )
         invoice.l10n_ae_binding_id = binding
         invoice.action_l10n_ae_prepare()
@@ -3376,8 +3551,16 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
             "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
         )
         invoice.l10n_ae_fiscal_uuid = "12121212-1212-4212-8212-121212121212"
-        invoice.l10n_ae_binding_id = self.env["l10n_ae.edi.binding"].create(
-            {"name": "Synthetic pinned normative package"}
+        invoice.l10n_ae_binding_id = review_controlled_binding(
+            self.env["l10n_ae.edi.binding"].create(
+                {"name": "Synthetic pinned normative package"}
+            ),
+            self.simple_accountman,
+            capabilities=CONTROLLED_CAPABILITIES,
+            note=(
+                "Synthetic controlled contract for test_preparation_pins_normative_id"
+                "entity_before_transport."
+            ),
         )
         invoice.action_l10n_ae_prepare()
         issue = invoice.l10n_ae_transmission_id
@@ -3420,9 +3603,17 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
             {
                 "l10n_ae_exports": True,
                 "l10n_ae_fiscal_uuid": "bbbbbbbf-3333-4333-8333-333333333333",
-                "l10n_ae_binding_id": self.env["l10n_ae.edi.binding"]
-                .create({"name": "Integrated foreign export buyer"})
-                .id,
+                "l10n_ae_binding_id": review_controlled_binding(
+                    self.env["l10n_ae.edi.binding"].create(
+                        {"name": "Integrated foreign export buyer"}
+                    ),
+                    self.simple_accountman,
+                    capabilities=CONTROLLED_CAPABILITIES,
+                    note=(
+                        "Synthetic controlled contract for test_export_with_an_existi"
+                        "ng_foreign_participant_keeps_exchange."
+                    ),
+                ).id,
             }
         )
         invoice.action_l10n_ae_prepare()
@@ -3464,9 +3655,17 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
                 "l10n_ae_buyer_onboarding_review_date": "2019-01-01",
                 "l10n_ae_buyer_onboarding_review_reference": "SYNTH-EXPORT-VAT-REVIEW",
                 "l10n_ae_fiscal_uuid": "bbbbbbbf-4444-4444-8444-444444444444",
-                "l10n_ae_binding_id": self.env["l10n_ae.edi.binding"]
-                .create({"name": "Explicit foreign VAT review"})
-                .id,
+                "l10n_ae_binding_id": review_controlled_binding(
+                    self.env["l10n_ae.edi.binding"].create(
+                        {"name": "Explicit foreign VAT review"}
+                    ),
+                    self.simple_accountman,
+                    capabilities=CONTROLLED_CAPABILITIES,
+                    note=(
+                        "Synthetic controlled contract for test_explicit_foreign_vat_"
+                        "is_preserved_and_requires_formal_review."
+                    ),
+                ).id,
             }
         )
         tree = etree.fromstring(invoice.preview_l10n_ae_pint().encode())
@@ -3587,9 +3786,17 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
                 "l10n_ae_buyer_onboarding_review_date": "2019-01-01",
                 "l10n_ae_buyer_onboarding_review_reference": "SYNTH-EXPORT-REVIEW",
                 "l10n_ae_fiscal_uuid": "bbbbbbbf-2222-4222-8222-222222222222",
-                "l10n_ae_binding_id": self.env["l10n_ae.edi.binding"]
-                .create({"name": "Reviewed foreign export destination"})
-                .id,
+                "l10n_ae_binding_id": review_controlled_binding(
+                    self.env["l10n_ae.edi.binding"].create(
+                        {"name": "Reviewed foreign export destination"}
+                    ),
+                    self.simple_accountman,
+                    capabilities=CONTROLLED_CAPABILITIES,
+                    note=(
+                        "Synthetic controlled contract for test_prepared_export99_pre"
+                        "serves_review_foreign_identity_and_free_zone."
+                    ),
+                ).id,
             }
         )
         invoice.action_l10n_ae_prepare()
@@ -3708,8 +3915,16 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
     ):
         self.env.company.l10n_ae_edi_auto_prepare = True
         self.partner_a.routing_endpoint = False
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {"name": "Reviewed export recipient"}
+        binding = review_controlled_binding(
+            self.env["l10n_ae.edi.binding"].create(
+                {"name": "Reviewed export recipient"}
+            ),
+            self.simple_accountman,
+            capabilities=CONTROLLED_CAPABILITIES,
+            note=(
+                "Synthetic controlled contract for test_export99_posts_but_requires_d"
+                "ated_recipient_review_before_preparation."
+            ),
         )
         for declaration, date, reference, diagnostic in (
             (False, False, False, "Review the export buyer.*Peppol status"),
@@ -3843,9 +4058,17 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
                 "l10n_ae_disclosed_agent": True,
                 "l10n_ae_principal_id": "100000000300003",
                 "l10n_ae_fiscal_uuid": "aaaaaaaf-2222-4222-8222-222222222222",
-                "l10n_ae_binding_id": self.env["l10n_ae.edi.binding"]
-                .create({"name": "Disclosed agent preserved issue"})
-                .id,
+                "l10n_ae_binding_id": review_controlled_binding(
+                    self.env["l10n_ae.edi.binding"].create(
+                        {"name": "Disclosed agent preserved issue"}
+                    ),
+                    self.simple_accountman,
+                    capabilities=CONTROLLED_CAPABILITIES,
+                    note=(
+                        "Synthetic controlled contract for test_prepared_disclosed_ag"
+                        "ent_issue_freezes_principal_and_scenario."
+                    ),
+                ).id,
             }
         )
         invoice.action_l10n_ae_prepare()
@@ -4039,9 +4262,17 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
                 "l10n_ae_free_zone": True,
                 "l10n_ae_beneficiary_id": "1000000004",
                 "l10n_ae_fiscal_uuid": "aaaaaaaf-7777-4777-8777-777777777777",
-                "l10n_ae_binding_id": self.env["l10n_ae.edi.binding"]
-                .create({"name": "Prepared agent source for native reversal"})
-                .id,
+                "l10n_ae_binding_id": review_controlled_binding(
+                    self.env["l10n_ae.edi.binding"].create(
+                        {"name": "Prepared agent source for native reversal"}
+                    ),
+                    self.simple_accountman,
+                    capabilities=CONTROLLED_CAPABILITIES,
+                    note=(
+                        "Synthetic controlled contract for test_native_agent_credit_r"
+                        "etains_original_identifiers_as_reviewable_defaults."
+                    ),
+                ).id,
             }
         )
         original.action_l10n_ae_prepare()
@@ -8000,11 +8231,19 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         )
 
     def test_check_refuses_missing_or_unknown_emirate_without_blocking_post(self):
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {
-                "name": "Synthetic emirate review",
-                "fiscal_uuid_policy": "controlled_local",
-            }
+        binding = review_controlled_binding(
+            self.env["l10n_ae.edi.binding"].create(
+                {
+                    "name": "Synthetic emirate review",
+                    "fiscal_uuid_policy": "controlled_local",
+                }
+            ),
+            self.simple_accountman,
+            capabilities=CONTROLLED_CAPABILITIES,
+            note=(
+                "Synthetic controlled contract for test_check_refuses_missing_or_unkn"
+                "own_emirate_without_blocking_post."
+            ),
         )
         self.env.company.write(
             {"l10n_ae_edi_auto_prepare": True, "l10n_ae_edi_binding_id": binding.id}
@@ -8066,11 +8305,19 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
     def test_native_uae_states_emit_and_freeze_pint_emirate_codes(
         self,
     ):
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {
-                "name": "Synthetic reviewed emirate addresses",
-                "fiscal_uuid_policy": "controlled_local",
-            }
+        binding = review_controlled_binding(
+            self.env["l10n_ae.edi.binding"].create(
+                {
+                    "name": "Synthetic reviewed emirate addresses",
+                    "fiscal_uuid_policy": "controlled_local",
+                }
+            ),
+            self.simple_accountman,
+            capabilities=CONTROLLED_CAPABILITIES,
+            note=(
+                "Synthetic controlled contract for test_native_uae_states_emit_and_fr"
+                "eeze_pint_emirate_codes."
+            ),
         )
         cases = (
             ("base.state_ae_az", "AUH", "Abu Dhabi"),
@@ -8169,11 +8416,19 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
                 "rate": 1 / 3.6725,
             }
         )
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {
-                "name": "Synthetic native FX form",
-                "fiscal_uuid_policy": "controlled_local",
-            }
+        binding = review_controlled_binding(
+            self.env["l10n_ae.edi.binding"].create(
+                {
+                    "name": "Synthetic native FX form",
+                    "fiscal_uuid_policy": "controlled_local",
+                }
+            ),
+            self.simple_accountman,
+            capabilities=CONTROLLED_CAPABILITIES,
+            note=(
+                "Synthetic controlled contract for test_native_form_shows_unverified_"
+                "effective_aed_quote_and_frozen_source."
+            ),
         )
         invoice = self.init_invoice(
             "out_invoice", amounts=[100], taxes=self.tax_sale_a, currency=usd
@@ -8227,11 +8482,19 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
                 "rate": 1 / 3.6725,
             }
         )
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {
-                "name": "Synthetic dated native FX",
-                "fiscal_uuid_policy": "controlled_local",
-            }
+        binding = review_controlled_binding(
+            self.env["l10n_ae.edi.binding"].create(
+                {
+                    "name": "Synthetic dated native FX",
+                    "fiscal_uuid_policy": "controlled_local",
+                }
+            ),
+            self.simple_accountman,
+            capabilities=CONTROLLED_CAPABILITIES,
+            note=(
+                "Synthetic controlled contract for test_usd_invoice_prepares_from_dat"
+                "ed_native_rates_without_manual_quote."
+            ),
         )
         invoice = self.init_invoice(
             "out_invoice", amounts=[100], taxes=self.tax_sale_a, currency=usd
@@ -8304,11 +8567,19 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
 
     def test_uae_vat_point_date_is_reviewed_in_native_invoice_form(self):
         self.env.company.l10n_ae_edi_auto_prepare = False
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {
-                "name": "Synthetic native VAT point date review",
-                "fiscal_uuid_policy": "controlled_local",
-            }
+        binding = review_controlled_binding(
+            self.env["l10n_ae.edi.binding"].create(
+                {
+                    "name": "Synthetic native VAT point date review",
+                    "fiscal_uuid_policy": "controlled_local",
+                }
+            ),
+            self.simple_accountman,
+            capabilities=CONTROLLED_CAPABILITIES,
+            note=(
+                "Synthetic controlled contract for test_uae_vat_point_date_is_reviewe"
+                "d_in_native_invoice_form."
+            ),
         )
         invoice = self.init_invoice(
             "out_invoice", amounts=[100], taxes=self.tax_sale_a
@@ -8395,11 +8666,19 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
                 "rate": 1 / 3.6725,
             }
         )
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {
-                "name": "Synthetic manual quote source date review",
-                "fiscal_uuid_policy": "controlled_local",
-            }
+        binding = review_controlled_binding(
+            self.env["l10n_ae.edi.binding"].create(
+                {
+                    "name": "Synthetic manual quote source date review",
+                    "fiscal_uuid_policy": "controlled_local",
+                }
+            ),
+            self.simple_accountman,
+            capabilities=CONTROLLED_CAPABILITIES,
+            note=(
+                "Synthetic controlled contract for test_future_manual_quote_posts_in_"
+                "review_until_date_repaired."
+            ),
         )
         self.env.company.write(
             {"l10n_ae_edi_auto_prepare": True, "l10n_ae_edi_binding_id": binding.id}
@@ -8591,9 +8870,15 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
                 "l10n_ae_tax_exchange_date": invoice.invoice_date,
                 "l10n_ae_tax_exchange_source": "SYNTH-FROZEN-QUOTE",
                 "l10n_ae_fiscal_uuid": "ddddddda-2222-4222-8222-222222222222",
-                "l10n_ae_binding_id": self.env["l10n_ae.edi.binding"]
-                .create({"name": "FX quote"})
-                .id,
+                "l10n_ae_binding_id": review_controlled_binding(
+                    self.env["l10n_ae.edi.binding"].create({"name": "FX quote"}),
+                    self.simple_accountman,
+                    capabilities=CONTROLLED_CAPABILITIES,
+                    note=(
+                        "Synthetic controlled contract for test_prepared_foreign_invo"
+                        "ice_freezes_exchange_value_date_source_and_xml."
+                    ),
+                ).id,
             }
         )
         invoice.action_l10n_ae_prepare()
@@ -8646,9 +8931,15 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
                 "l10n_ae_tax_exchange_date": invoice.invoice_date,
                 "l10n_ae_tax_exchange_source": "SYNTH-WRONG-DIRECTION",
                 "l10n_ae_fiscal_uuid": "ddddddda-3333-4333-8333-333333333333",
-                "l10n_ae_binding_id": self.env["l10n_ae.edi.binding"]
-                .create({"name": "FX mismatch"})
-                .id,
+                "l10n_ae_binding_id": review_controlled_binding(
+                    self.env["l10n_ae.edi.binding"].create({"name": "FX mismatch"}),
+                    self.simple_accountman,
+                    capabilities=CONTROLLED_CAPABILITIES,
+                    note=(
+                        "Synthetic controlled contract for test_an_inverted_quote_can"
+                        "not_prepare_a_different_aed_accounting_obligation."
+                    ),
+                ).id,
             }
         )
         with self.assertRaisesRegex(UserError, "AED.*accounting"):
@@ -8789,11 +9080,19 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
                 "rate": 1 / 0.90,
             }
         )
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {
-                "name": "Synthetic EUR discount ledger binding",
-                "company_id": company.id,
-            }
+        binding = review_controlled_binding(
+            self.env["l10n_ae.edi.binding"].create(
+                {
+                    "name": "Synthetic EUR discount ledger binding",
+                    "company_id": company.id,
+                }
+            ),
+            self.simple_accountman,
+            capabilities=CONTROLLED_CAPABILITIES,
+            note=(
+                "Synthetic controlled contract for test_usd_line_discount_preserves_e"
+                "ur_ledger_and_reviewed_aed_quote."
+            ),
         )
         manager_moves = (
             self.env["account.move"]
@@ -9072,9 +9371,17 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
                 "l10n_ae_tax_exchange_date": invoice.invoice_date,
                 "l10n_ae_tax_exchange_source": "SYNTH-FRACTIONAL-ROUNDING-REVIEW",
                 "l10n_ae_fiscal_uuid": "ddddddda-6666-4666-8666-666666666666",
-                "l10n_ae_binding_id": self.env["l10n_ae.edi.binding"]
-                .create({"name": "Fractional VAT review"})
-                .id,
+                "l10n_ae_binding_id": review_controlled_binding(
+                    self.env["l10n_ae.edi.binding"].create(
+                        {"name": "Fractional VAT review"}
+                    ),
+                    self.simple_accountman,
+                    capabilities=CONTROLLED_CAPABILITIES,
+                    note=(
+                        "Synthetic controlled contract for test_fractional_usd_vat_di"
+                        "vergence_requires_review_without_a_rounding_patch."
+                    ),
+                ).id,
             }
         )
         original_totals = (invoice.amount_total, invoice.amount_tax_signed)
@@ -9266,11 +9573,19 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
             invoice.action_l10n_ae_validate_pint()
 
     def test_controlled_preparation_assigns_one_uuid_without_preseeded_identity(self):
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {
-                "name": "Explicit UUID simulation",
-                "fiscal_uuid_policy": "controlled_local",
-            }
+        binding = review_controlled_binding(
+            self.env["l10n_ae.edi.binding"].create(
+                {
+                    "name": "Explicit UUID simulation",
+                    "fiscal_uuid_policy": "controlled_local",
+                }
+            ),
+            self.simple_accountman,
+            capabilities=CONTROLLED_CAPABILITIES,
+            note=(
+                "Synthetic controlled contract for test_controlled_preparation_assign"
+                "s_one_uuid_without_preseeded_identity."
+            ),
         )
         invoice = self.init_invoice(
             "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
@@ -9324,14 +9639,20 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
                 "l10n_ae_tax_exchange_rate": "0.272294",
                 "l10n_ae_tax_exchange_date": invoice.invoice_date,
                 "l10n_ae_tax_exchange_source": "SYNTH-WRONG-DIRECTION",
-                "l10n_ae_binding_id": self.env["l10n_ae.edi.binding"]
-                .create(
-                    {
-                        "name": "UUID failure simulation",
-                        "fiscal_uuid_policy": "controlled_local",
-                    }
-                )
-                .id,
+                "l10n_ae_binding_id": review_controlled_binding(
+                    self.env["l10n_ae.edi.binding"].create(
+                        {
+                            "name": "UUID failure simulation",
+                            "fiscal_uuid_policy": "controlled_local",
+                        }
+                    ),
+                    self.simple_accountman,
+                    capabilities=CONTROLLED_CAPABILITIES,
+                    note=(
+                        "Synthetic controlled contract for test_failed_controlled_pre"
+                        "paration_leaves_no_assigned_uuid."
+                    ),
+                ).id,
             }
         )
         # Odoo assertRaises adds a savepoint; catch directly to verify the action
@@ -9525,8 +9846,14 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         self.assertFalse(credit.l10n_ae_transmission_id)
 
     def test_prepared_credit_protects_its_allocated_original_references(self):
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {"name": "Allocated credit test"}
+        binding = review_controlled_binding(
+            self.env["l10n_ae.edi.binding"].create({"name": "Allocated credit test"}),
+            self.simple_accountman,
+            capabilities=CONTROLLED_CAPABILITIES,
+            note=(
+                "Synthetic controlled contract for test_prepared_credit_protects_its_"
+                "allocated_original_references."
+            ),
         )
         original = self.init_invoice(
             "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
@@ -9692,11 +10019,19 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         self.assertTrue(report["valid"], report)
 
     def test_commercial_standard_vat_posts_but_is_refused_before_freezing(self):
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {
-                "name": "Invalid commercial simulation",
-                "fiscal_uuid_policy": "controlled_local",
-            }
+        binding = review_controlled_binding(
+            self.env["l10n_ae.edi.binding"].create(
+                {
+                    "name": "Invalid commercial simulation",
+                    "fiscal_uuid_policy": "controlled_local",
+                }
+            ),
+            self.simple_accountman,
+            capabilities=CONTROLLED_CAPABILITIES,
+            note=(
+                "Synthetic controlled contract for test_commercial_standard_vat_posts"
+                "_but_is_refused_before_freezing."
+            ),
         )
         self.env.company.write(
             {"l10n_ae_edi_auto_prepare": True, "l10n_ae_edi_binding_id": binding.id}
@@ -9762,11 +10097,19 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
             }
         )
         original = self.init_invoice("out_invoice", amounts=[100], taxes=outside_scope)
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {
-                "name": "Commercial credit local simulation",
-                "fiscal_uuid_policy": "controlled_local",
-            }
+        binding = review_controlled_binding(
+            self.env["l10n_ae.edi.binding"].create(
+                {
+                    "name": "Commercial credit local simulation",
+                    "fiscal_uuid_policy": "controlled_local",
+                }
+            ),
+            self.simple_accountman,
+            capabilities=CONTROLLED_CAPABILITIES,
+            note=(
+                "Synthetic controlled contract for _assert_native_partial_commercial_"
+                "credit."
+            ),
         )
         original.write(
             {
@@ -9903,11 +10246,19 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
     def test_publisher_posting_batch_isolates_missing_agreement_evidence_and_repairs(
         self,
     ):
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {
-                "name": "Synthetic publisher batch sandbox",
-                "fiscal_uuid_policy": "controlled_local",
-            }
+        binding = review_controlled_binding(
+            self.env["l10n_ae.edi.binding"].create(
+                {
+                    "name": "Synthetic publisher batch sandbox",
+                    "fiscal_uuid_policy": "controlled_local",
+                }
+            ),
+            self.simple_accountman,
+            capabilities=CONTROLLED_CAPABILITIES,
+            note=(
+                "Synthetic controlled contract for test_publisher_posting_batch_isola"
+                "tes_missing_agreement_evidence_and_repairs."
+            ),
         )
         self.env.company.write(
             {
@@ -10105,9 +10456,17 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
             {
                 "l10n_ae_selfbilling_agreement_id": agreement.id,
                 "l10n_ae_fiscal_uuid": "ddddddda-3333-4333-8333-333333333333",
-                "l10n_ae_binding_id": self.env["l10n_ae.edi.binding"]
-                .create({"name": "Synthetic self-billing sandbox"})
-                .id,
+                "l10n_ae_binding_id": review_controlled_binding(
+                    self.env["l10n_ae.edi.binding"].create(
+                        {"name": "Synthetic self-billing sandbox"}
+                    ),
+                    self.simple_accountman,
+                    capabilities=CONTROLLED_CAPABILITIES,
+                    note=(
+                        "Synthetic controlled contract for _selfbilling_bill_with_agr"
+                        "eement."
+                    ),
+                ).id,
             }
         )
         return bill, agreement
@@ -10354,9 +10713,17 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
             {
                 "l10n_ae_deemed_supply": True,
                 "l10n_ae_fiscal_uuid": "aaaaaaae-2222-4222-8222-222222222222",
-                "l10n_ae_binding_id": self.env["l10n_ae.edi.binding"]
-                .create({"name": "Deemed supply destination"})
-                .id,
+                "l10n_ae_binding_id": review_controlled_binding(
+                    self.env["l10n_ae.edi.binding"].create(
+                        {"name": "Deemed supply destination"}
+                    ),
+                    self.simple_accountman,
+                    capabilities=CONTROLLED_CAPABILITIES,
+                    note=(
+                        "Synthetic controlled contract for test_prepared_deemed_suppl"
+                        "y_preserves_effective_and_master_destinations."
+                    ),
+                ).id,
             }
         )
         invoice.action_l10n_ae_prepare()
@@ -10547,9 +10914,17 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
                 "l10n_ae_buyer_onboarding_review_date": "2019-01-01",
                 "l10n_ae_buyer_onboarding_review_reference": "SYNTH-BUYER98-REVIEW",
                 "l10n_ae_fiscal_uuid": "aaaaaaaf-2222-4222-8222-222222222222",
-                "l10n_ae_binding_id": self.env["l10n_ae.edi.binding"]
-                .create({"name": "Buyer98 reviewed destination"})
-                .id,
+                "l10n_ae_binding_id": review_controlled_binding(
+                    self.env["l10n_ae.edi.binding"].create(
+                        {"name": "Buyer98 reviewed destination"}
+                    ),
+                    self.simple_accountman,
+                    capabilities=CONTROLLED_CAPABILITIES,
+                    note=(
+                        "Synthetic controlled contract for test_prepared_buyer98_free"
+                        "zes_review_and_separate_delivery_obligation."
+                    ),
+                ).id,
             }
         )
         invoice.action_l10n_ae_prepare()
@@ -10601,9 +10976,17 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
                 "l10n_ae_buyer_onboarding_review_date": "2019-01-01",
                 "l10n_ae_buyer_onboarding_review_reference": "SYNTH-BUYER98-HTML",
                 "l10n_ae_fiscal_uuid": "aaaaaaaf-4444-4444-8444-444444444444",
-                "l10n_ae_binding_id": self.env["l10n_ae.edi.binding"]
-                .create({"name": "Buyer98 conventional presentation"})
-                .id,
+                "l10n_ae_binding_id": review_controlled_binding(
+                    self.env["l10n_ae.edi.binding"].create(
+                        {"name": "Buyer98 conventional presentation"}
+                    ),
+                    self.simple_accountman,
+                    capabilities=CONTROLLED_CAPABILITIES,
+                    note=(
+                        "Synthetic controlled contract for test_prepared_buyer98_pres"
+                        "erves_native_invoice_html_after_buyer_changes."
+                    ),
+                ).id,
             }
         )
         invoice.action_l10n_ae_prepare()
@@ -10651,9 +11034,17 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         original.write(
             {
                 "l10n_ae_fiscal_uuid": "aaaaaaaf-5555-4555-8555-555555555555",
-                "l10n_ae_binding_id": self.env["l10n_ae.edi.binding"]
-                .create({"name": "Preserved PDF invoice association"})
-                .id,
+                "l10n_ae_binding_id": review_controlled_binding(
+                    self.env["l10n_ae.edi.binding"].create(
+                        {"name": "Preserved PDF invoice association"}
+                    ),
+                    self.simple_accountman,
+                    capabilities=CONTROLLED_CAPABILITIES,
+                    note=(
+                        "Synthetic controlled contract for test_pdf_issue_cannot_be_a"
+                        "ttached_to_another_invoice."
+                    ),
+                ).id,
             }
         )
         original.action_l10n_ae_prepare()
@@ -10677,9 +11068,17 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         original.write(
             {
                 "l10n_ae_fiscal_uuid": "aaaaaaaf-6666-4666-8666-666666666666",
-                "l10n_ae_binding_id": self.env["l10n_ae.edi.binding"]
-                .create({"name": "Frozen XML invoice association"})
-                .id,
+                "l10n_ae_binding_id": review_controlled_binding(
+                    self.env["l10n_ae.edi.binding"].create(
+                        {"name": "Frozen XML invoice association"}
+                    ),
+                    self.simple_accountman,
+                    capabilities=CONTROLLED_CAPABILITIES,
+                    note=(
+                        "Synthetic controlled contract for test_xml_issue_cannot_be_a"
+                        "ttached_to_another_invoice."
+                    ),
+                ).id,
             }
         )
         original.action_l10n_ae_prepare()
@@ -10718,9 +11117,17 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
                 "l10n_ae_buyer_onboarding_review_date": "2019-01-01",
                 "l10n_ae_buyer_onboarding_review_reference": "SYNTH-FROZEN-BUYER98",
                 "l10n_ae_fiscal_uuid": "aaaaaaaf-3333-4333-8333-333333333333",
-                "l10n_ae_binding_id": self.env["l10n_ae.edi.binding"]
-                .create({"name": "Protected buyer98 review"})
-                .id,
+                "l10n_ae_binding_id": review_controlled_binding(
+                    self.env["l10n_ae.edi.binding"].create(
+                        {"name": "Protected buyer98 review"}
+                    ),
+                    self.simple_accountman,
+                    capabilities=CONTROLLED_CAPABILITIES,
+                    note=(
+                        "Synthetic controlled contract for test_prepared_buyer98_revi"
+                        "ew_cannot_be_rewritten_by_an_administrator."
+                    ),
+                ).id,
             }
         )
         invoice.action_l10n_ae_prepare()
@@ -10764,9 +11171,17 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
             {
                 "l10n_ae_deemed_supply": True,
                 "l10n_ae_fiscal_uuid": "aaaaaaae-3333-4333-8333-333333333333",
-                "l10n_ae_binding_id": self.env["l10n_ae.edi.binding"]
-                .create({"name": "Deemed reporting-only obligations"})
-                .id,
+                "l10n_ae_binding_id": review_controlled_binding(
+                    self.env["l10n_ae.edi.binding"].create(
+                        {"name": "Deemed reporting-only obligations"}
+                    ),
+                    self.simple_accountman,
+                    capabilities=CONTROLLED_CAPABILITIES,
+                    note=(
+                        "Synthetic controlled contract for test_prepared_deemed_suppl"
+                        "y_declares_reporting_only_without_c3_obligations."
+                    ),
+                ).id,
             }
         )
         invoice.action_l10n_ae_prepare()
@@ -10793,8 +11208,16 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
             .with_context(allowed_company_ids=[self.env.company.id])
         )
         self.assertFalse(invoice.env.su)
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {"name": "Synthetic Summary reversed-period review"}
+        binding = review_controlled_binding(
+            self.env["l10n_ae.edi.binding"].create(
+                {"name": "Synthetic Summary reversed-period review"}
+            ),
+            self.simple_accountman,
+            capabilities=CONTROLLED_CAPABILITIES,
+            note=(
+                "Synthetic controlled contract for test_reversed_summary_period_is_re"
+                "fused_before_an_issue_is_frozen."
+            ),
         )
         invoice.write(
             {
@@ -10851,8 +11274,16 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
             .with_context(allowed_company_ids=[self.env.company.id])
         )
         self.assertFalse(invoice.env.su)
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {"name": "Synthetic Summary missing-period review"}
+        binding = review_controlled_binding(
+            self.env["l10n_ae.edi.binding"].create(
+                {"name": "Synthetic Summary missing-period review"}
+            ),
+            self.simple_accountman,
+            capabilities=CONTROLLED_CAPABILITIES,
+            note=(
+                "Synthetic controlled contract for test_summary_without_period_is_ref"
+                "used_before_an_issue_is_frozen."
+            ),
         )
         invoice.write(
             {
@@ -10904,8 +11335,16 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         )
 
     def test_native_cancel_does_not_implicitly_correct_a_prepared_queued_issue(self):
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {"name": "Synthetic native Cancel sandbox"}
+        binding = review_controlled_binding(
+            self.env["l10n_ae.edi.binding"].create(
+                {"name": "Synthetic native Cancel sandbox"}
+            ),
+            self.simple_accountman,
+            capabilities=CONTROLLED_CAPABILITIES,
+            note=(
+                "Synthetic controlled contract for test_native_cancel_does_not_implic"
+                "itly_correct_a_prepared_queued_issue."
+            ),
         )
         invoice = self.init_invoice(
             "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
@@ -10922,8 +11361,16 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         self.assertFalse(original.attempt_ids)
 
     def test_native_reset_rolls_back_queued_history_when_accounting_refuses_batch(self):
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {"name": "Synthetic native Reset accounting lock sandbox"}
+        binding = review_controlled_binding(
+            self.env["l10n_ae.edi.binding"].create(
+                {"name": "Synthetic native Reset accounting lock sandbox"}
+            ),
+            self.simple_accountman,
+            capabilities=CONTROLLED_CAPABILITIES,
+            note=(
+                "Synthetic controlled contract for test_native_reset_rolls_back_queue"
+                "d_history_when_accounting_refuses_batch."
+            ),
         )
         invoices = self.env["account.move"]
         originals = []
@@ -10952,11 +11399,19 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
             self.assertFalse(issue.attempt_ids)
 
     def test_native_reset_preserves_queued_original_and_prepares_next_revision(self):
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {
-                "name": "Synthetic ordinary native Reset sandbox",
-                "fiscal_uuid_policy": "controlled_local",
-            }
+        binding = review_controlled_binding(
+            self.env["l10n_ae.edi.binding"].create(
+                {
+                    "name": "Synthetic ordinary native Reset sandbox",
+                    "fiscal_uuid_policy": "controlled_local",
+                }
+            ),
+            self.simple_accountman,
+            capabilities=CONTROLLED_CAPABILITIES,
+            note=(
+                "Synthetic controlled contract for test_native_reset_preserves_queued"
+                "_original_and_prepares_next_revision."
+            ),
         )
         operator = new_test_user(
             self.env,
@@ -11361,8 +11816,16 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         journal = self.env["account.journal"].search(
             [("company_id", "=", company.id), ("type", "=", "sale")], limit=1
         )
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {"name": "Synthetic summary invoice period"}
+        binding = review_controlled_binding(
+            self.env["l10n_ae.edi.binding"].create(
+                {"name": "Synthetic summary invoice period"}
+            ),
+            self.simple_accountman,
+            capabilities=CONTROLLED_CAPABILITIES,
+            note=(
+                "Synthetic controlled contract for test_summary_tax_invoice_serialize"
+                "s_reviewed_invoice_period."
+            ),
         )
         invoice = manager_moves.create(
             {
@@ -11551,8 +12014,16 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
             (("2019-01-01", False), (False, "2019-01-31")), start=1
         ):
             with self.subTest(start=start, end=end):
-                binding = self.env["l10n_ae.edi.binding"].create(
-                    {"name": f"Synthetic one-ended summary period {index}"}
+                binding = review_controlled_binding(
+                    self.env["l10n_ae.edi.binding"].create(
+                        {"name": f"Synthetic one-ended summary period {index}"}
+                    ),
+                    self.simple_accountman,
+                    capabilities=CONTROLLED_CAPABILITIES,
+                    note=(
+                        "Synthetic controlled contract for test_summary_tax_invoice_s"
+                        "erializes_single_reviewed_period_endpoint."
+                    ),
                 )
                 invoice = manager_moves.create(
                     {
@@ -11724,9 +12195,17 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
                 "l10n_ae_free_zone": True,
                 "l10n_ae_beneficiary_id": "1000000003",
                 "l10n_ae_fiscal_uuid": "aaaaaaad-1111-4111-8111-111111111111",
-                "l10n_ae_binding_id": self.env["l10n_ae.edi.binding"]
-                .create({"name": "Free Zone snapshot"})
-                .id,
+                "l10n_ae_binding_id": review_controlled_binding(
+                    self.env["l10n_ae.edi.binding"].create(
+                        {"name": "Free Zone snapshot"}
+                    ),
+                    self.simple_accountman,
+                    capabilities=CONTROLLED_CAPABILITIES,
+                    note=(
+                        "Synthetic controlled contract for test_prepared_free_zone_do"
+                        "cument_freezes_scenario_and_beneficiary_facts."
+                    ),
+                ).id,
             }
         )
         invoice.action_l10n_ae_prepare()
@@ -11759,7 +12238,15 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         invoice = self.init_invoice(
             "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
         )
-        binding = self.env["l10n_ae.edi.binding"].create({"name": "Synthetic sandbox"})
+        binding = review_controlled_binding(
+            self.env["l10n_ae.edi.binding"].create({"name": "Synthetic sandbox"}),
+            self.simple_accountman,
+            capabilities=CONTROLLED_CAPABILITIES,
+            note=(
+                "Synthetic controlled contract for test_prepared_xml_survives_later_c"
+                "ustomer_address_changes."
+            ),
+        )
         invoice.l10n_ae_binding_id = binding
         expected = invoice.preview_l10n_ae_pint()
         invoice.action_l10n_ae_prepare()
@@ -11776,8 +12263,16 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
             "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
         )
         invoice.l10n_ae_fiscal_uuid = "22222222-2222-4222-8222-222222222222"
-        invoice.l10n_ae_binding_id = self.env["l10n_ae.edi.binding"].create(
-            {"name": "Synthetic frozen validation sandbox"}
+        invoice.l10n_ae_binding_id = review_controlled_binding(
+            self.env["l10n_ae.edi.binding"].create(
+                {"name": "Synthetic frozen validation sandbox"}
+            ),
+            self.simple_accountman,
+            capabilities=CONTROLLED_CAPABILITIES,
+            note=(
+                "Synthetic controlled contract for test_formal_validation_reads_froze"
+                "n_xml_after_master_data_changes."
+            ),
         )
         invoice.action_l10n_ae_prepare()
         self.partner_a.write({"street": False, "city": False})

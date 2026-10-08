@@ -10,6 +10,10 @@ from odoo.exceptions import UserError
 from odoo.tests import Form, tagged
 
 from odoo.addons.account.tests.common import AccountTestInvoicingCommon
+from odoo.addons.l10n_ae_edi.tests.common import (
+    CONTROLLED_CAPABILITIES,
+    review_controlled_binding,
+)
 
 NS = {
     "cbc": "urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2",
@@ -37,9 +41,14 @@ class TestUaeFiscalCategoryMatrix(AccountTestInvoicingCommon):
                     "journal_id": self.company_data["default_journal_sale"].id,
                     "invoice_date": "2019-01-01",
                     "l10n_ae_margin_scheme": True,
-                    "l10n_ae_binding_id": self.env["l10n_ae.edi.binding"]
-                    .create({"name": "Synthetic margin native VAT conflict"})
-                    .id,
+                    "l10n_ae_binding_id": review_controlled_binding(
+                        self.env["l10n_ae.edi.binding"].create(
+                            {"name": "Synthetic margin native VAT conflict"}
+                        ),
+                        self.simple_accountman,
+                        capabilities=CONTROLLED_CAPABILITIES,
+                        note="Synthetic reviewed controlled contract fixture.",
+                    ).id,
                     "invoice_line_ids": [
                         Command.create(
                             {
@@ -101,9 +110,14 @@ class TestUaeFiscalCategoryMatrix(AccountTestInvoicingCommon):
                     "journal_id": self.company_data["default_journal_sale"].id,
                     "invoice_date": "2019-01-01",
                     "l10n_ae_margin_scheme": True,
-                    "l10n_ae_binding_id": self.env["l10n_ae.edi.binding"]
-                    .create({"name": "Synthetic margin rate review"})
-                    .id,
+                    "l10n_ae_binding_id": review_controlled_binding(
+                        self.env["l10n_ae.edi.binding"].create(
+                            {"name": "Synthetic margin rate review"}
+                        ),
+                        self.simple_accountman,
+                        capabilities=CONTROLLED_CAPABILITIES,
+                        note="Synthetic reviewed controlled contract fixture.",
+                    ).id,
                     "invoice_line_ids": [
                         Command.create(
                             {
@@ -190,14 +204,17 @@ class TestUaeFiscalCategoryMatrix(AccountTestInvoicingCommon):
                     "currency_id": self.env.ref("base.AED").id,
                     "invoice_date": "2019-01-01",
                     "l10n_ae_margin_scheme": True,
-                    "l10n_ae_binding_id": self.env["l10n_ae.edi.binding"]
-                    .create(
-                        {
-                            "name": "Synthetic reviewed margin representation",
-                            "fiscal_uuid_policy": "controlled_local",
-                        }
-                    )
-                    .id,
+                    "l10n_ae_binding_id": review_controlled_binding(
+                        self.env["l10n_ae.edi.binding"].create(
+                            {
+                                "name": "Synthetic reviewed margin representation",
+                                "fiscal_uuid_policy": "controlled_local",
+                            }
+                        ),
+                        self.simple_accountman,
+                        capabilities=CONTROLLED_CAPABILITIES,
+                        note="Synthetic reviewed controlled contract fixture.",
+                    ).id,
                     "invoice_line_ids": [
                         Command.create(
                             {
@@ -308,9 +325,14 @@ class TestUaeFiscalCategoryMatrix(AccountTestInvoicingCommon):
                     "currency_id": self.env.ref("base.AED").id,
                     "invoice_date": "2019-01-01",
                     "l10n_ae_margin_scheme": True,
-                    "l10n_ae_binding_id": self.env["l10n_ae.edi.binding"]
-                    .create({"name": "Synthetic unreviewed margin classification"})
-                    .id,
+                    "l10n_ae_binding_id": review_controlled_binding(
+                        self.env["l10n_ae.edi.binding"].create(
+                            {"name": "Synthetic unreviewed margin classification"}
+                        ),
+                        self.simple_accountman,
+                        capabilities=CONTROLLED_CAPABILITIES,
+                        note="Synthetic reviewed controlled contract fixture.",
+                    ).id,
                     "invoice_line_ids": [
                         Command.create(
                             {
@@ -446,7 +468,12 @@ class TestUaeFiscalCategoryMatrix(AccountTestInvoicingCommon):
         tax_definition = tax.read(tax_fields)
         self.assertEqual(tax.amount, 0)
         self.assertFalse(tax.ubl_cii_tax_exemption_reason_code)
-        binding = self.env["l10n_ae.edi.binding"].create({"name": "Native zero tax"})
+        binding = review_controlled_binding(
+            self.env["l10n_ae.edi.binding"].create({"name": "Native zero tax"}),
+            self.simple_accountman,
+            capabilities=CONTROLLED_CAPABILITIES,
+            note="Synthetic reviewed controlled contract fixture.",
+        )
         invoice = (
             self.env["account.move"]
             .with_user(self.simple_accountman)
@@ -604,8 +631,13 @@ class TestUaeFiscalCategoryMatrix(AccountTestInvoicingCommon):
             }
         )
         self.assertTrue(tax.price_include)
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {"name": "Synthetic tax-inclusive discount"}
+        binding = review_controlled_binding(
+            self.env["l10n_ae.edi.binding"].create(
+                {"name": "Synthetic tax-inclusive discount"}
+            ),
+            self.simple_accountman,
+            capabilities=CONTROLLED_CAPABILITIES,
+            note="Synthetic reviewed controlled contract fixture.",
         )
         invoice = (
             self.env["account.move"]
@@ -728,8 +760,13 @@ class TestUaeFiscalCategoryMatrix(AccountTestInvoicingCommon):
             }
         )
         self.assertFalse(tax.price_include)
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {"name": "Synthetic full line discount"}
+        binding = review_controlled_binding(
+            self.env["l10n_ae.edi.binding"].create(
+                {"name": "Synthetic full line discount"}
+            ),
+            self.simple_accountman,
+            capabilities=CONTROLLED_CAPABILITIES,
+            note="Synthetic reviewed controlled contract fixture.",
         )
         invoice = (
             self.env["account.move"]
@@ -852,8 +889,13 @@ class TestUaeFiscalCategoryMatrix(AccountTestInvoicingCommon):
             }
         )
         self.assertTrue(tax.price_include)
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {"name": "Synthetic tax-inclusive full discount"}
+        binding = review_controlled_binding(
+            self.env["l10n_ae.edi.binding"].create(
+                {"name": "Synthetic tax-inclusive full discount"}
+            ),
+            self.simple_accountman,
+            capabilities=CONTROLLED_CAPABILITIES,
+            note="Synthetic reviewed controlled contract fixture.",
         )
         invoice = (
             self.env["account.move"]
@@ -989,8 +1031,11 @@ class TestUaeFiscalCategoryMatrix(AccountTestInvoicingCommon):
             }
         )
         self.assertFalse(tax.price_include)
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {"name": "Synthetic line charge"}
+        binding = review_controlled_binding(
+            self.env["l10n_ae.edi.binding"].create({"name": "Synthetic line charge"}),
+            self.simple_accountman,
+            capabilities=CONTROLLED_CAPABILITIES,
+            note="Synthetic reviewed controlled contract fixture.",
         )
         invoice = (
             self.env["account.move"]
@@ -1128,8 +1173,13 @@ class TestUaeFiscalCategoryMatrix(AccountTestInvoicingCommon):
                 "ubl_cii_tax_category_code": "S",
             }
         )
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {"name": "Synthetic discounted partial credit"}
+        binding = review_controlled_binding(
+            self.env["l10n_ae.edi.binding"].create(
+                {"name": "Synthetic discounted partial credit"}
+            ),
+            self.simple_accountman,
+            capabilities=CONTROLLED_CAPABILITIES,
+            note="Synthetic reviewed controlled contract fixture.",
         )
         original = (
             self.env["account.move"]
@@ -1327,8 +1377,13 @@ class TestUaeFiscalCategoryMatrix(AccountTestInvoicingCommon):
                 "ubl_cii_tax_category_code": "S",
             }
         )
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {"name": "Synthetic high precision USD"}
+        binding = review_controlled_binding(
+            self.env["l10n_ae.edi.binding"].create(
+                {"name": "Synthetic high precision USD"}
+            ),
+            self.simple_accountman,
+            capabilities=CONTROLLED_CAPABILITIES,
+            note="Synthetic reviewed controlled contract fixture.",
         )
         invoice = (
             self.env["account.move"]
@@ -1481,8 +1536,13 @@ class TestUaeFiscalCategoryMatrix(AccountTestInvoicingCommon):
                 "ubl_cii_tax_category_code": "S",
             }
         )
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {"name": "Synthetic fractional discount USD"}
+        binding = review_controlled_binding(
+            self.env["l10n_ae.edi.binding"].create(
+                {"name": "Synthetic fractional discount USD"}
+            ),
+            self.simple_accountman,
+            capabilities=CONTROLLED_CAPABILITIES,
+            note="Synthetic reviewed controlled contract fixture.",
         )
         invoice = (
             self.env["account.move"]
@@ -1645,8 +1705,13 @@ class TestUaeFiscalCategoryMatrix(AccountTestInvoicingCommon):
                 "ubl_cii_tax_category_code": "S",
             }
         )
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {"name": "Synthetic many small lines"}
+        binding = review_controlled_binding(
+            self.env["l10n_ae.edi.binding"].create(
+                {"name": "Synthetic many small lines"}
+            ),
+            self.simple_accountman,
+            capabilities=CONTROLLED_CAPABILITIES,
+            note="Synthetic reviewed controlled contract fixture.",
         )
         invoice = (
             self.env["account.move"]
@@ -1727,8 +1792,13 @@ class TestUaeFiscalCategoryMatrix(AccountTestInvoicingCommon):
                 "ubl_cii_tax_exemption_reason": "Synthetic reviewed residential lease",
             }
         )
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {"name": "Synthetic all-E tax invoice"}
+        binding = review_controlled_binding(
+            self.env["l10n_ae.edi.binding"].create(
+                {"name": "Synthetic all-E tax invoice"}
+            ),
+            self.simple_accountman,
+            capabilities=CONTROLLED_CAPABILITIES,
+            note="Synthetic reviewed controlled contract fixture.",
         )
         invoice = (
             self.env["account.move"]
@@ -1809,8 +1879,13 @@ class TestUaeFiscalCategoryMatrix(AccountTestInvoicingCommon):
                 "ubl_cii_tax_category_code": "S",
             }
         )
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {"name": "Synthetic E/O type boundary"}
+        binding = review_controlled_binding(
+            self.env["l10n_ae.edi.binding"].create(
+                {"name": "Synthetic E/O type boundary"}
+            ),
+            self.simple_accountman,
+            capabilities=CONTROLLED_CAPABILITIES,
+            note="Synthetic reviewed controlled contract fixture.",
         )
         # A line's fixed charge or an unclassified/no-tax line must not invent
         # the non-E/O item category required by the published 380/381 predicate.
@@ -1881,11 +1956,16 @@ class TestUaeFiscalCategoryMatrix(AccountTestInvoicingCommon):
             }
         )
         outside = self.env.ref(f"account.{self.env.company.id}_uae_out_of_scope")
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {
-                "name": "Synthetic commercial E/O",
-                "fiscal_uuid_policy": "controlled_local",
-            }
+        binding = review_controlled_binding(
+            self.env["l10n_ae.edi.binding"].create(
+                {
+                    "name": "Synthetic commercial E/O",
+                    "fiscal_uuid_policy": "controlled_local",
+                }
+            ),
+            self.simple_accountman,
+            capabilities=CONTROLLED_CAPABILITIES,
+            note="Synthetic reviewed controlled contract fixture.",
         )
         for kind, node, code in (
             ("out_invoice", "cbc:InvoiceTypeCode", "480"),
@@ -1974,7 +2054,12 @@ class TestUaeFiscalCategoryMatrix(AccountTestInvoicingCommon):
                 "ubl_cii_tax_exemption_reason_code": False,
             }
         )
-        binding = self.env["l10n_ae.edi.binding"].create({"name": "Synthetic E guard"})
+        binding = review_controlled_binding(
+            self.env["l10n_ae.edi.binding"].create({"name": "Synthetic E guard"}),
+            self.simple_accountman,
+            capabilities=CONTROLLED_CAPABILITIES,
+            note="Synthetic reviewed controlled contract fixture.",
+        )
         invoice = (
             self.env["account.move"]
             .with_user(self.simple_accountman)
@@ -2042,7 +2127,12 @@ class TestUaeFiscalCategoryMatrix(AccountTestInvoicingCommon):
                 self.assertEqual(tax.ubl_cii_tax_exemption_reason_code, code)
 
     def test_four_uae_exemption_codes_survive_native_emission(self):
-        binding = self.env["l10n_ae.edi.binding"].create({"name": "Synthetic E codes"})
+        binding = review_controlled_binding(
+            self.env["l10n_ae.edi.binding"].create({"name": "Synthetic E codes"}),
+            self.simple_accountman,
+            capabilities=CONTROLLED_CAPABILITIES,
+            note="Synthetic reviewed controlled contract fixture.",
+        )
         manager = (
             self.env["account.move"]
             .with_user(self.simple_accountman)
@@ -2166,7 +2256,12 @@ class TestUaeFiscalCategoryMatrix(AccountTestInvoicingCommon):
                 "ubl_cii_tax_exemption_reason": "Synthetic reviewed exempt supply",
             }
         )
-        binding = self.env["l10n_ae.edi.binding"].create({"name": "Synthetic EUR SZE"})
+        binding = review_controlled_binding(
+            self.env["l10n_ae.edi.binding"].create({"name": "Synthetic EUR SZE"}),
+            self.simple_accountman,
+            capabilities=CONTROLLED_CAPABILITIES,
+            note="Synthetic reviewed controlled contract fixture.",
+        )
         manager = (
             self.env["account.move"]
             .with_user(self.simple_accountman)

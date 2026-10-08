@@ -10,6 +10,10 @@ from odoo.exceptions import UserError
 from odoo.tests import Form, tagged
 
 from odoo.addons.account.tests.common import AccountTestInvoicingCommon
+from odoo.addons.l10n_ae_edi.tests.common import (
+    CONTROLLED_CAPABILITIES,
+    review_controlled_binding,
+)
 
 NS = {
     "cbc": "urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2",
@@ -84,11 +88,16 @@ class TestUaeProductClassification(AccountTestInvoicingCommon):
                 ],
             }
         )
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {
-                "name": "Synthetic reverse-charge sandbox",
-                "fiscal_uuid_policy": "controlled_local",
-            }
+        binding = review_controlled_binding(
+            self.env["l10n_ae.edi.binding"].create(
+                {
+                    "name": "Synthetic reverse-charge sandbox",
+                    "fiscal_uuid_policy": "controlled_local",
+                }
+            ),
+            self.simple_accountman,
+            capabilities=CONTROLLED_CAPABILITIES,
+            note="Synthetic reviewed controlled contract fixture.",
         )
         # Native product assignment selects the reviewed product's own taxes.
         product.taxes_id = tax
@@ -194,11 +203,16 @@ class TestUaeProductClassification(AccountTestInvoicingCommon):
                 "ubl_cii_tax_category_code": "AE",
             }
         )
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {
-                "name": "Synthetic manual AE sandbox",
-                "fiscal_uuid_policy": "controlled_local",
-            }
+        binding = review_controlled_binding(
+            self.env["l10n_ae.edi.binding"].create(
+                {
+                    "name": "Synthetic manual AE sandbox",
+                    "fiscal_uuid_policy": "controlled_local",
+                }
+            ),
+            self.simple_accountman,
+            capabilities=CONTROLLED_CAPABILITIES,
+            note="Synthetic reviewed controlled contract fixture.",
         )
         invoice = self.init_invoice("out_invoice", amounts=[100], taxes=tax)
         invoice.l10n_ae_binding_id = binding
@@ -297,11 +311,16 @@ class TestUaeProductClassification(AccountTestInvoicingCommon):
                 "l10n_ae_service_accounting_version": "SYNTHETIC-SAC-2026",
             }
         )
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {
-                "name": "Synthetic service classification sandbox",
-                "fiscal_uuid_policy": "controlled_local",
-            }
+        binding = review_controlled_binding(
+            self.env["l10n_ae.edi.binding"].create(
+                {
+                    "name": "Synthetic service classification sandbox",
+                    "fiscal_uuid_policy": "controlled_local",
+                }
+            ),
+            self.simple_accountman,
+            capabilities=CONTROLLED_CAPABILITIES,
+            note="Synthetic reviewed controlled contract fixture.",
         )
         invoice = self.init_invoice("out_invoice", amounts=[100], taxes=self.tax_sale_a)
         invoice.invoice_line_ids.product_id = product
@@ -385,11 +404,16 @@ class TestUaeProductClassification(AccountTestInvoicingCommon):
     def test_incomplete_classification_posts_in_review_and_repairs_without_ledger_edit(
         self,
     ):
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {
-                "name": "Synthetic classification review",
-                "fiscal_uuid_policy": "controlled_local",
-            }
+        binding = review_controlled_binding(
+            self.env["l10n_ae.edi.binding"].create(
+                {
+                    "name": "Synthetic classification review",
+                    "fiscal_uuid_policy": "controlled_local",
+                }
+            ),
+            self.simple_accountman,
+            capabilities=CONTROLLED_CAPABILITIES,
+            note="Synthetic reviewed controlled contract fixture.",
         )
         self.env.company.write(
             {"l10n_ae_edi_auto_prepare": True, "l10n_ae_edi_binding_id": binding.id}
@@ -481,8 +505,16 @@ class TestUaeProductClassification(AccountTestInvoicingCommon):
                 "l10n_ae_service_accounting_version": "SYNTHETIC-SAC-2026",
             }
         )
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {"name": "Synthetic both sandbox", "fiscal_uuid_policy": "controlled_local"}
+        binding = review_controlled_binding(
+            self.env["l10n_ae.edi.binding"].create(
+                {
+                    "name": "Synthetic both sandbox",
+                    "fiscal_uuid_policy": "controlled_local",
+                }
+            ),
+            self.simple_accountman,
+            capabilities=CONTROLLED_CAPABILITIES,
+            note="Synthetic reviewed controlled contract fixture.",
         )
         invoice = self.init_invoice("out_invoice", amounts=[100], taxes=self.tax_sale_a)
         invoice.invoice_line_ids.product_id = product
@@ -556,11 +588,16 @@ class TestUaeProductClassification(AccountTestInvoicingCommon):
                 "l10n_ae_service_accounting_version": "UNUSED-SYNTHETIC-VERSION",
             }
         )
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {
-                "name": "Synthetic goods classification",
-                "fiscal_uuid_policy": "controlled_local",
-            }
+        binding = review_controlled_binding(
+            self.env["l10n_ae.edi.binding"].create(
+                {
+                    "name": "Synthetic goods classification",
+                    "fiscal_uuid_policy": "controlled_local",
+                }
+            ),
+            self.simple_accountman,
+            capabilities=CONTROLLED_CAPABILITIES,
+            note="Synthetic reviewed controlled contract fixture.",
         )
         invoice = self.init_invoice("out_invoice", amounts=[100], taxes=self.tax_sale_a)
         invoice.invoice_line_ids.product_id = product
@@ -636,8 +673,16 @@ class TestUaeProductClassification(AccountTestInvoicingCommon):
                 "SYNTHETIC-SAC-2026",
             ),
         )
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {"name": "Synthetic Form sandbox", "fiscal_uuid_policy": "controlled_local"}
+        binding = review_controlled_binding(
+            self.env["l10n_ae.edi.binding"].create(
+                {
+                    "name": "Synthetic Form sandbox",
+                    "fiscal_uuid_policy": "controlled_local",
+                }
+            ),
+            self.simple_accountman,
+            capabilities=CONTROLLED_CAPABILITIES,
+            note="Synthetic reviewed controlled contract fixture.",
         )
         invoice = self.init_invoice("out_invoice", amounts=[100], taxes=self.tax_sale_a)
         invoice.invoice_line_ids.product_id = product
@@ -688,8 +733,16 @@ class TestUaeProductClassification(AccountTestInvoicingCommon):
         self.assertTrue(product.l10n_ae_is_good_and_service)
         self.assertEqual(template.l10n_ae_classification_code, "999999")
         self.assertEqual(product.l10n_ae_classification_code, "999999")
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {"name": "Synthetic mixed Form", "fiscal_uuid_policy": "controlled_local"}
+        binding = review_controlled_binding(
+            self.env["l10n_ae.edi.binding"].create(
+                {
+                    "name": "Synthetic mixed Form",
+                    "fiscal_uuid_policy": "controlled_local",
+                }
+            ),
+            self.simple_accountman,
+            capabilities=CONTROLLED_CAPABILITIES,
+            note="Synthetic reviewed controlled contract fixture.",
         )
         invoice = self.init_invoice("out_invoice", amounts=[100], taxes=self.tax_sale_a)
         invoice.invoice_line_ids.product_id = product
@@ -765,11 +818,16 @@ class TestUaeProductClassification(AccountTestInvoicingCommon):
             variants.mapped("l10n_ae_service_accounting_code"),
             ["SYNTHETIC-SAC-A", "SYNTHETIC-SAC-B"],
         )
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {
-                "name": "Synthetic distinct variants",
-                "fiscal_uuid_policy": "controlled_local",
-            }
+        binding = review_controlled_binding(
+            self.env["l10n_ae.edi.binding"].create(
+                {
+                    "name": "Synthetic distinct variants",
+                    "fiscal_uuid_policy": "controlled_local",
+                }
+            ),
+            self.simple_accountman,
+            capabilities=CONTROLLED_CAPABILITIES,
+            note="Synthetic reviewed controlled contract fixture.",
         )
         invoice = self.init_invoice(
             "out_invoice", amounts=[100, 100], taxes=self.tax_sale_a

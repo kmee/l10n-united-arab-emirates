@@ -11,6 +11,11 @@ from odoo.exceptions import AccessError, UserError
 from odoo.tests import Form, tagged
 from odoo.tests.common import new_test_user
 
+from odoo.addons.l10n_ae_edi.tests.common import (
+    CONTROLLED_CAPABILITIES,
+    review_controlled_binding,
+)
+
 from .test_invoice_xml import TestUaeInvoiceXml
 
 
@@ -20,11 +25,16 @@ class TestUaeCbuaeFx(TestUaeInvoiceXml):
         usd, _anchor, review = self._reviewed_cbuae_usd()
         company = self.env.company
         company.l10n_ae_edi_auto_prepare = False
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {
-                "name": "Synthetic imported currency identity",
-                "fiscal_uuid_policy": "controlled_local",
-            }
+        binding = review_controlled_binding(
+            self.env["l10n_ae.edi.binding"].create(
+                {
+                    "name": "Synthetic imported currency identity",
+                    "fiscal_uuid_policy": "controlled_local",
+                }
+            ),
+            self.simple_accountman,
+            capabilities=CONTROLLED_CAPABILITIES,
+            note="Synthetic reviewed controlled contract fixture.",
         )
         original = self.init_invoice(
             "out_invoice", amounts=[100], taxes=self.tax_sale_a, currency=usd
@@ -183,6 +193,19 @@ class TestUaeCbuaeFx(TestUaeInvoiceXml):
                     "fiscal_uuid_policy": "controlled_local",
                 }
             )
+        )
+        contract_reviewer = new_test_user(
+            self.env,
+            login="synthetic-cbuae-branch-contract-reviewer",
+            groups="base.group_user,account.group_account_manager",
+            company_id=branch.id,
+            company_ids=branch.ids,
+        )
+        review_controlled_binding(
+            binding,
+            contract_reviewer,
+            capabilities=CONTROLLED_CAPABILITIES,
+            note="Synthetic branch contract; source reader has no review authority.",
         )
         invoice = (
             self.init_invoice(
@@ -469,11 +492,16 @@ class TestUaeCbuaeFx(TestUaeInvoiceXml):
     def test_selected_cbuae_import_is_retained_without_fiscal_approval(self):
         usd, anchor, review = self._reviewed_cbuae_usd()
         self.env.company.l10n_ae_edi_auto_prepare = False
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {
-                "name": "Synthetic selected CBUAE source",
-                "fiscal_uuid_policy": "controlled_local",
-            }
+        binding = review_controlled_binding(
+            self.env["l10n_ae.edi.binding"].create(
+                {
+                    "name": "Synthetic selected CBUAE source",
+                    "fiscal_uuid_policy": "controlled_local",
+                }
+            ),
+            self.simple_accountman,
+            capabilities=CONTROLLED_CAPABILITIES,
+            note="Synthetic reviewed controlled contract fixture.",
         )
         invoice = self.init_invoice(
             "out_invoice", amounts=[100], taxes=self.tax_sale_a, currency=usd
@@ -552,11 +580,16 @@ class TestUaeCbuaeFx(TestUaeInvoiceXml):
         retained = review.read(["quote_literal", "import_facts", "reviewed_at"])
         anchor.rate = 2.0
         self.env.company.l10n_ae_edi_auto_prepare = True
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {
-                "name": "Synthetic changed AED anchor",
-                "fiscal_uuid_policy": "controlled_local",
-            }
+        binding = review_controlled_binding(
+            self.env["l10n_ae.edi.binding"].create(
+                {
+                    "name": "Synthetic changed AED anchor",
+                    "fiscal_uuid_policy": "controlled_local",
+                }
+            ),
+            self.simple_accountman,
+            capabilities=CONTROLLED_CAPABILITIES,
+            note="Synthetic reviewed controlled contract fixture.",
         )
         invoice = self.init_invoice(
             "out_invoice", amounts=[100], taxes=self.tax_sale_a, currency=usd
@@ -609,11 +642,16 @@ class TestUaeCbuaeFx(TestUaeInvoiceXml):
         self.assertFalse(operator.has_group("account.group_account_manager"))
         self.assertFalse(operator.has_group("account.group_account_readonly"))
         self.assertFalse(operator.has_group("base.group_system"))
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {
-                "name": "Synthetic CBUAE invoice reader",
-                "fiscal_uuid_policy": "controlled_local",
-            }
+        binding = review_controlled_binding(
+            self.env["l10n_ae.edi.binding"].create(
+                {
+                    "name": "Synthetic CBUAE invoice reader",
+                    "fiscal_uuid_policy": "controlled_local",
+                }
+            ),
+            self.simple_accountman,
+            capabilities=CONTROLLED_CAPABILITIES,
+            note="Synthetic reviewed controlled contract fixture.",
         )
         invoice = self.init_invoice(
             "out_invoice", amounts=[100], taxes=self.tax_sale_a, currency=usd
@@ -678,11 +716,16 @@ class TestUaeCbuaeFx(TestUaeInvoiceXml):
     def test_only_selected_native_row_carries_cbuae_provenance(self):
         usd, _anchor, review = self._reviewed_cbuae_usd()
         self.env.company.l10n_ae_edi_auto_prepare = False
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {
-                "name": "Synthetic root-global CBUAE precedence",
-                "fiscal_uuid_policy": "controlled_local",
-            }
+        binding = review_controlled_binding(
+            self.env["l10n_ae.edi.binding"].create(
+                {
+                    "name": "Synthetic root-global CBUAE precedence",
+                    "fiscal_uuid_policy": "controlled_local",
+                }
+            ),
+            self.simple_accountman,
+            capabilities=CONTROLLED_CAPABILITIES,
+            note="Synthetic reviewed controlled contract fixture.",
         )
         self.env["res.currency.rate"].create(
             {
