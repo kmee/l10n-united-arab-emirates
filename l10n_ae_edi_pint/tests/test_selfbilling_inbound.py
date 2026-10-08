@@ -15,6 +15,173 @@ from odoo.addons.account.tests.common import AccountTestInvoicingCommon
 
 @tagged("post_install", "-at_install")
 class TestUaeSelfBillingInbound(AccountTestInvoicingCommon):
+    def test_margin_credit_reversal_and_received_reference_preserve_originals(self):
+        # Independent partial adjustment:1000 original,250 credit, no disclosed
+        # VAT, nominal N5. Native receivable reconciliation remains core-owned.
+        tax = self.tax_sale_a.copy(
+            {
+                "name": "Synthetic margin credit source",
+                "amount": 0,
+                "ubl_cii_tax_category_code": "N",
+                "l10n_ae_edi_additional_vat_rate": 5,
+            }
+        )
+        recipient_tax = self.buyer_data["default_tax_purchase"].copy(
+            {
+                "name": "Synthetic margin credit purchase",
+                "amount": 0,
+                "ubl_cii_tax_category_code": "N",
+                "l10n_ae_edi_additional_vat_rate": 5,
+            }
+        )
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {
+                "name": "Synthetic margin credit issuer",
+                "fiscal_uuid_policy": "controlled_local",
+            }
+        )
+        original = self.init_invoice(
+            "out_invoice",
+            partner=self.buyer.partner_id,
+            invoice_date="2026-10-02",
+            amounts=[1000],
+            taxes=tax,
+        ).with_user(self.simple_accountman)
+        original.write(
+            {"l10n_ae_margin_scheme": True, "l10n_ae_binding_id": binding.id}
+        )
+        original.action_post()
+        original.action_l10n_ae_prepare()
+        self.assertTrue(original.validate_l10n_ae_pint()["valid"])
+        original_xml = original.preview_l10n_ae_pint().encode()
+        manager = new_test_user(
+            self.env,
+            login="uae-margin-credit-recipient",
+            groups="account.group_account_manager",
+            company_id=self.buyer.id,
+            company_ids=[Command.set(self.buyer.ids)],
+        )
+        receiver_binding = (
+            self.env["l10n_ae.edi.binding"]
+            .with_company(self.buyer)
+            .create(
+                {
+                    "name": "Synthetic margin credit receiver",
+                    "company_id": self.buyer.id,
+                }
+            )
+        )
+        inboxes = (
+            self.env["l10n_ae.edi.inbox"].with_user(manager).with_company(self.buyer)
+        )
+        received_original = inboxes.receive_controlled_document(
+            receiver_binding.id,
+            "margin-credit-original",
+            original_xml,
+        )
+        self.assertTrue(
+            received_original.action_process(), received_original.diagnostic
+        )
+        bill = received_original.move_id
+        self.assertEqual(bill.ref, original.name)
+        reversal = (
+            self.env["account.move.reversal"]
+            .with_user(self.simple_accountman)
+            .with_context(
+                active_model="account.move",
+                active_ids=original.ids,
+                allowed_company_ids=[self.env.company.id],
+            )
+            .create(
+                {
+                    "move_ids": [Command.set(original.ids)],
+                    "journal_id": original.journal_id.id,
+                    "date": "2026-10-03",
+                    "reason": "Synthetic quarter adjustment",
+                    "l10n_ae_credit_reason": "DL8.61.1.C",
+                }
+            )
+        )
+        reversal.refund_moves()
+        credit = reversal.new_move_ids
+        self.assertFalse(credit.env.su)
+        self.assertTrue(credit.l10n_ae_margin_scheme)
+        self.assertEqual(credit.reversed_entry_id, original)
+        credit.invoice_line_ids.write({"quantity": 0.25})
+        credit.l10n_ae_binding_id = binding
+        credit.action_post()
+        self.assertEqual(
+            (credit.amount_untaxed, credit.amount_tax, credit.amount_total),
+            (250, 0, 250),
+        )
+        ledger_fields = [
+            "account_id",
+            "debit",
+            "credit",
+            "amount_currency",
+            "tax_ids",
+            "create_date",
+            "write_date",
+        ]
+        original_ledger = original.line_ids.read(ledger_fields)
+        credit_ledger = credit.line_ids.read(ledger_fields)
+        bill_ledger = bill.line_ids.read(ledger_fields)
+        credit.action_l10n_ae_prepare()
+        report = credit.validate_l10n_ae_pint()
+        self.assertTrue(report["valid"], report)
+        content = credit.preview_l10n_ae_pint().encode()
+        tree = etree.fromstring(content)
+        self.assertEqual(tree.findtext("./{*}CreditNoteTypeCode"), "381")
+        self.assertEqual(tree.findtext("./{*}ProfileExecutionID"), "00100000")
+        self.assertEqual(
+            tree.findtext("./{*}BillingReference/{*}InvoiceDocumentReference/{*}ID"),
+            original.name,
+        )
+        self.assertEqual(
+            tree.findtext("./{*}DiscrepancyResponse/{*}ResponseCode"), "DL8.61.1.C"
+        )
+        received_credit = inboxes.receive_controlled_document(
+            receiver_binding.id,
+            "margin-credit-quarter",
+            content,
+        )
+        self.assertTrue(received_credit.action_process(), received_credit.diagnostic)
+        refund = received_credit.move_id
+        self.assertEqual((refund.state, refund.move_type), ("draft", "in_refund"))
+        self.assertEqual(refund.reversed_entry_id, bill)
+        self.assertEqual(refund.l10n_ae_credit_reason, "DL8.61.1.C")
+        self.assertTrue(refund.l10n_ae_margin_scheme)
+        self.assertEqual(refund.invoice_line_ids.tax_ids, recipient_tax)
+        self.assertEqual(
+            (refund.amount_untaxed, refund.amount_tax, refund.amount_total),
+            (250, 0, 250),
+        )
+        self.assertFalse(refund.l10n_ae_transmission_ids)
+        refund_ledger = refund.line_ids.read(ledger_fields)
+        tax.l10n_ae_edi_additional_vat_rate = 7
+        recipient_tax.l10n_ae_edi_additional_vat_rate = 7
+        replay = inboxes.receive_controlled_document(
+            receiver_binding.id,
+            "margin-credit-quarter",
+            content,
+        )
+        self.assertEqual(replay, received_credit)
+        self.assertTrue(replay.action_process(), replay.diagnostic)
+        self.assertEqual(replay.move_id, refund)
+        self.assertEqual(received_original.original_xml.content, original_xml)
+        self.assertEqual(received_credit.original_xml.content, content)
+        self.assertEqual(received_credit.xml_hash, hashlib.sha256(content).hexdigest())
+        self.assertEqual(original.preview_l10n_ae_pint().encode(), original_xml)
+        self.assertEqual(credit.preview_l10n_ae_pint().encode(), content)
+        for move, ledger in [
+            (original, original_ledger),
+            (credit, credit_ledger),
+            (bill, bill_ledger),
+            (refund, refund_ledger),
+        ]:
+            self.assertEqual(move.line_ids.read(ledger_fields), ledger)
+        self.assertEqual((tax.amount, recipient_tax.amount), (0, 0))
+
     def test_received_margin_n_matches_reviewed_nominal_metadata_not_native_rate(self):
         # Independent PINT example: net1000, nominal N5, disclosed VAT0,
         # payable1000. This is representation, not margin liability accounting.
