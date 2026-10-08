@@ -91,9 +91,15 @@ class CbuaePublication(models.Model):
                 .strip()
                 for row in tree.xpath("//table/tbody/tr")
             }
+            same_date = publication_date == self.requested_date
             self.write(
                 {
-                    "state": "captured",
+                    "state": "captured" if same_date else "error",
+                    "diagnostic": False
+                    if same_date
+                    else self.env._(
+                        "CBUAE publication date differs from the requested date."
+                    ),
                     "source_url": response.url,
                     "retrieved_at": fields.Datetime.now(),
                     "http_status": response.status_code,
@@ -102,7 +108,7 @@ class CbuaePublication(models.Model):
                     "source_sha256": hashlib.sha256(body).hexdigest(),
                     "publication_stamp": stamp,
                     "publication_date": publication_date,
-                    "quotes": quotes,
+                    "quotes": quotes if same_date else False,
                 }
             )
         return True
