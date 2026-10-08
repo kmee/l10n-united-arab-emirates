@@ -274,7 +274,11 @@ class AccountMove(models.Model):
     l10n_ae_margin_scheme = fields.Boolean(string="Profit Margin Scheme", copy=False)
     l10n_ae_summary = fields.Boolean(string="Summary Invoice", copy=False)
     l10n_ae_invoicing_period_start = fields.Date(
-        string="Invoice Period Start", copy=False
+        string="Invoice Period Start",
+        copy=False,
+        help="Reviewed UAE period. Either explicit endpoint takes precedence over "
+        "native deferred line dates. A Summary without explicit dates may use "
+        "complete native deferred periods; payment due dates are never used.",
     )
     l10n_ae_invoicing_period_end = fields.Date(string="Invoice Period End", copy=False)
     l10n_ae_billing_frequency_code = fields.Selection(
@@ -928,17 +932,14 @@ class AccountMove(models.Model):
             classification = line._l10n_ae_item_classification()
             if classification:
                 snapshot_line["item_classification"] = classification
-        if (
-            self.l10n_ae_invoicing_period_start
-            or self.l10n_ae_invoicing_period_end
-            or self.l10n_ae_billing_frequency_code
-        ):
+        period_start, period_end, period_origin = self._l10n_ae_invoicing_period_dates()
+        if period_start or period_end or self.l10n_ae_billing_frequency_code:
             snapshot["invoicing_period"] = {
-                "start_date": fields.Date.to_string(self.l10n_ae_invoicing_period_start)
-                or None,
-                "end_date": fields.Date.to_string(self.l10n_ae_invoicing_period_end)
-                or None,
+                "start_date": fields.Date.to_string(period_start) or None,
+                "end_date": fields.Date.to_string(period_end) or None,
             }
+            if period_origin:
+                snapshot["invoicing_period_origin"] = period_origin
             if self.l10n_ae_billing_frequency_code:
                 snapshot["invoicing_period"]["billing_frequency_code"] = (
                     self.l10n_ae_billing_frequency_code
@@ -1363,6 +1364,84 @@ class AccountMove(models.Model):
                     )
                 )
 
+    def _l10n_ae_uses_native_period_dates(self):
+        """Native accounting dates are fiscal sources only for this fallback."""
+        self.ensure_one()
+        if self.l10n_ae_transmission_id:
+            origin = json.loads(self.l10n_ae_transmission_id.payload).get(
+                "invoicing_period_origin", {}
+            )
+            return origin.get("source") == "native_deferred_lines"
+        return (
+            self.company_id.country_code == "AE"
+            and self.l10n_ae_summary
+            and not self.l10n_ae_received_document
+            and not (
+                self.l10n_ae_invoicing_period_start or self.l10n_ae_invoicing_period_end
+            )
+            and {"deferred_start_date", "deferred_end_date"}.issubset(
+                self.invoice_line_ids._fields
+            )
+        )
+
+    def _l10n_ae_invoicing_period_dates(self):
+        """Reviewed header endpoints win as a unit over native Summary sources."""
+        self.ensure_one()
+        if self.l10n_ae_transmission_id:
+            snapshot = json.loads(self.l10n_ae_transmission_id.payload)
+            period = snapshot.get("invoicing_period", {})
+            return (
+                fields.Date.to_date(period.get("start_date")),
+                fields.Date.to_date(period.get("end_date")),
+                snapshot.get("invoicing_period_origin"),
+            )
+        start, end = (
+            self.l10n_ae_invoicing_period_start,
+            self.l10n_ae_invoicing_period_end,
+        )
+        origin = None
+        if self._l10n_ae_uses_native_period_dates():
+            dated_lines = self.invoice_line_ids.filtered(
+                lambda line: (
+                    line.display_type in (False, "product")
+                    and (line.deferred_start_date or line.deferred_end_date)
+                )
+            ).sorted("id")
+            for line in dated_lines:
+                if not (line.deferred_start_date and line.deferred_end_date):
+                    raise UserError(
+                        self.env._(
+                            "Review both native deferred period dates on line %(line)s "
+                            "before preparing this Summary invoice.",
+                            line=line.name,
+                        )
+                    )
+                if line.deferred_end_date < line.deferred_start_date:
+                    raise UserError(
+                        self.env._(
+                            "IBR-029: the native deferred period end on line %(line)s "
+                            "must be on or after its start.",
+                            line=line.name,
+                        )
+                    )
+            if dated_lines:
+                start = min(dated_lines.mapped("deferred_start_date"))
+                end = max(dated_lines.mapped("deferred_end_date"))
+                origin = {
+                    "source": "native_deferred_lines",
+                    "lines": [
+                        {
+                            "id": line.id,
+                            "start_date": fields.Date.to_string(
+                                line.deferred_start_date
+                            ),
+                            "end_date": fields.Date.to_string(line.deferred_end_date),
+                        }
+                        for line in dated_lines
+                    ],
+                }
+        return start, end, origin
+
     def _check_l10n_ae_invoicing_period(self):
         self.ensure_one()
         if (
@@ -1376,19 +1455,14 @@ class AccountMove(models.Model):
                     "do not supply a reviewed cadence explanation."
                 )
             )
-        if (
-            self.l10n_ae_invoicing_period_start
-            and self.l10n_ae_invoicing_period_end
-            and self.l10n_ae_invoicing_period_end < self.l10n_ae_invoicing_period_start
-        ):
+        period_start, period_end, _origin = self._l10n_ae_invoicing_period_dates()
+        if period_start and period_end and period_end < period_start:
             raise UserError(
                 self.env._(
                     "IBR-029: the invoicing period end must be on or after its start."
                 )
             )
-        if self.l10n_ae_summary and not (
-            self.l10n_ae_invoicing_period_start or self.l10n_ae_invoicing_period_end
-        ):
+        if self.l10n_ae_summary and not (period_start or period_end):
             raise UserError(
                 self.env._(
                     "IBR-138-AE: a Summary invoice requires a reviewed "

@@ -70,7 +70,11 @@ class AccountMoveLine(models.Model):
 
     def write(self, vals):
         fiscal_fields = self._l10n_ae_fiscal_line_fields().intersection(vals)
-        if fiscal_fields:
+        native_period_fields = {
+            "deferred_start_date",
+            "deferred_end_date",
+        }.intersection(vals)
+        if fiscal_fields or native_period_fields:
             self.check_access("write")
             changed = self.filtered(
                 lambda line: any(
@@ -78,6 +82,19 @@ class AccountMoveLine(models.Model):
                     for name in fiscal_fields
                 )
             )
+            if native_period_fields:
+                changed |= self.filtered(
+                    lambda line: (
+                        line.display_type in (False, "product")
+                        and line.move_id._l10n_ae_uses_native_period_dates()
+                        and any(
+                            self.env["account.move"]._field_will_change(
+                                line, vals, name
+                            )
+                            for name in native_period_fields
+                        )
+                    )
+                )
             moves = changed.move_id
             if changed and vals.get("move_id"):
                 moves |= self.env["account.move"].browse(vals["move_id"])
