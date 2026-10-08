@@ -23,6 +23,7 @@ UAE_TRANSACTION_FLAG_FIELDS = (
 )
 
 UAE_EFFECTIVE_EXCHANGE_FIELDS = (
+    "l10n_ae_effective_cbuae_review_id",
     "l10n_ae_effective_tax_exchange_rate",
     "l10n_ae_effective_tax_exchange_date",
     "l10n_ae_effective_tax_exchange_conversion_date",
@@ -122,6 +123,12 @@ class AccountMove(models.Model):
         compute="_compute_l10n_ae_effective_tax_exchange",
         compute_sudo=False,
     )
+    l10n_ae_effective_cbuae_review_id = fields.Many2one(
+        "l10n_ae.cbuae.rate.review",
+        string="Selected CBUAE Review",
+        compute="_compute_l10n_ae_effective_tax_exchange",
+        compute_sudo=False,
+    )
     l10n_ae_effective_tax_exchange_date = fields.Date(
         string="AED Quote Source Date",
         compute="_compute_l10n_ae_effective_tax_exchange",
@@ -191,6 +198,11 @@ class AccountMove(models.Model):
                         evidence = exchange.get("evidence") or {}
                         values.update(
                             {
+                                "l10n_ae_effective_cbuae_review_id": (
+                                    evidence.get("cbuae_provenance", {}).get(
+                                        "review_id"
+                                    )
+                                ),
                                 "l10n_ae_effective_tax_exchange_rate": exchange["rate"],
                                 "l10n_ae_effective_tax_exchange_date": exchange["date"],
                                 "l10n_ae_effective_tax_exchange_conversion_date": (
