@@ -39,6 +39,25 @@ class AccountEdiUblUae(models.AbstractModel):
         categories = document.findall(
             "{*}InvoiceLine/{*}Item/{*}ClassifiedTaxCategory"
         ) + document.findall("{*}CreditNoteLine/{*}Item/{*}ClassifiedTaxCategory")
+        transaction_type = document.findtext("{*}ProfileExecutionID") or ""
+        if (
+            len(transaction_type) == 8
+            and transaction_type[2] == "1"
+            and any(
+                (node.text or "").strip() != "N"
+                for node in (
+                    document.findall(".//{*}TaxCategory/{*}ID")
+                    + document.findall(".//{*}ClassifiedTaxCategory/{*}ID")
+                )
+            )
+        ):
+            raise UserError(
+                self.env._(
+                    "IBR-116-AE: a profit margin document requires reviewed VAT "
+                    "category N on every item and tax breakdown. Selecting the "
+                    "scenario does not change the tax configuration or accounting."
+                )
+            )
         if document_type in {"380", "381"} and not any(
             (category.findtext("{*}ID") or "").strip() not in {"E", "O"}
             for category in categories
