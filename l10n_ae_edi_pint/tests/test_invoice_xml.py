@@ -8352,6 +8352,9 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
             form.l10n_ae_tax_exchange_date = "2019-01-02"
             form.l10n_ae_tax_exchange_source = "SYNTHETIC-UNVERIFIED-QUOTE"
         invoice.action_post()
+        # Finish the posting transaction's deferred ORM writes before comparing
+        # a separate manager's header edit, as the browser's next request does.
+        invoice.env.flush_all()
         audit_fields = [
             "account_id",
             "debit",
@@ -8373,6 +8376,7 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         self.assertFalse(reviewed.env.su)
         with Form(reviewed) as form:
             form.l10n_ae_tax_exchange_date = "2019-01-01"
+        reviewed.env.flush_all()
         self.assertEqual(reviewed.l10n_ae_tax_exchange_date.isoformat(), "2019-01-01")
         self.assertEqual(invoice.line_ids.read(audit_fields), original)
         self.assertEqual(invoice.amount_total_signed, 385.61)
