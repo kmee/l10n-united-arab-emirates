@@ -47,6 +47,14 @@ class ResCurrencyRate(models.Model):
         review.check_access("read")
         publication = review.publication_id
         publication.check_access("read")
+        if self.currency_id.name != review.import_facts["currency_code"]:
+            raise UserError(
+                self.env._(
+                    "The selected currency code differs from its reviewed "
+                    "CBUAE import. Review the currency identity before "
+                    "preparing this e-invoice."
+                )
+            )
         return {
             "review_id": review.id,
             "publication_id": publication.id,
