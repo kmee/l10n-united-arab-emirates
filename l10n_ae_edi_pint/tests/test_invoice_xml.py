@@ -32,6 +32,120 @@ NS = {
 
 @tagged("post_install", "-at_install")
 class TestUaeInvoiceXml(AccountTestInvoicingCommon):
+    def test_explicit_period_wins_without_merging_native_dates_or_freezing_them(self):
+        if not {"deferred_start_date", "deferred_end_date"}.issubset(
+            self.env["account.move.line"]._fields
+        ):
+            self.skipTest("Native deferred-date fields are not installed.")
+        self.env.company.write(
+            {
+                "l10n_ae_edi_auto_prepare": False,
+                "generate_deferred_revenue_entries_method": "manual",
+            }
+        )
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {
+                "name": "Synthetic explicit period precedence",
+                "fiscal_uuid_policy": "controlled_local",
+            }
+        )
+        # Explicit dates are independent reviewed facts. Do not combine one
+        # explicit endpoint with the accounting recognition period in January.
+        cases = (
+            (True, "2026-02-01", False, "2026-02-01", None),
+            (True, False, "2026-02-28", None, "2026-02-28"),
+            (True, "2026-02-01", "2026-02-28", "2026-02-01", "2026-02-28"),
+            (False, False, False, None, None),
+        )
+        for summary, start, end, expected_start, expected_end in cases:
+            with self.subTest(summary=summary, start=start, end=end):
+                invoice = self.init_invoice(
+                    "out_invoice", amounts=[100], taxes=self.tax_sale_a
+                ).with_user(self.simple_accountman)
+                invoice.write(
+                    {
+                        "invoice_date": "2026-01-31",
+                        "l10n_ae_summary": summary,
+                        "l10n_ae_invoicing_period_start": start,
+                        "l10n_ae_invoicing_period_end": end,
+                        "l10n_ae_billing_frequency_code": False,
+                        "l10n_ae_binding_id": binding.id,
+                        "preferred_payment_method_line_id": False,
+                        "partner_bank_id": False,
+                    }
+                )
+                line = invoice.invoice_line_ids
+                line.write(
+                    {
+                        "deferred_start_date": "2026-01-01",
+                        "deferred_end_date": "2026-01-31",
+                    }
+                )
+                invoice.action_post()
+                invoice.action_l10n_ae_validate()
+                invoice.action_l10n_ae_prepare()
+                issue = invoice.l10n_ae_transmission_id
+                payload = json.loads(issue.payload)
+                tree = etree.fromstring(issue.xml_content.encode())
+                period = tree.find("cac:InvoicePeriod", NS)
+                if summary:
+                    self.assertIsNotNone(period)
+                    self.assertEqual(
+                        period.findtext("cbc:StartDate", namespaces=NS), expected_start
+                    )
+                    self.assertEqual(
+                        period.findtext("cbc:EndDate", namespaces=NS), expected_end
+                    )
+                    self.assertEqual(
+                        payload["invoicing_period"],
+                        {"start_date": expected_start, "end_date": expected_end},
+                    )
+                else:
+                    self.assertIsNone(period)
+                    self.assertNotIn("invoicing_period", payload)
+                self.assertNotIn("invoicing_period_origin", payload)
+                self.assertTrue(invoice.validate_l10n_ae_pint()["valid"])
+                self.assertEqual(
+                    (invoice.amount_untaxed, invoice.amount_tax, invoice.amount_total),
+                    (100, 5, 105),
+                )
+                immutable = [
+                    "payload",
+                    "payload_hash",
+                    "xml_content",
+                    "xml_hash",
+                    "idempotency_key",
+                ]
+                frozen = issue.read(immutable)
+                # These deferrals did not supply fiscal header dates. Ordinary
+                # accounting scheduling remains editable under native policy.
+                line.write({"deferred_end_date": "2026-02-28"})
+                ledger_fields = [
+                    "account_id",
+                    "partner_id",
+                    "currency_id",
+                    "date",
+                    "date_maturity",
+                    "debit",
+                    "credit",
+                    "balance",
+                    "amount_currency",
+                    "tax_ids",
+                    "create_date",
+                    "write_date",
+                ]
+                ledger_after_native_edit = invoice.line_ids.sorted("id").read(
+                    ledger_fields
+                )
+                invoice.action_l10n_ae_prepare()
+                self.assertTrue(invoice.validate_l10n_ae_pint()["valid"])
+                self.assertEqual(issue.read(immutable), frozen)
+                self.assertEqual(
+                    invoice.line_ids.sorted("id").read(ledger_fields),
+                    ledger_after_native_edit,
+                )
+                self.assertFalse(issue.attempt_ids or issue.event_ids)
+
     def test_summary_uses_native_deferred_lines_without_inventing_due_dates(self):
         if not {"deferred_start_date", "deferred_end_date"}.issubset(
             self.env["account.move.line"]._fields
