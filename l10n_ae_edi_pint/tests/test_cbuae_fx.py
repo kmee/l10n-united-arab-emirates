@@ -6,8 +6,9 @@ from unittest.mock import patch
 
 from requests import Response
 
-from odoo.exceptions import UserError
+from odoo.exceptions import AccessError, UserError
 from odoo.tests import Form, tagged
+from odoo.tests.common import new_test_user
 
 from .test_invoice_xml import TestUaeInvoiceXml
 
@@ -182,3 +183,82 @@ class TestUaeCbuaeFx(TestUaeInvoiceXml):
         self.assertEqual(
             review.read(["quote_literal", "import_facts", "reviewed_at"]), retained
         )
+
+    def test_invoice_writer_reads_source_without_capture_or_import_authority(self):
+        usd, _anchor, review = self._reviewed_cbuae_usd()
+        self.env.company.l10n_ae_edi_auto_prepare = False
+        operator = new_test_user(
+            self.env,
+            login="synthetic-cbuae-invoice-writer",
+            groups="base.group_user,account.group_account_invoice",
+            company_id=self.env.company.id,
+            company_ids=self.env.company.ids,
+        )
+        self.assertFalse(operator.has_group("account.group_account_manager"))
+        self.assertFalse(operator.has_group("account.group_account_readonly"))
+        self.assertFalse(operator.has_group("base.group_system"))
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {
+                "name": "Synthetic CBUAE invoice reader",
+                "fiscal_uuid_policy": "controlled_local",
+            }
+        )
+        invoice = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a, currency=usd
+        ).with_user(operator)
+        self.assertFalse(invoice.env.su)
+        with Form(invoice) as form:
+            form.invoice_date = "2026-08-27"
+            form.l10n_ae_binding_id = binding
+        invoice.action_post()
+        invoice.action_l10n_ae_validate()
+        invoice.action_l10n_ae_prepare()
+        self.assertEqual(invoice.amount_total_signed, 385.61)
+        self.assertEqual(
+            invoice.l10n_ae_effective_tax_exchange_origin, "native_unverified"
+        )
+        evidence = json.loads(invoice.l10n_ae_transmission_id.payload)["tax_exchange"][
+            "evidence"
+        ]
+        self.assertFalse(evidence["cbuae_origin_verified"])
+        self.assertEqual(evidence["cbuae_provenance"]["review_id"], review.id)
+        readonly_review = review.with_user(operator)
+        publication = review.publication_id.with_user(operator)
+        self.assertEqual(
+            readonly_review.read(["quote_literal"])[0]["quote_literal"], "3.6725"
+        )
+        self.assertEqual(
+            publication.read(["source_sha256"])[0]["source_sha256"],
+            evidence["cbuae_provenance"]["source"]["sha256"],
+        )
+        for action in (
+            readonly_review.action_import,
+            publication.action_capture,
+            lambda: readonly_review.write({"review_note": "Unauthorized revision"}),
+            lambda: publication.write({"requested_date": "2026-08-28"}),
+            lambda: invoice.env["l10n_ae.cbuae.publication"].create(
+                {"requested_date": "2026-08-28"}
+            ),
+        ):
+            with self.assertRaises(AccessError):
+                action()
+        other = self.env["res.company"].create(
+            {"name": "Synthetic isolated CBUAE company"}
+        )
+        other_manager = new_test_user(
+            self.env,
+            login="synthetic-cbuae-other-manager",
+            groups="base.group_user,account.group_account_manager",
+            company_id=other.id,
+            company_ids=other.ids,
+        )
+        other_publication = (
+            self.env["l10n_ae.cbuae.publication"]
+            .with_user(other_manager)
+            .with_context(allowed_company_ids=other.ids)
+            .create({"requested_date": "2026-08-26"})
+        )
+        with self.assertRaises(AccessError):
+            other_publication.with_user(operator).with_context(
+                allowed_company_ids=self.env.company.ids
+            ).read(["requested_date"])
