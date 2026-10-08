@@ -32,6 +32,171 @@ NS = {
 
 @tagged("post_install", "-at_install")
 class TestUaeInvoiceXml(AccountTestInvoicingCommon):
+    def test_native_partial_credit_freezes_selected_customer_payment_account(self):
+        self.env.company.l10n_ae_edi_auto_prepare = False
+        journal = self.company_data["default_journal_bank"]
+        method = journal.inbound_payment_method_line_ids.filtered(
+            lambda line: line.code == "manual"
+        )[:1]
+        self.assertTrue(method)
+        company_account = self.env["res.partner.bank"].create(
+            {
+                "partner_id": self.env.company.partner_id.id,
+                "company_id": self.env.company.id,
+                "account_number": "SYNTH COMPANY 01",
+            }
+        )
+        journal.bank_account_id = company_account
+        customer_account = self.env["res.partner.bank"].create(
+            {
+                "partner_id": self.partner_a.commercial_partner_id.id,
+                "company_id": self.env.company.id,
+                "account_number": "SYNTH CUSTOMER 01",
+                "allow_out_payment": True,
+            }
+        )
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {
+                "name": "Synthetic credit recipient review",
+                "fiscal_uuid_policy": "controlled_local",
+            }
+        )
+        self.env.company.l10n_ae_edi_binding_id = binding
+        original = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a
+        ).with_user(self.simple_accountman)
+        self.assertFalse(original.env.su)
+        with Form(original) as form:
+            form.preferred_payment_method_line_id = method
+            form.partner_bank_id = company_account
+            form.payment_reference = "SYNTH-COMPANY-INVOICE-2026"
+            form.l10n_ae_binding_id = binding
+        original.action_post()
+        original.action_l10n_ae_prepare()
+        self.assertTrue(original.validate_l10n_ae_pint()["valid"])
+        immutable = [
+            "payload",
+            "payload_hash",
+            "xml_content",
+            "xml_hash",
+            "idempotency_key",
+        ]
+        original_issue = original.l10n_ae_transmission_id
+        original_frozen = original_issue.read(immutable)
+        wizard = (
+            self.env["account.move.reversal"]
+            .with_user(self.simple_accountman)
+            .with_context(active_model="account.move", active_ids=original.ids)
+            .create(
+                {
+                    "move_ids": [(6, 0, original.ids)],
+                    "journal_id": original.journal_id.id,
+                    "reason": "Synthetic payment instruction partial credit",
+                    "l10n_ae_credit_reason": "DL8.61.1.C",
+                }
+            )
+        )
+        wizard.refund_moves()
+        credit = wizard.new_move_ids
+        self.assertEqual(credit.move_type, "out_refund")
+        self.assertEqual(credit.reversed_entry_id, original)
+        self.assertEqual(credit.bank_partner_id, self.partner_a.commercial_partner_id)
+        self.assertFalse(credit.l10n_ae_transmission_id)
+        with Form(credit) as form:
+            with form.invoice_line_ids.edit(0) as line:
+                line.price_unit = 40
+            # This is the native sales-form preference, not refund execution.
+            form.preferred_payment_method_line_id = method
+            form.payment_reference = "SYNTH-CUSTOMER-CREDIT-2026"
+            form.partner_bank_id = self.env["res.partner.bank"]
+            form.l10n_ae_binding_id = binding
+        self.assertFalse(credit.partner_bank_id)
+        self.env.company.l10n_ae_edi_auto_prepare = True
+        with self.assertRaisesRegex(UserError, "IBR-192-AE"):
+            credit.action_l10n_ae_validate()
+        credit.action_post()
+        self.assertEqual(credit.state, "posted")
+        self.assertEqual(credit.l10n_ae_preparation_state, "review")
+        self.assertIn("IBR-192-AE", credit.l10n_ae_preparation_error)
+        self.assertFalse(credit.l10n_ae_fiscal_uuid)
+        self.assertFalse(credit.l10n_ae_transmission_id)
+        self.assertEqual(
+            (credit.amount_untaxed, credit.amount_tax, credit.amount_total), (40, 2, 42)
+        )
+        self.assertEqual((original.amount_residual, credit.amount_residual), (63, 0))
+        with self.assertRaisesRegex(UserError, "IBR-192-AE"):
+            credit.action_l10n_ae_prepare()
+        with Form(credit) as form:
+            form.partner_bank_id = customer_account
+        # Native Post reconciles the partial credit, and Form can refresh line
+        # metadata. Observe both complete ledgers after the reviewed Form save.
+        ledger_fields = [
+            "account_id",
+            "partner_id",
+            "currency_id",
+            "debit",
+            "credit",
+            "balance",
+            "amount_currency",
+            "tax_ids",
+            "create_date",
+            "write_date",
+        ]
+        ledgers = [
+            move.line_ids.sorted("id").read(ledger_fields)
+            for move in (original, credit)
+        ]
+        credit.action_l10n_ae_validate()
+        credit.action_l10n_ae_prepare()
+        issue = credit.l10n_ae_transmission_id
+        self.assertNotEqual(issue, original_issue)
+        self.assertNotEqual(credit.l10n_ae_fiscal_uuid, original.l10n_ae_fiscal_uuid)
+        snapshot = json.loads(issue.payload)
+        self.assertEqual(snapshot["payment_means"]["code"], "30")
+        self.assertEqual(snapshot["payment_means"]["method_line_id"], method.id)
+        self.assertEqual(snapshot["payment_means"]["account_id"], customer_account.id)
+        self.assertEqual(
+            snapshot["payment_means"]["account_identifier"], "SYNTHCUSTOMER01"
+        )
+        tree = etree.fromstring(issue.xml_content.encode())
+        expected = {
+            "cbc:CreditNoteTypeCode": "381",
+            "cac:PaymentMeans/cbc:PaymentMeansCode": "30",
+            "cac:PaymentMeans/cbc:PaymentID": "SYNTH-CUSTOMER-CREDIT-2026",
+            "cac:PaymentMeans/cac:PayeeFinancialAccount/cbc:ID": "SYNTHCUSTOMER01",
+            "cac:BillingReference/cac:InvoiceDocumentReference/cbc:ID": original.name,
+            "cac:DiscrepancyResponse/cbc:ResponseCode": "DL8.61.1.C",
+            "cac:LegalMonetaryTotal/cbc:TaxExclusiveAmount": "40.00",
+            "cac:TaxTotal/cbc:TaxAmount": "2.00",
+            "cac:LegalMonetaryTotal/cbc:TaxInclusiveAmount": "42.00",
+            "cac:LegalMonetaryTotal/cbc:PrepaidAmount": "42.00",
+            "cac:LegalMonetaryTotal/cbc:PayableAmount": "0.00",
+        }
+        for path, value in expected.items():
+            self.assertEqual(tree.findtext(path, namespaces=NS), value, path)
+        self.assertNotIn("SYNTHCOMPANY01", issue.xml_content)
+        self.assertEqual(original_issue.read(immutable), original_frozen)
+        self.assertTrue(credit.validate_l10n_ae_pint()["valid"])
+        frozen = issue.read(immutable)
+        self.assertTrue(customer_account.allow_out_payment)
+        customer_account.holder_name = "Synthetic reviewed customer bank holder"
+        journal.name = "Synthetic renamed payment preference journal"
+        for move in (original, credit):
+            move.action_l10n_ae_prepare()
+            self.assertTrue(move.validate_l10n_ae_pint()["valid"])
+        self.assertEqual(credit.preview_l10n_ae_pint(), frozen[0]["xml_content"])
+        self.assertEqual(issue.read(immutable), frozen)
+        self.assertEqual(original_issue.read(immutable), original_frozen)
+        self.assertEqual(
+            [
+                move.line_ids.sorted("id").read(ledger_fields)
+                for move in (original, credit)
+            ],
+            ledgers,
+        )
+        self.assertFalse(issue.attempt_ids or original_issue.attempt_ids)
+        self.assertFalse(issue.event_ids or original_issue.event_ids)
+
     def test_native_transfer_requires_recipient_account_and_freezes_review(self):
         journal = self.company_data["default_journal_bank"]
         journal.bank_account_id = False
