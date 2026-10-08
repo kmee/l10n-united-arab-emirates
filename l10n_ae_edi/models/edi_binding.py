@@ -240,6 +240,10 @@ class UaeEdiBinding(models.Model):
                     "Review the binding's contract capabilities before receiving."
                 )
             )
+        if "receive" not in self.capability_ids.mapped("code"):
+            raise ValidationError(
+                self.env._("The reviewed binding contract does not support receive.")
+            )
 
     def _require_document_capability(self, process, credit):
         self._require_sending_capabilities()
