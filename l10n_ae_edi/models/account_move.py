@@ -9,6 +9,8 @@ from decimal import ROUND_HALF_UP, Decimal
 from odoo import api, fields, models
 from odoo.exceptions import AccessError, UserError
 
+from .account_payment_term import UAE_BILLING_FREQUENCIES
+
 UAE_TRANSACTION_FLAG_FIELDS = (
     "l10n_ae_free_zone",
     "l10n_ae_deemed_supply",
@@ -259,6 +261,23 @@ class AccountMove(models.Model):
         string="Invoice Period Start", copy=False
     )
     l10n_ae_invoicing_period_end = fields.Date(string="Invoice Period End", copy=False)
+    l10n_ae_billing_frequency_code = fields.Selection(
+        UAE_BILLING_FREQUENCIES,
+        string="UAE Billing Frequency",
+        copy=False,
+        help="Reviewed billing cadence. Selecting a payment term in the invoice "
+        "form supplies its reviewed default; you may override or clear it "
+        "before preparing the document. Due dates do not define a supply period.",
+    )
+
+    @api.onchange("invoice_payment_term_id")
+    def _onchange_l10n_ae_billing_frequency(self):
+        for move in self:
+            if not (move.l10n_ae_transmission_id or move.l10n_ae_received_document):
+                move.l10n_ae_billing_frequency_code = (
+                    move.invoice_payment_term_id.l10n_ae_billing_frequency_code
+                )
+
     l10n_ae_continuous_supply = fields.Boolean(string="Continuous Supply", copy=False)
     l10n_ae_disclosed_agent = fields.Boolean(
         string="Disclosed Agent Billing", copy=False
@@ -546,6 +565,7 @@ class AccountMove(models.Model):
             "l10n_ae_tax_exchange_source",
             "l10n_ae_invoicing_period_start",
             "l10n_ae_invoicing_period_end",
+            "l10n_ae_billing_frequency_code",
             "l10n_ae_beneficiary_id",
             "l10n_ae_principal_id",
             "l10n_ae_document_category",
@@ -884,13 +904,21 @@ class AccountMove(models.Model):
             classification = line._l10n_ae_item_classification()
             if classification:
                 snapshot_line["item_classification"] = classification
-        if self.l10n_ae_invoicing_period_start or self.l10n_ae_invoicing_period_end:
+        if (
+            self.l10n_ae_invoicing_period_start
+            or self.l10n_ae_invoicing_period_end
+            or self.l10n_ae_billing_frequency_code
+        ):
             snapshot["invoicing_period"] = {
                 "start_date": fields.Date.to_string(self.l10n_ae_invoicing_period_start)
                 or None,
                 "end_date": fields.Date.to_string(self.l10n_ae_invoicing_period_end)
                 or None,
             }
+            if self.l10n_ae_billing_frequency_code:
+                snapshot["invoicing_period"]["billing_frequency_code"] = (
+                    self.l10n_ae_billing_frequency_code
+                )
         return snapshot
 
     def _l10n_ae_prepare_xml(self):

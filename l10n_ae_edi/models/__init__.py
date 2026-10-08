@@ -5,6 +5,7 @@ from . import res_partner
 from . import product_product
 from . import product_template
 from . import selfbilling_agreement
+from . import account_payment_term
 from . import account_move
 from . import ir_actions_report
 from . import account_move_line

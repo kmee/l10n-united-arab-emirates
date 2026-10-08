@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<odoo>
+    <record id="account_payment_term_form_uae_frequency" model="ir.ui.view">
+        <field name="name">account.payment.term.form.uae.frequency</field>
+        <field name="model">account.payment.term</field>
+        <field name="inherit_id" ref="account.view_payment_term_form" />
+        <field name="arch" type="xml">
+            <xpath expr="//sheet" position="inside">
+                <group
+                    string="UAE Billing"
+                    invisible="'AE' not in fiscal_country_codes"
+                >
+                    <field name="l10n_ae_billing_frequency_code" />
+                </group>
+            </xpath>
+        </field>
+    </record>
+</odoo>
