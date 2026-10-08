@@ -16,8 +16,8 @@ from ..tools.validation import (
     ValidationUnavailable,
     describe_ruleset,
 )
-from .account_tax import UAE_EXEMPTION_REASONS
 from .account_payment_method import UAE_PAYMENT_MEANS
+from .account_tax import UAE_EXEMPTION_REASONS
 
 
 class AccountMove(models.Model):

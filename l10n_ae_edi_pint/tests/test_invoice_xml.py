@@ -40,9 +40,11 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         )[:1]
         self.assertTrue(method)
         index = journal.inbound_payment_method_line_ids.ids.index(method.id)
-        with Form(journal.with_user(self.simple_accountman)) as form:
-            with form.inbound_payment_method_line_ids.edit(index) as line:
-                line.l10n_ae_edi_payment_means_code = "20"
+        with (
+            Form(journal.with_user(self.simple_accountman)) as form,
+            form.inbound_payment_method_line_ids.edit(index) as line,
+        ):
+            line.l10n_ae_edi_payment_means_code = "20"
         self.assertEqual(method.code, "manual")
         self.assertEqual(method.payment_type, "inbound")
         binding = self.env["l10n_ae.edi.binding"].create(
@@ -109,9 +111,11 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
             "idempotency_key",
         ]
         frozen = issue.read(immutable)
-        with Form(journal.with_user(self.simple_accountman)) as form:
-            with form.inbound_payment_method_line_ids.edit(index) as line:
-                line.l10n_ae_edi_payment_means_code = "30"
+        with (
+            Form(journal.with_user(self.simple_accountman)) as form,
+            form.inbound_payment_method_line_ids.edit(index) as line,
+        ):
+            line.l10n_ae_edi_payment_means_code = "30"
         invoice.action_l10n_ae_prepare()
         self.assertEqual(invoice.preview_l10n_ae_pint(), frozen[0]["xml_content"])
         self.assertTrue(invoice.validate_l10n_ae_pint()["valid"])
