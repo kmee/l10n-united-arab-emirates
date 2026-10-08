@@ -101,6 +101,87 @@ class TestCbuaePublication(AccountTestInvoicingCommon):
             review.read(["reviewed_at", "reviewed_by", "write_date"]), review_before
         )
 
+    def test_import_provenance_cannot_be_forged_changed_or_deleted(self):
+        manager = self.simple_accountman
+        publication = (
+            self.env["l10n_ae.cbuae.publication"]
+            .with_user(manager)
+            .create({"requested_date": "2026-08-26"})
+        )
+        response = Response()
+        response.status_code = 200
+        response.url = (
+            "https://centralbank.ae/umbraco/Surface/Exchange/"
+            "GetExchangeRateAllCurrencyDate?dateTime=2026-08-26"
+        )
+        response.headers["Content-Type"] = "text/html"
+        response._content = (
+            Path(__file__).parent / "cassettes/cbuae/cbuae-2026-08-26.html"
+        ).read_bytes()
+        response._content_consumed = True
+        with patch("requests.get", return_value=response):
+            publication.action_capture()
+        usd = self.env.ref("base.USD")
+        usd.active = True
+        review_model = self.env["l10n_ae.cbuae.rate.review"].with_user(manager)
+        values = {
+            "publication_id": publication.id,
+            "source_label": "US Dollar",
+            "currency_id": usd.id,
+            "review_note": "Explicit USD source mapping reviewed.",
+        }
+        for field, value in (
+            ("quote_literal", "99"),
+            ("reviewed_by", manager.id),
+            ("reviewed_at", "2026-08-26 18:05:16"),
+            ("anchor_rate_literal", "99"),
+            ("company_id", publication.company_id.id),
+        ):
+            with self.subTest(forge=field), self.assertRaises(UserError):
+                review_model.create({**values, field: value})
+        review = review_model.with_context(
+            default_quote_literal="99", default_reviewed_by=manager.id
+        ).create(values)
+        self.assertFalse(review.quote_literal)
+        self.assertFalse(review.reviewed_by)
+        review.action_import()
+        native_rate = review.native_rate_id
+        for change in (
+            {"source_label": "Euro"},
+            {"review_note": "Changed after import"},
+            {"quote_literal": "99"},
+            {"native_rate_id": False},
+        ):
+            with self.subTest(review_change=change), self.assertRaises(UserError):
+                review.write(change)
+        with self.assertRaises(UserError):
+            review.unlink()
+        rate_model = self.env["res.currency.rate"].with_user(manager)
+        rate_values = {
+            "name": "2026-08-28",
+            "currency_id": usd.id,
+            "company_id": publication.company_id.id,
+            "rate": 0.25,
+        }
+        with self.assertRaises(UserError):
+            rate_model.create({**rate_values, "l10n_ae_cbuae_review_id": review.id})
+        ordinary = rate_model.with_context(
+            default_l10n_ae_cbuae_review_id=review.id
+        ).create(rate_values)
+        self.assertFalse(ordinary.l10n_ae_cbuae_review_id)
+        with self.assertRaises(UserError):
+            ordinary.write({"l10n_ae_cbuae_review_id": review.id})
+        for change in ({"rate": 0.5}, {"name": "2026-08-27"}):
+            with self.subTest(native_change=change), self.assertRaises(UserError):
+                native_rate.write(change)
+        with self.assertRaises(UserError):
+            native_rate.unlink()
+        ordinary.write({"rate": 0.5})
+        self.assertEqual(ordinary.rate, 0.5)
+        ordinary.unlink()
+        self.assertEqual(review.quote_literal, "3.6725")
+        self.assertEqual(native_rate.l10n_ae_cbuae_review_id, review)
+
     def test_manager_captures_dated_original_without_importing_currency_rates(self):
         publication_model = self.env["l10n_ae.cbuae.publication"].with_user(
             self.simple_accountman
