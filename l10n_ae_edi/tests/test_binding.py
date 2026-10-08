@@ -113,6 +113,56 @@ class TestUaeProviderBinding(AccountTestInvoicingCommon):
                 allowed_company_ids=self.env.company.ids
             ).read(["name"])
 
+    def test_manager_cannot_move_reviewed_binding_to_unauthorized_company(self):
+        company = self.env.company
+        other = self.env["res.company"].create(
+            {"name": "Synthetic unauthorized binding destination"}
+        )
+        manager = new_test_user(
+            self.env,
+            login="uae-capability-company-manager",
+            groups="account.group_account_manager",
+            company_id=company.id,
+            company_ids=[(6, 0, company.ids)],
+        )
+        capabilities = self.env["l10n_ae.edi.capability"].search(
+            [("code", "in", ["submit", "lookup", "report", "billing_invoice"])]
+        )
+        binding = (
+            self.env["l10n_ae.edi.binding"]
+            .create(
+                {
+                    "name": "Synthetic reviewed company-isolated contract",
+                    "company_id": company.id,
+                    "capability_profile": "kmee-controlled-1",
+                    "capability_ids": [(6, 0, capabilities.ids)],
+                    "capability_review_note": "Reviewed only for this legal entity.",
+                }
+            )
+            .with_user(manager)
+            .with_context(allowed_company_ids=company.ids)
+        )
+        self.assertFalse(binding.env.su)
+        self.assertNotIn(other, manager.company_ids)
+        binding.action_review_capabilities()
+        binding.controlled_dispatch_enabled = True
+        evidence_fields = [
+            "company_id",
+            "capability_ids",
+            "capability_reviewed_by",
+            "capability_reviewed_at",
+            "capability_review_hash",
+            "capability_review_state",
+            "controlled_dispatch_enabled",
+        ]
+        original = binding.read(evidence_fields)
+        for elevated in (False, True):
+            actor = binding.sudo() if elevated else binding
+            with self.subTest(elevated=elevated):
+                with self.assertRaises(AccessError), self.cr.savepoint():
+                    actor.write({"company_id": other.id})
+                self.assertEqual(binding.read(evidence_fields), original)
+
     def test_controlled_local_uuid_assignment_cannot_be_enabled_in_production(self):
         binding = self.env["l10n_ae.edi.binding"].create(
             {
