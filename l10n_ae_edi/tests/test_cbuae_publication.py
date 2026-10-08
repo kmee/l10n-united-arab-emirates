@@ -5,8 +5,9 @@ from unittest.mock import patch
 
 from requests import Response
 
-from odoo.exceptions import UserError
+from odoo.exceptions import AccessError, UserError
 from odoo.tests import Form, tagged
+from odoo.tests.common import new_test_user
 
 from odoo.addons.account.tests.common import AccountTestInvoicingCommon
 
@@ -201,3 +202,55 @@ class TestCbuaePublication(AccountTestInvoicingCommon):
         duplicate = publication.copy()
         self.assertEqual(duplicate.state, "draft")
         self.assertFalse(duplicate.source_body)
+
+    def test_denies_unauthorized_capture_before_http_including_sudo(
+        self,
+    ):
+        publication = (
+            self.env["l10n_ae.cbuae.publication"]
+            .with_user(self.simple_accountman)
+            .create({"requested_date": "2026-08-26"})
+        )
+        reader = new_test_user(
+            self.env,
+            login="cbuae-reader",
+            groups="account.group_account_readonly",
+            company_id=self.env.company.id,
+            company_ids=self.env.company.ids,
+        )
+        other = self.env["res.company"].create(
+            {"name": "Other CBUAE entity", "country_id": self.env.ref("base.ae").id}
+        )
+        isolated = new_test_user(
+            self.env,
+            login="cbuae-other-manager",
+            groups="account.group_account_manager",
+            company_id=other.id,
+            company_ids=other.ids,
+        )
+        self.assertEqual(
+            publication.with_user(reader)
+            .read(["requested_date"])[0]["requested_date"]
+            .isoformat(),
+            "2026-08-26",
+        )
+        with patch("requests.get") as http:
+            for user in (reader, isolated):
+                for elevated in (False, True):
+                    with (
+                        self.subTest(user=user.login, elevated=elevated),
+                        self.cr.savepoint(),
+                    ):
+                        actor = (
+                            publication.with_user(user)
+                            .with_context(allowed_company_ids=user.company_ids.ids)
+                            .sudo(elevated)
+                        )
+                        with self.assertRaises(AccessError):
+                            actor.action_capture()
+            reader.active = False
+            with self.assertRaises(AccessError):
+                publication.with_user(reader).sudo().action_capture()
+            http.assert_not_called()
+        self.assertEqual(publication.state, "draft")
+        self.assertFalse(publication.source_body)
