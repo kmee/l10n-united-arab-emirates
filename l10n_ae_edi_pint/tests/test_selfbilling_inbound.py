@@ -15,6 +15,81 @@ from odoo.addons.account.tests.common import AccountTestInvoicingCommon
 
 @tagged("post_install", "-at_install")
 class TestUaeSelfBillingInbound(AccountTestInvoicingCommon):
+    def test_received_selfbilling_frequency_preserves_original_over_local_term(self):
+        source, _agreement, binding = self._selfbilling_fixture()
+        source.l10n_ae_billing_frequency_code = "MTH"
+        term = self.env["account.payment.term"].create(
+            {
+                "name": "Synthetic local weekly payment term",
+                "company_id": self.env.company.id,
+                "l10n_ae_billing_frequency_code": "WKY",
+                "line_ids": [Command.create({"value": "percent", "value_amount": 100})],
+            }
+        )
+        self.buyer.partner_id.with_company(
+            self.env.company
+        ).property_payment_term_id = term
+        content = source.preview_l10n_ae_pint().encode()
+        tree = etree.fromstring(content)
+        self.assertEqual(tree.findtext("./{*}InvoiceTypeCode"), "389")
+        self.assertEqual(tree.findtext("./{*}InvoicePeriod/{*}DescriptionCode"), "MTH")
+        manager = new_test_user(
+            self.env,
+            login="uae-received-frequency-manager",
+            groups="account.group_account_manager",
+            company_id=self.env.company.id,
+            company_ids=[Command.set(self.env.company.ids)],
+        )
+        inbox_model = (
+            self.env["l10n_ae.edi.inbox"]
+            .with_user(manager)
+            .with_company(self.env.company)
+        )
+        self.assertFalse(inbox_model.env.su)
+        inbox = inbox_model.receive_controlled_document(
+            binding.id, "selfbilling-monthly-frequency", content
+        )
+        self.assertTrue(inbox.action_process(), inbox.diagnostic)
+        received = inbox.move_id
+        self.assertEqual(received.invoice_payment_term_id, term)
+        self.assertEqual(received.l10n_ae_billing_frequency_code, "MTH")
+        self.assertEqual((received.move_type, received.state), ("out_invoice", "draft"))
+        self.assertTrue(received.l10n_ae_received_document)
+        self.assertFalse(received.l10n_ae_transmission_ids)
+        self.assertEqual(
+            (received.amount_untaxed, received.amount_tax, received.amount_total),
+            (100, 5, 105),
+        )
+        self.assertEqual(inbox.original_xml.content, content)
+        self.assertEqual(inbox.xml_hash, hashlib.sha256(content).hexdigest())
+        ledger_fields = [
+            "account_id",
+            "partner_id",
+            "currency_id",
+            "date",
+            "date_maturity",
+            "debit",
+            "credit",
+            "balance",
+            "amount_currency",
+            "tax_ids",
+            "create_date",
+            "write_date",
+        ]
+        ledger = received.line_ids.sorted("id").read(ledger_fields)
+        term.l10n_ae_billing_frequency_code = "DLY"
+        with self.assertRaisesRegex(UserError, "received UAE"):
+            received.write({"l10n_ae_billing_frequency_code": "WKY"})
+        replay = inbox_model.receive_controlled_document(
+            binding.id, "selfbilling-monthly-frequency", content
+        )
+        self.assertEqual(replay, inbox)
+        self.assertTrue(replay.action_process(), replay.diagnostic)
+        self.assertEqual(replay.move_id, received)
+        self.assertEqual(received.l10n_ae_billing_frequency_code, "MTH")
+        self.assertEqual(received.line_ids.sorted("id").read(ledger_fields), ledger)
+        self.assertEqual(replay.original_xml.content, content)
+
     def test_margin_selfbilling_partial_credit_preserves_roles_and_originals(self):
         # Independently worked representation:1000/N5/VAT0 original,
         # quarter adjustment250. Agreements define buyer and supplier roles.
