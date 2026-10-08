@@ -3,14 +3,30 @@
     <record id="cbuae_rate_review_company_rule" model="ir.access">
         <field name="name">CBUAE native rate review company isolation</field>
         <field name="model_id" ref="model_l10n_ae_cbuae_rate_review" />
-        <field name="operation">crud</field>
+        <field name="operation">cud</field>
         <field name="domain">[('company_id', 'in', company_ids)]</field>
+    </record>
+    <record id="cbuae_rate_review_source_read_rule" model="ir.access">
+        <field name="name">CBUAE imported ancestor rate source reading</field>
+        <field name="model_id" ref="model_l10n_ae_cbuae_rate_review" />
+        <field name="operation">r</field>
+        <field
+            name="domain"
+        >['|', ('company_id', 'in', company_ids), '&amp;', ('company_id', 'parent_of', company_ids), ('native_rate_id', '!=', False)]</field>
     </record>
     <record id="cbuae_publication_company_rule" model="ir.access">
         <field name="name">CBUAE publication company isolation</field>
         <field name="model_id" ref="model_l10n_ae_cbuae_publication" />
-        <field name="operation">crud</field>
+        <field name="operation">cud</field>
         <field name="domain">[('company_id', 'in', company_ids)]</field>
+    </record>
+    <record id="cbuae_publication_source_read_rule" model="ir.access">
+        <field name="name">CBUAE imported ancestor publication reading</field>
+        <field name="model_id" ref="model_l10n_ae_cbuae_publication" />
+        <field name="operation">r</field>
+        <field
+            name="domain"
+        >['|', ('company_id', 'in', company_ids), '&amp;', ('company_id', 'parent_of', company_ids), ('rate_review_ids.native_rate_id', '!=', False)]</field>
     </record>
     <record id="edi_calendar_company_rule" model="ir.access">
         <field name="name">UAE calendar version company isolation</field>

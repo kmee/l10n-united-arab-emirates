@@ -50,6 +50,9 @@ class CbuaePublication(models.Model):
     publication_stamp = fields.Char(readonly=True, copy=False)
     publication_date = fields.Date(readonly=True, copy=False)
     quotes = fields.Json(readonly=True, copy=False)
+    rate_review_ids = fields.One2many(
+        "l10n_ae.cbuae.rate.review", "publication_id", readonly=True, copy=False
+    )
 
     _max_source_bytes: ClassVar[int] = 2 * 1024 * 1024
     _max_elapsed_seconds: ClassVar[int] = 30
