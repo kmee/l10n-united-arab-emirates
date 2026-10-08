@@ -49,7 +49,12 @@ class TestUaeFiscalCategoryMatrix(AccountTestInvoicingCommon):
                     "invoice_date": "2019-01-01",
                     "l10n_ae_margin_scheme": True,
                     "l10n_ae_binding_id": self.env["l10n_ae.edi.binding"]
-                    .create({"name": "Synthetic reviewed margin representation"})
+                    .create(
+                        {
+                            "name": "Synthetic reviewed margin representation",
+                            "fiscal_uuid_policy": "controlled_local",
+                        }
+                    )
                     .id,
                     "invoice_line_ids": [
                         Command.create(
