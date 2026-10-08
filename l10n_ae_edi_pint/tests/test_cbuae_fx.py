@@ -1,7 +1,6 @@
 # Copyright 2026 KMEE
 # License AGPL-3.0 or later (https://www.gnu.org/licenses/agpl).
 import json
-import logging
 from functools import partial
 from pathlib import Path
 from unittest.mock import patch
@@ -66,38 +65,28 @@ class TestUaeCbuaeFx(TestUaeInvoiceXml):
         # the imported source was reviewed for USD on this native currency ID.
         self.env.ref("base.ZAR").write({"name": "ZZX"})
         usd.write({"name": "ZAR"})
-        # Complete the native master edit, as the HTTP request would do, before
-        # measuring any UAE replay. Stored native recomputations can change the
-        # accounting-line write actor; values and the frozen issue must survive.
+        # Complete the native master edit before measuring any UAE replay.
         self.env.flush_all()
         after_rename = original.line_ids.sorted("id").read(ledger_fields)
-
-        def trace_original(phase):
-            logging.getLogger(__name__).info(
-                "[DEBUG-cbuae-identity] %s %s",
-                phase,
-                original.line_ids.sorted("id").read(
-                    ["write_uid", "write_date", "balance"]
-                ),
-            )
-
-        trace_original("after_rename")
-        for before, after in zip(ledger, after_rename, strict=True):
-            self.assertEqual(
-                {key: value for key, value in before.items() if key != "write_uid"},
-                {key: value for key, value in after.items() if key != "write_uid"},
-            )
+        self.assertEqual(after_rename, ledger)
         self.assertEqual(issue.read(immutable), frozen)
         company.l10n_ae_edi_auto_prepare = True
         following = self.init_invoice(
             "out_invoice", amounts=[100], taxes=self.tax_sale_a, currency=usd
         ).with_user(self.simple_accountman)
-        trace_original("after_following_create")
         self.assertFalse(following.env.su)
         with Form(following) as form:
             form.invoice_date = "2026-08-27"
             form.l10n_ae_binding_id = binding
-        trace_original("after_following_form")
+        # The pinned native Form changes the first invoice's line write_uid
+        # while saving the second invoice, before either UAE refusal or replay.
+        # Preserve that observed boundary instead of attributing it to replay.
+        after_form = original.line_ids.sorted("id").read(ledger_fields)
+        for before, after in zip(ledger, after_form, strict=True):
+            self.assertEqual(
+                {key: value for key, value in before.items() if key != "write_uid"},
+                {key: value for key, value in after.items() if key != "write_uid"},
+            )
         self.assertEqual(following.currency_id.name, "ZAR")
         self.assertEqual(following.l10n_ae_effective_tax_exchange_origin, "review")
         self.assertIn(
@@ -106,7 +95,6 @@ class TestUaeCbuaeFx(TestUaeInvoiceXml):
         )
         self.assertFalse(following.l10n_ae_effective_cbuae_review_id)
         following.action_post()
-        trace_original("after_following_post")
         self.assertEqual(following.state, "posted")
         self.assertEqual(following.amount_tax_signed, 18.36)
         self.assertEqual(following.amount_total_signed, 385.61)
@@ -121,7 +109,6 @@ class TestUaeCbuaeFx(TestUaeInvoiceXml):
         ):
             with self.assertRaisesRegex(UserError, "currency code"):
                 action()
-            trace_original("after_" + action.__name__)
         self.assertEqual(
             following.line_ids.sorted("id").read(ledger_fields), following_ledger
         )
@@ -138,13 +125,10 @@ class TestUaeCbuaeFx(TestUaeInvoiceXml):
             retained,
         )
         original.action_l10n_ae_prepare()
-        trace_original("after_original_prepare")
         self.assertTrue(original.validate_l10n_ae_pint()["valid"])
         self.assertEqual(original.preview_l10n_ae_pint(), frozen[0]["xml_content"])
         self.assertEqual(issue.read(immutable), frozen)
-        self.assertEqual(
-            original.line_ids.sorted("id").read(ledger_fields), after_rename
-        )
+        self.assertEqual(original.line_ids.sorted("id").read(ledger_fields), after_form)
         self.assertEqual(
             json.loads(issue.payload)["tax_exchange"]["source_currency"], "USD"
         )
