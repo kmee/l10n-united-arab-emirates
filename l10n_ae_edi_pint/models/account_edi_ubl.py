@@ -193,6 +193,10 @@ class AccountEdiUblUae(models.AbstractModel):
                     },
                 }
             )
+        if invoice.l10n_ae_billing_frequency_code:
+            vals["document_node"]["cac:InvoicePeriod"]["cbc:DescriptionCode"] = {
+                "_text": invoice.l10n_ae_billing_frequency_code
+            }
         return result
 
     def _ubl_get_line_item_node_classified_tax_category_node(self, vals, tax_category):
