@@ -2,6 +2,7 @@
 # License AGPL-3.0 or later (https://www.gnu.org/licenses/agpl).
 from . import res_company
 from . import cbuae_publication
+from . import cbuae_rate_review
 from . import res_partner
 from . import product_product
 from . import product_template

@@ -20,6 +20,87 @@ class TestCbuaePublication(AccountTestInvoicingCommon):
     def setUpClass(cls):
         super().setUpClass()
 
+    def test_reviewed_quote_imports_native_rate_with_publication_provenance(self):
+        manager = self.simple_accountman
+        company = self.company_data["company"]
+        usd = self.env.ref("base.USD")
+        aed = self.env.ref("base.AED")
+        usd.active = True
+        publication = (
+            self.env["l10n_ae.cbuae.publication"]
+            .with_user(manager)
+            .create({"requested_date": "2026-08-26"})
+        )
+        original = (
+            Path(__file__).parent / "cassettes/cbuae/cbuae-2026-08-26.html"
+        ).read_bytes()
+        response = Response()
+        response.status_code = 200
+        response.url = (
+            "https://centralbank.ae/umbraco/Surface/Exchange/"
+            "GetExchangeRateAllCurrencyDate?dateTime=2026-08-26"
+        )
+        response.headers["Content-Type"] = "text/html; charset=utf-8"
+        response._content = original
+        response._content_consumed = True
+        with patch("requests.get", return_value=response):
+            publication.action_capture()
+        rates = self.env["res.currency.rate"].search([])
+        before = rates.read(["name", "rate", "company_id", "currency_id", "write_date"])
+        review_model = self.env["l10n_ae.cbuae.rate.review"].with_user(manager)
+        self.assertFalse(review_model.env.su)
+        with Form(review_model) as form:
+            form.publication_id = publication
+            form.source_label = "US Dollar"
+            form.currency_id = usd
+            form.review_note = "Reviewed exact US Dollar label against USD."
+        review = form.record
+        self.assertEqual(
+            rates.read(["name", "rate", "company_id", "currency_id", "write_date"]),
+            before,
+        )
+        review.action_import()
+        imported = review.native_rate_id
+        self.assertTrue(imported)
+        self.assertEqual(imported.company_id, company)
+        self.assertEqual(imported.currency_id, usd)
+        self.assertEqual(imported.name.isoformat(), "2026-08-26")
+        self.assertEqual(imported.l10n_ae_cbuae_review_id, review)
+        self.assertEqual(review.quote_literal, "3.6725")
+        self.assertEqual(review.publication_id, publication)
+        self.assertEqual(review.reviewed_by, manager)
+        self.assertTrue(review.reviewed_at)
+        self.assertEqual(review.anchor_rate_literal, "1.0")
+        self.assertAlmostEqual(
+            usd.with_company(company)._convert(100, aed, company, "2026-08-27"),
+            367.25,
+        )
+        self.assertAlmostEqual(
+            usd.with_company(company)._convert(
+                105, aed, company, "2026-08-27", round=False
+            ),
+            385.6125,
+        )
+        self.assertEqual(
+            usd.with_company(company)
+            .with_context(date="2026-08-27")
+            .rate_date.isoformat(),
+            "2026-08-26",
+        )
+        self.assertEqual(publication.source_body.content, original)
+        after = self.env["res.currency.rate"].search([])
+        self.assertEqual(after - rates, imported)
+        imported_before = imported.read(["rate", "write_uid", "write_date"])
+        review_before = review.read(["reviewed_at", "reviewed_by", "write_date"])
+        review.action_import()
+        self.assertEqual(review.native_rate_id, imported)
+        self.assertEqual(
+            imported.read(["rate", "write_uid", "write_date"]), imported_before
+        )
+        self.assertEqual(
+            review.read(["reviewed_at", "reviewed_by", "write_date"]), review_before
+        )
+
     def test_manager_captures_dated_original_without_importing_currency_rates(self):
         publication_model = self.env["l10n_ae.cbuae.publication"].with_user(
             self.simple_accountman
