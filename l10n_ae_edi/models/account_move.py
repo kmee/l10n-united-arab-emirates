@@ -1242,6 +1242,14 @@ class AccountMove(models.Model):
                     ).l10n_ae_fiscal_uuid = str(uuid.uuid4())
                     uuid_source = "controlled_local"
                 snapshot = self._l10n_ae_snapshot()
+                snapshot["binding_contract"] = {
+                    **binding._capability_facts(),
+                    "reviewed_by": binding.capability_reviewed_by.id,
+                    "reviewed_at": fields.Datetime.to_string(
+                        binding.capability_reviewed_at
+                    ),
+                    "review_hash": binding.capability_review_hash,
+                }
                 snapshot["fiscal_uuid_assignment"] = {
                     "policy": binding.fiscal_uuid_policy,
                     "source": uuid_source,
