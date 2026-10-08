@@ -7,7 +7,7 @@ from lxml import etree
 
 from odoo import Command
 from odoo.exceptions import UserError
-from odoo.tests import tagged
+from odoo.tests import Form, tagged
 
 from odoo.addons.account.tests.common import AccountTestInvoicingCommon
 
@@ -19,6 +19,134 @@ NS = {
 
 @tagged("post_install", "-at_install")
 class TestUaeFiscalCategoryMatrix(AccountTestInvoicingCommon):
+    def test_margin_n_nominal_rate_preserves_native_amounts_and_frozen_xml(self):
+        # Independently worked official Margin scheme.xml: AED1000 payable,
+        # displayed VAT0, category N with nominal5. This is a representation
+        # fixture; it does not compute the supplier's VAT liability on profit.
+        tax = self.tax_sale_a.copy(
+            {"name": "Synthetic reviewed additional VAT", "amount": 0}
+        )
+        with Form(tax) as form:
+            form.ubl_cii_tax_category_code = "N"
+            form.l10n_ae_edi_additional_vat_rate = 5
+        product = self.env["product.product"].create(
+            {
+                "name": "Synthetic reviewed antique",
+                "type": "consu",
+                "l10n_ae_classification_code": "970600",
+                "taxes_id": [Command.set(tax.ids)],
+            }
+        )
+        invoice = (
+            self.env["account.move"]
+            .with_user(self.simple_accountman)
+            .create(
+                {
+                    "move_type": "out_invoice",
+                    "partner_id": self.partner_a.id,
+                    "journal_id": self.company_data["default_journal_sale"].id,
+                    "currency_id": self.env.ref("base.AED").id,
+                    "invoice_date": "2019-01-01",
+                    "l10n_ae_margin_scheme": True,
+                    "l10n_ae_binding_id": self.env["l10n_ae.edi.binding"]
+                    .create({"name": "Synthetic reviewed margin representation"})
+                    .id,
+                    "invoice_line_ids": [
+                        Command.create(
+                            {
+                                "product_id": product.id,
+                                "name": product.name,
+                                "price_unit": 1000,
+                                "account_id": self.company_data[
+                                    "default_account_revenue"
+                                ].id,
+                                "tax_ids": [Command.set(tax.ids)],
+                            }
+                        )
+                    ],
+                }
+            )
+        )
+        self.assertFalse(invoice.env.su)
+        invoice.action_post()
+        self.assertEqual(
+            (invoice.amount_untaxed, invoice.amount_tax, invoice.amount_total),
+            (1000, 0, 1000),
+        )
+        ledger_fields = [
+            "account_id",
+            "debit",
+            "credit",
+            "amount_currency",
+            "tax_ids",
+            "create_date",
+            "write_date",
+        ]
+        ledger = invoice.line_ids.read(ledger_fields)
+        invoice.action_l10n_ae_prepare()
+        issue = invoice.l10n_ae_transmission_id
+        self.assertTrue(issue)
+        root = etree.fromstring(issue.xml_content.encode())
+        self.assertEqual(
+            root.findtext("cbc:ProfileExecutionID", namespaces=NS), "00100000"
+        )
+        category = root.find("cac:InvoiceLine/cac:Item/cac:ClassifiedTaxCategory", NS)
+        self.assertEqual(category.findtext("cbc:ID", namespaces=NS), "N")
+        self.assertEqual(Decimal(category.findtext("cbc:Percent", namespaces=NS)), 5)
+        self.assertEqual(
+            Decimal(
+                root.findtext("cac:InvoiceLine/cbc:LineExtensionAmount", namespaces=NS)
+            ),
+            1000,
+        )
+        self.assertEqual(
+            Decimal(
+                root.findtext(
+                    "cac:InvoiceLine/cac:ItemPriceExtension/cac:TaxTotal/cbc:TaxAmount",
+                    namespaces=NS,
+                )
+            ),
+            0,
+        )
+        subtotals = root.findall("cac:TaxTotal/cac:TaxSubtotal", NS)
+        self.assertEqual(len(subtotals), 1)
+        subtotal = subtotals[0]
+        self.assertEqual(
+            subtotal.findtext("cac:TaxCategory/cbc:ID", namespaces=NS), "N"
+        )
+        self.assertEqual(
+            Decimal(subtotal.findtext("cac:TaxCategory/cbc:Percent", namespaces=NS)), 5
+        )
+        self.assertEqual(
+            Decimal(subtotal.findtext("cbc:TaxableAmount", namespaces=NS)), 1000
+        )
+        self.assertEqual(Decimal(subtotal.findtext("cbc:TaxAmount", namespaces=NS)), 0)
+        for name in (
+            "LineExtensionAmount",
+            "TaxExclusiveAmount",
+            "TaxInclusiveAmount",
+            "PayableAmount",
+        ):
+            self.assertEqual(
+                Decimal(
+                    root.findtext("cac:LegalMonetaryTotal/cbc:" + name, namespaces=NS)
+                ),
+                1000,
+            )
+        self.assertTrue(invoice.validate_l10n_ae_pint()["valid"])
+        frozen = issue.xml_content
+        snapshot = json.loads(issue.payload)
+        self.assertEqual(snapshot["transaction_flags"], "00100000")
+        facts = snapshot["lines"][0]["additional_vat_rates"]
+        self.assertEqual(len(facts), 1)
+        self.assertEqual(facts[0]["category"], "N")
+        self.assertEqual(Decimal(facts[0]["nominal_rate"]), 5)
+        tax.l10n_ae_edi_additional_vat_rate = 7
+        self.assertEqual(invoice.preview_l10n_ae_pint(), frozen)
+        self.assertEqual(json.loads(issue.payload), snapshot)
+        self.assertEqual(invoice.line_ids.read(ledger_fields), ledger)
+        self.assertEqual(tax.amount, 0)
+
     def test_margin_scheme_requires_reviewed_n_categories_before_issue(self):
         self.env.company.l10n_ae_edi_auto_prepare = True
         invoice = (
