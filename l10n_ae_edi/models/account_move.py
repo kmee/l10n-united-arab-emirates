@@ -1608,6 +1608,7 @@ class AccountMove(models.Model):
                 )
             )
         rate_facts = []
+        cbuae_provenance = None
         for currency in self.currency_id | self.company_currency_id:
             dated_currency = currency.with_company(self.company_id).with_context(
                 date=fields.Date.to_string(conversion_date),
@@ -1637,6 +1638,8 @@ class AccountMove(models.Model):
                 raise UserError(
                     self.env._("The dated AED exchange rate source cannot be read.")
                 )
+            if currency == self.currency_id:
+                cbuae_provenance = record._l10n_ae_cbuae_provenance()
             rate_facts.append(
                 {
                     "record_id": record.id,
@@ -1656,6 +1659,8 @@ class AccountMove(models.Model):
             "inverse_before_serialization": str(inverse),
             "rates": rate_facts,
         }
+        if cbuae_provenance:
+            evidence["cbuae_provenance"] = cbuae_provenance
         evidence["source_sha256"] = hashlib.sha256(
             json.dumps(evidence, sort_keys=True, separators=(",", ":")).encode()
         ).hexdigest()

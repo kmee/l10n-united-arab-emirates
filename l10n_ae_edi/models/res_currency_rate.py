@@ -36,3 +36,36 @@ class ResCurrencyRate(models.Model):
 
     def _create_cbuae_rate(self, review, values):
         return super().create({**values, "l10n_ae_cbuae_review_id": review.id})
+
+    def _l10n_ae_cbuae_provenance(self):
+        """Return the selected row's reviewed source chain, without fiscal approval."""
+        self.ensure_one()
+        self.with_user(self.env.uid).check_access("read")
+        review = self.l10n_ae_cbuae_review_id.with_user(self.env.uid)
+        if not review:
+            return None
+        review.check_access("read")
+        publication = review.publication_id
+        publication.check_access("read")
+        return {
+            "review_id": review.id,
+            "publication_id": publication.id,
+            "native_rate_id": self.id,
+            "source_label": review.source_label,
+            "quote_literal": review.quote_literal,
+            "currency_code": review.import_facts["currency_code"],
+            "review_note": review.review_note,
+            "reviewed_by": review.reviewed_by.id,
+            "reviewed_at": fields.Datetime.to_string(review.reviewed_at),
+            "import_facts": review.import_facts,
+            "source": {
+                "url": publication.source_url,
+                "date": fields.Date.to_string(publication.publication_date),
+                "stamp": publication.publication_stamp,
+                "sha256": publication.source_sha256,
+                "http_status": publication.http_status,
+                "content_type": publication.content_type,
+                "retrieved_at": fields.Datetime.to_string(publication.retrieved_at),
+                "complete": publication.source_complete,
+            },
+        }
