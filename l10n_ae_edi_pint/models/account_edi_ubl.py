@@ -62,6 +62,23 @@ class AccountEdiUblUae(models.AbstractModel):
                             "the native tax calculation will not be changed."
                         )
                     )
+        for subtotal in document.findall("{*}TaxTotal/{*}TaxSubtotal"):
+            category = subtotal.find("{*}TaxCategory")
+            if category is not None and (
+                (category.findtext("{*}ID") or "").strip() == "N"
+                and (category.findtext("{*}TaxScheme/{*}ID") or "").strip().upper()
+                == "VAT"
+            ):
+                vat_amount = Decimal(subtotal.findtext("{*}TaxAmount") or "0")
+                if not vat_amount.is_finite() or vat_amount != 0:
+                    raise UserError(
+                        self.env._(
+                            "IBR-108-AE: category N requires zero disclosed VAT. "
+                            "Review the fiscal representation and accounting "
+                            "policy; existing VAT and ledger amounts will not "
+                            "be zeroed automatically."
+                        )
+                    )
         transaction_type = document.findtext("{*}ProfileExecutionID") or ""
         if (
             len(transaction_type) == 8
