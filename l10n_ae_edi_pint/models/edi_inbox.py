@@ -641,6 +641,9 @@ class UaeEdiInbox(models.Model):
                 "./{*}InvoicePeriod/{*}DescriptionCode"
             )
             or False,
+            "l10n_ae_billing_frequency_note": tree.findtext("./{*}Note")
+            if tree.findtext("./{*}InvoicePeriod/{*}DescriptionCode") == "OTH"
+            else False,
             "l10n_ae_disclosed_agent": transaction_flags[5] == "1",
             "l10n_ae_ecommerce": transaction_flags[6] == "1",
             "l10n_ae_principal_id": principal_id,
