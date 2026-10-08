@@ -182,6 +182,88 @@ class TestCbuaePublication(AccountTestInvoicingCommon):
         self.assertEqual(review.quote_literal, "3.6725")
         self.assertEqual(native_rate.l10n_ae_cbuae_review_id, review)
 
+    def test_import_freezes_currency_identity_and_dated_nonunit_anchor(self):
+        company = self.company_data["company"]
+        manager = self.simple_accountman
+        usd = self.env.ref("base.USD")
+        aed = self.env.ref("base.AED")
+        usd.active = True
+        anchor = self.env["res.currency.rate"].create(
+            {
+                "company_id": company.id,
+                "currency_id": aed.id,
+                "name": "2026-08-25",
+                "rate": 2.0,
+            }
+        )
+        # A future anchor must not influence an earlier dated import through the
+        # latest-rate inverse widget. Both anchors are real public native rows.
+        self.env["res.currency.rate"].create(
+            {
+                "company_id": company.id,
+                "currency_id": aed.id,
+                "name": "2026-09-01",
+                "rate": 9.0,
+            }
+        )
+        publication = (
+            self.env["l10n_ae.cbuae.publication"]
+            .with_user(manager)
+            .create({"requested_date": "2026-08-26"})
+        )
+        response = Response()
+        response.status_code = 200
+        response.url = (
+            "https://centralbank.ae/umbraco/Surface/Exchange/"
+            "GetExchangeRateAllCurrencyDate?dateTime=2026-08-26"
+        )
+        response.headers["Content-Type"] = "text/html"
+        response._content = (
+            Path(__file__).parent / "cassettes/cbuae/cbuae-2026-08-26.html"
+        ).read_bytes()
+        response._content_consumed = True
+        with patch("requests.get", return_value=response):
+            publication.action_capture()
+        review = (
+            self.env["l10n_ae.cbuae.rate.review"]
+            .with_user(manager)
+            .create(
+                {
+                    "publication_id": publication.id,
+                    "source_label": "US Dollar",
+                    "currency_id": usd.id,
+                    "review_note": "Explicit USD label with dated nonunit AED anchor.",
+                }
+            )
+        )
+        review.action_import()
+        self.assertAlmostEqual(
+            usd.with_company(company)._convert(100, aed, company, "2026-08-27"),
+            367.25,
+        )
+        self.assertEqual(review.anchor_rate_id, anchor)
+        self.assertEqual(review.anchor_rate_literal, "2.0")
+        facts = review.import_facts
+        self.assertEqual(facts["currency_code"], "USD")
+        self.assertEqual(facts["publication_date"], "2026-08-26")
+        self.assertEqual(facts["anchor"]["date"], "2026-08-25")
+        self.assertEqual(facts["anchor"]["id"], anchor.id)
+        self.assertEqual(facts["anchor"]["technical_rate"], "2.0")
+        self.assertEqual(facts["anchor"]["company_id"], company.id)
+        self.assertEqual(facts["anchor"]["write_uid"], anchor.write_uid.id)
+        self.assertTrue(facts["anchor"]["write_date"])
+        self.assertEqual(facts["technical_rate"], str(review.native_rate_id.rate))
+        # Ordinary rate masters remain editable; retained review facts do not
+        # become today's values or imply today's conversion is still applicable.
+        anchor.write({"rate": 4.0})
+        usd.write({"name": "USX"})
+        review.action_import()
+        self.assertEqual(review.import_facts, facts)
+        self.assertEqual(review.import_facts["currency_code"], "USD")
+        self.assertEqual(review.import_facts["anchor"]["technical_rate"], "2.0")
+        with self.assertRaises(UserError):
+            review.write({"import_facts": {"currency_code": "USX"}})
+
     def test_manager_captures_dated_original_without_importing_currency_rates(self):
         publication_model = self.env["l10n_ae.cbuae.publication"].with_user(
             self.simple_accountman
