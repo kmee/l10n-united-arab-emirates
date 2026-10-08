@@ -56,6 +56,10 @@ class UaeEdiEvidence(models.Model):
             )
 
     @api.depends(
+        "dispatch_review_required",
+        "dispatch_error_kind",
+        "dispatch_review_at",
+        "dispatch_validation_receipt",
         "retention_ids",
         "retention_ids.write_date",
         "retention_ids.hold_ids",
@@ -109,6 +113,11 @@ class UaeEdiEvidence(models.Model):
             )
         preserve("snapshot.json", issue.payload.encode(), issue.payload_hash)
         preserve("document.xml", issue.xml_content.encode(), issue.xml_hash)
+        if issue.dispatch_validation_receipt:
+            preserve_json(
+                "local-validation-rejection.json",
+                json.loads(issue.dispatch_validation_receipt),
+            )
         attempts = issue.attempt_ids
         preserve_json(
             "attempts.json",
@@ -261,6 +270,7 @@ class UaeEdiEvidence(models.Model):
                     "confirmation_state",
                     "event_review_required",
                     "dispatch_review_required",
+                    "dispatch_error_kind",
                 ]
             },
             "relationships": {
@@ -282,6 +292,11 @@ class UaeEdiEvidence(models.Model):
                 for name, content in sorted(artifacts.items())
             },
         }
+        manifest["facts"]["dispatch_review_at"] = (
+            fields.Datetime.to_string(issue.dispatch_review_at)
+            if issue.dispatch_review_at
+            else False
+        )
         preserve_json("manifest.json", manifest)
         output = io.BytesIO()
         with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_STORED) as archive:
