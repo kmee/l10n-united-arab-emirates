@@ -32,6 +32,104 @@ NS = {
 
 @tagged("post_install", "-at_install")
 class TestUaeInvoiceXml(AccountTestInvoicingCommon):
+    def test_api_invoice_defaults_reviewed_monthly_term_without_supply_dates(self):
+        self.env.company.l10n_ae_edi_auto_prepare = False
+        term = self.env["account.payment.term"].create(
+            {
+                "name": "Synthetic API reviewed monthly sixty-day term",
+                "company_id": self.env.company.id,
+                "l10n_ae_billing_frequency_code": "MTH",
+                "line_ids": [
+                    (0, 0, {"value": "percent", "value_amount": 100, "nb_days": 60})
+                ],
+            }
+        )
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {"name": "Synthetic API monthly", "fiscal_uuid_policy": "controlled_local"}
+        )
+        invoice = (
+            self.env["account.move"]
+            .with_user(self.simple_accountman)
+            .with_company(self.env.company)
+            .create(
+                {
+                    "move_type": "out_invoice",
+                    "partner_id": self.partner_a.id,
+                    "invoice_date": "2026-01-31",
+                    "invoice_payment_term_id": term.id,
+                    "l10n_ae_binding_id": binding.id,
+                    "invoice_line_ids": [
+                        (
+                            0,
+                            0,
+                            {
+                                "product_id": self.product_a.id,
+                                "name": "Synthetic reviewed monthly supply",
+                                "price_unit": 100,
+                                "tax_ids": [(6, 0, self.tax_sale_a.ids)],
+                            },
+                        )
+                    ],
+                }
+            )
+        )
+        self.assertFalse(invoice.env.su)
+        self.assertEqual(invoice.l10n_ae_billing_frequency_code, "MTH")
+        self.assertFalse(invoice.l10n_ae_invoicing_period_start)
+        self.assertFalse(invoice.l10n_ae_invoicing_period_end)
+        self.assertEqual(str(invoice.invoice_date_due), "2026-04-01")
+        invoice.action_post()
+        self.assertEqual(
+            (invoice.amount_untaxed, invoice.amount_tax, invoice.amount_total),
+            (100, 5, 105),
+        )
+        ledger_fields = [
+            "account_id",
+            "partner_id",
+            "currency_id",
+            "date",
+            "date_maturity",
+            "debit",
+            "credit",
+            "balance",
+            "amount_currency",
+            "tax_ids",
+            "create_date",
+            "write_date",
+        ]
+        ledger = invoice.line_ids.sorted("id").read(ledger_fields)
+        invoice.action_l10n_ae_prepare()
+        issue = invoice.l10n_ae_transmission_id
+        tree = etree.fromstring(issue.xml_content.encode())
+        periods = tree.findall("cac:InvoicePeriod", namespaces=NS)
+        self.assertEqual(len(periods), 1)
+        self.assertEqual(
+            periods[0].findtext("cbc:DescriptionCode", namespaces=NS), "MTH"
+        )
+        self.assertIsNone(periods[0].find("cbc:StartDate", namespaces=NS))
+        self.assertIsNone(periods[0].find("cbc:EndDate", namespaces=NS))
+        self.assertEqual(tree.findtext("cbc:DueDate", namespaces=NS), "2026-04-01")
+        self.assertEqual(
+            json.loads(issue.payload)["invoicing_period"],
+            {"start_date": None, "end_date": None, "billing_frequency_code": "MTH"},
+        )
+        report = invoice.validate_l10n_ae_pint()
+        self.assertTrue(report["valid"], report)
+        immutable = [
+            "payload",
+            "xml_content",
+            "payload_hash",
+            "xml_hash",
+            "idempotency_key",
+        ]
+        originals = issue.read(immutable)
+        term.l10n_ae_billing_frequency_code = "WKY"
+        self.assertEqual(invoice.l10n_ae_billing_frequency_code, "MTH")
+        invoice.action_l10n_ae_prepare()
+        self.assertEqual(issue.read(immutable), originals)
+        self.assertEqual(invoice.line_ids.sorted("id").read(ledger_fields), ledger)
+        self.assertFalse(issue.attempt_ids or issue.event_ids)
+
     def test_other_billing_frequency_reviews_explanation_without_replacing_terms(self):
         binding = self.env["l10n_ae.edi.binding"].create(
             {
