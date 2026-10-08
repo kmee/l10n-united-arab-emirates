@@ -3,8 +3,8 @@
 import json
 
 from odoo import Command
-from odoo.exceptions import UserError
-from odoo.tests import tagged
+from odoo.exceptions import UserError, ValidationError
+from odoo.tests import Form, tagged
 
 from odoo.addons.account.tests.common import AccountTestInvoicingCommon
 
@@ -35,6 +35,60 @@ class TestUaeInvoicePreparation(AccountTestInvoicingCommon):
         cls.binding = cls.env["l10n_ae.edi.binding"].create(
             {"name": "Synthetic sandbox ASP"}
         )
+
+    def test_unsupported_contract_document_keeps_native_post_until_reviewed(self):
+        binding = self.binding.with_user(self.simple_accountman)
+        capabilities = binding.env["l10n_ae.edi.capability"].search(
+            [("code", "in", ["submit", "lookup", "report", "billing_credit"])]
+        )
+        self.assertEqual(len(capabilities), 4)
+        with Form(binding) as form:
+            form.fiscal_uuid_policy = "controlled_local"
+            form.capability_profile = "kmee-controlled-1"
+            form.capability_review_note = (
+                "Only billing credits contracted in this test."
+            )
+            for capability in capabilities:
+                form.capability_ids.add(capability)
+        binding.action_review_capabilities()
+        self.env.company.l10n_ae_edi_auto_prepare = True
+        invoice = self.init_invoice("out_invoice", amounts=[100], taxes=self.tax_sale_a)
+        invoice.l10n_ae_binding_id = binding
+        actor = invoice.with_user(self.simple_accountman)
+        self.assertFalse(actor.env.su)
+        actor.action_post()
+        self.assertEqual(actor.state, "posted")
+        self.assertEqual(actor.amount_total, 105)
+        self.assertEqual(actor.l10n_ae_preparation_state, "review")
+        self.assertIn("billing_invoice", actor.l10n_ae_preparation_error)
+        self.assertFalse(actor.l10n_ae_transmission_ids)
+        self.assertFalse(actor.l10n_ae_fiscal_uuid)
+        ledger_fields = [
+            "balance",
+            "amount_currency",
+            "account_id",
+            "tax_ids",
+            "write_uid",
+            "write_date",
+        ]
+        ledger = actor.line_ids.read(ledger_fields)
+        with (
+            self.assertRaisesRegex(ValidationError, "billing_invoice"),
+            self.cr.savepoint(),
+        ):
+            actor.action_l10n_ae_prepare()
+        self.assertFalse(actor.l10n_ae_transmission_ids)
+        self.assertFalse(actor.l10n_ae_fiscal_uuid)
+        with Form(binding) as form:
+            form.capability_ids.add(
+                binding.env.ref("l10n_ae_edi.capability_billing_invoice")
+            )
+        binding.action_review_capabilities()
+        actor.action_l10n_ae_prepare()
+        self.assertEqual(actor.l10n_ae_preparation_state, "ready")
+        self.assertTrue(actor.l10n_ae_fiscal_uuid)
+        self.assertEqual(len(actor.l10n_ae_transmission_ids), 1)
+        self.assertEqual(actor.line_ids.read(ledger_fields), ledger)
 
     def test_native_batch_frequency_defaults_preserve_explicit_values_and_clears(self):
         term = self.env["account.payment.term"].create(
