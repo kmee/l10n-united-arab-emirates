@@ -149,6 +149,7 @@ class ControlledInboxWorker:
         """Commit a whole fetched page with its cursor, without accounting import."""
         with self.registry.cursor() as cursor:
             binding = self._binding(cursor, binding_id)
+            binding._require_receiving_capabilities()
             tin, provider, route = self._receiving_route(binding)
             checkpoint = binding.controlled_inbound_cursor or ""
         # Neither listing nor artifact retrieval keeps a database transaction open.
