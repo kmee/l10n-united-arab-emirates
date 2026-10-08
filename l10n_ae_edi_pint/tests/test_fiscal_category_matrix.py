@@ -19,6 +19,68 @@ NS = {
 
 @tagged("post_install", "-at_install")
 class TestUaeFiscalCategoryMatrix(AccountTestInvoicingCommon):
+    def test_margin_scheme_requires_reviewed_n_categories_before_issue(self):
+        self.env.company.l10n_ae_edi_auto_prepare = True
+        invoice = (
+            self.env["account.move"]
+            .with_user(self.simple_accountman)
+            .create(
+                {
+                    "move_type": "out_invoice",
+                    "partner_id": self.partner_a.id,
+                    "journal_id": self.company_data["default_journal_sale"].id,
+                    "currency_id": self.env.ref("base.AED").id,
+                    "invoice_date": "2019-01-01",
+                    "l10n_ae_margin_scheme": True,
+                    "l10n_ae_binding_id": self.env["l10n_ae.edi.binding"]
+                    .create({"name": "Synthetic unreviewed margin classification"})
+                    .id,
+                    "invoice_line_ids": [
+                        Command.create(
+                            {
+                                "name": "Supply still configured as standard VAT",
+                                "price_unit": 100,
+                                "account_id": self.company_data[
+                                    "default_account_revenue"
+                                ].id,
+                                "tax_ids": [Command.set(self.tax_sale_a.ids)],
+                            }
+                        )
+                    ],
+                }
+            )
+        )
+        self.assertFalse(invoice.env.su)
+        self.assertEqual(self.tax_sale_a.ubl_cii_tax_category_code, "S")
+        with self.assertRaisesRegex(UserError, "IBR-116-AE"):
+            invoice.action_l10n_ae_validate()
+        self.assertFalse(invoice.l10n_ae_transmission_ids)
+        self.assertFalse(invoice.l10n_ae_fiscal_uuid)
+        invoice.action_post()
+        self.assertEqual(invoice.state, "posted")
+        self.assertEqual(
+            (invoice.amount_untaxed, invoice.amount_tax, invoice.amount_total),
+            (100, 5, 105),
+        )
+        self.assertEqual(invoice.l10n_ae_preparation_state, "review")
+        self.assertIn("IBR-116-AE", invoice.l10n_ae_preparation_error)
+        ledger_fields = [
+            "account_id",
+            "debit",
+            "credit",
+            "amount_currency",
+            "tax_ids",
+            "create_date",
+            "write_date",
+        ]
+        ledger = invoice.line_ids.read(ledger_fields)
+        with self.assertRaisesRegex(UserError, "IBR-116-AE"):
+            invoice.action_l10n_ae_prepare()
+        self.assertEqual(invoice.line_ids.read(ledger_fields), ledger)
+        self.assertFalse(invoice.l10n_ae_transmission_ids)
+        self.assertFalse(invoice.l10n_ae_fiscal_uuid)
+        self.assertEqual(self.tax_sale_a.ubl_cii_tax_category_code, "S")
+
     @classmethod
     @AccountTestInvoicingCommon.setup_country("ae")
     def setUpClass(cls):
