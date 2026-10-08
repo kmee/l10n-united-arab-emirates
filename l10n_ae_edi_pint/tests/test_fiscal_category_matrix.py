@@ -19,6 +19,70 @@ NS = {
 
 @tagged("post_install", "-at_install")
 class TestUaeFiscalCategoryMatrix(AccountTestInvoicingCommon):
+    def test_margin_n_with_nonzero_native_vat_is_refused_without_zeroing_ledger(self):
+        tax = self.tax_sale_a.copy(
+            {
+                "name": "Synthetic N still calculating standard VAT",
+                "ubl_cii_tax_category_code": "N",
+                "l10n_ae_edi_additional_vat_rate": 5,
+            }
+        )
+        invoice = (
+            self.env["account.move"]
+            .with_user(self.simple_accountman)
+            .create(
+                {
+                    "move_type": "out_invoice",
+                    "partner_id": self.partner_a.id,
+                    "journal_id": self.company_data["default_journal_sale"].id,
+                    "invoice_date": "2019-01-01",
+                    "l10n_ae_margin_scheme": True,
+                    "l10n_ae_binding_id": self.env["l10n_ae.edi.binding"]
+                    .create({"name": "Synthetic margin native VAT conflict"})
+                    .id,
+                    "invoice_line_ids": [
+                        Command.create(
+                            {
+                                "name": "Synthetic reviewed supply",
+                                "price_unit": 1000,
+                                "account_id": self.company_data[
+                                    "default_account_revenue"
+                                ].id,
+                                "tax_ids": [Command.set(tax.ids)],
+                            }
+                        )
+                    ],
+                }
+            )
+        )
+        self.env.company.l10n_ae_edi_auto_prepare = True
+        invoice.action_post()
+        self.assertEqual(invoice.state, "posted")
+        self.assertEqual(
+            (invoice.amount_untaxed, invoice.amount_tax, invoice.amount_total),
+            (1000, 50, 1050),
+        )
+        self.assertEqual(invoice.l10n_ae_preparation_state, "review")
+        self.assertIn("IBR-108-AE", invoice.l10n_ae_preparation_error)
+        ledger_fields = [
+            "account_id",
+            "debit",
+            "credit",
+            "amount_currency",
+            "tax_ids",
+            "create_date",
+            "write_date",
+        ]
+        ledger = invoice.line_ids.read(ledger_fields)
+        with self.assertRaisesRegex(UserError, "IBR-108-AE"):
+            invoice.action_l10n_ae_validate()
+        with self.assertRaisesRegex(UserError, "IBR-108-AE"):
+            invoice.action_l10n_ae_prepare()
+        self.assertFalse(invoice.l10n_ae_transmission_ids)
+        self.assertFalse(invoice.l10n_ae_fiscal_uuid)
+        self.assertEqual(tax.amount, 5)
+        self.assertEqual(invoice.line_ids.read(ledger_fields), ledger)
+
     def test_margin_n_without_positive_nominal_rate_requires_review(self):
         tax = self.tax_sale_a.copy(
             {
