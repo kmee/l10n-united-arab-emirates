@@ -1527,6 +1527,89 @@ class TestUaeFiscalCategoryMatrix(AccountTestInvoicingCommon):
                     self.assertFalse(invoice.l10n_ae_fiscal_uuid)
                     self.assertEqual(invoice.l10n_ae_document_category, "tax")
 
+    def test_commercial_e_o_documents_keep_their_explicit_non_tax_types(self):
+        exempt = self.env.ref(
+            f"account.{self.env.company.id}_uae_sale_tax_exempted"
+        )
+        exempt.write(
+            {
+                "ubl_cii_tax_exemption_reason_code": "DL8.46.2",
+                "ubl_cii_tax_exemption_reason": "Synthetic reviewed residential lease",
+            }
+        )
+        outside = self.env.ref(f"account.{self.env.company.id}_uae_out_of_scope")
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {"name": "Synthetic commercial E/O", "fiscal_uuid_policy": "controlled_local"}
+        )
+        for kind, node, code in (
+            ("out_invoice", "cbc:InvoiceTypeCode", "480"),
+            ("out_refund", "cbc:CreditNoteTypeCode", "81"),
+        ):
+            for label, taxes_per_line, net in (
+                ("E", [exempt], 25),
+                ("O", [outside], 25),
+                ("E and O", [exempt, outside], 50),
+            ):
+                with self.subTest(kind=kind, categories=label):
+                    values = {
+                        "move_type": kind,
+                        "partner_id": self.partner_a.id,
+                        "journal_id": self.company_data["default_journal_sale"].id,
+                        "invoice_date": "2019-01-01",
+                        "currency_id": self.env.ref("base.AED").id,
+                        "l10n_ae_binding_id": binding.id,
+                        "l10n_ae_document_category": "commercial",
+                        "invoice_line_ids": [
+                            Command.create(
+                                {
+                                    "name": "Synthetic commercial " + label,
+                                    "price_unit": 25,
+                                    "account_id": self.company_data[
+                                        "default_account_revenue"
+                                    ].id,
+                                    "tax_ids": [Command.set(taxes.ids)],
+                                }
+                            )
+                            for taxes in taxes_per_line
+                        ],
+                    }
+                    if kind == "out_refund":
+                        values.update(
+                            l10n_ae_credit_reason="DL8.61.1.C",
+                            l10n_ae_credit_reference_ids=[
+                                Command.create(
+                                    {
+                                        "number": "SYNTH-REVIEWED-COMMERCIAL-ORIGINAL",
+                                        "issue_date": "2018-12-01",
+                                        "review_evidence": "Synthetic commercial review",
+                                        "allocated_net": net,
+                                        "allocated_tax": 0,
+                                    }
+                                )
+                            ],
+                        )
+                    invoice = self.env["account.move"].with_user(
+                        self.simple_accountman
+                    ).create(values)
+                    invoice.action_l10n_ae_validate()
+                    invoice.action_post()
+                    ledger_fields = [
+                        "debit", "credit", "amount_currency", "create_date", "write_date"
+                    ]
+                    ledger = invoice.line_ids.read(ledger_fields)
+                    invoice.action_l10n_ae_prepare()
+                    document = etree.fromstring(invoice.preview_l10n_ae_pint().encode())
+                    self.assertEqual(document.findtext(node, namespaces=NS), code)
+                    self.assertEqual(invoice.amount_untaxed, net)
+                    self.assertEqual(invoice.amount_tax, 0)
+                    self.assertEqual(invoice.amount_total, net)
+                    report = invoice.validate_l10n_ae_pint()
+                    self.assertTrue(report["valid"], report)
+                    self.assertEqual(invoice.line_ids.read(ledger_fields), ledger)
+                    self.assertEqual(invoice.l10n_ae_document_category, "commercial")
+                    issue = invoice.l10n_ae_transmission_id
+                    self.assertFalse(issue.attempt_ids or issue.event_ids or issue.remote_id)
+
     def test_exempt_without_uae_legal_code_is_refused_before_preparation(self):
         tax = self.tax_sale_a.copy(
             {
