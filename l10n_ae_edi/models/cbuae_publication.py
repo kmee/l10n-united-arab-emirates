@@ -136,6 +136,7 @@ class CbuaePublication(models.Model):
                         "source_sha256": hashlib.sha256(body).hexdigest(),
                     }
                 )
+                self.flush_recordset()
                 return True
             stamp_node = stamp_nodes[0]
             stamp = " ".join(stamp_node.text_content().split()).removeprefix(
@@ -171,4 +172,5 @@ class CbuaePublication(models.Model):
                     "quotes": quotes if same_date else False,
                 }
             )
+            self.flush_recordset()
         return True
