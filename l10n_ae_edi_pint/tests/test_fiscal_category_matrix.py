@@ -133,7 +133,8 @@ class TestUaeFiscalCategoryMatrix(AccountTestInvoicingCommon):
                 ),
                 1000,
             )
-        self.assertTrue(invoice.validate_l10n_ae_pint()["valid"])
+        validation = invoice.validate_l10n_ae_pint()
+        self.assertTrue(validation["valid"], validation)
         frozen = issue.xml_content
         snapshot = json.loads(issue.payload)
         self.assertEqual(snapshot["transaction_flags"], "00100000")
