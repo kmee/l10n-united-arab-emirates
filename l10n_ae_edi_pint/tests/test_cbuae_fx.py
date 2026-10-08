@@ -16,6 +16,110 @@ from .test_invoice_xml import TestUaeInvoiceXml
 
 @tagged("post_install", "-at_install")
 class TestUaeCbuaeFx(TestUaeInvoiceXml):
+    def test_renamed_imported_currency_requires_review_and_keeps_frozen_invoice(self):
+        usd, _anchor, review = self._reviewed_cbuae_usd()
+        company = self.env.company
+        company.l10n_ae_edi_auto_prepare = False
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {
+                "name": "Synthetic imported currency identity",
+                "fiscal_uuid_policy": "controlled_local",
+            }
+        )
+        original = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a, currency=usd
+        ).with_user(self.simple_accountman)
+        with Form(original) as form:
+            form.invoice_date = "2026-08-27"
+            form.l10n_ae_binding_id = binding
+        original.action_post()
+        original.action_l10n_ae_prepare()
+        issue = original.l10n_ae_transmission_id
+        immutable = [
+            "payload",
+            "payload_hash",
+            "xml_content",
+            "xml_hash",
+            "idempotency_key",
+            "write_uid",
+            "write_date",
+        ]
+        frozen = issue.read(immutable)
+        ledger_fields = [
+            "account_id",
+            "debit",
+            "credit",
+            "balance",
+            "amount_currency",
+            "tax_ids",
+            "write_uid",
+            "write_date",
+        ]
+        original.line_ids.flush_recordset()
+        ledger = original.line_ids.sorted("id").read(ledger_fields)
+        retained = review.read(
+            ["quote_literal", "import_facts", "reviewed_at", "write_uid", "write_date"]
+        )
+        # Administrative master change, in this disposable fixture only. ZAR is a
+        # valid invoice currency code: schema validity must not hide the fact that
+        # the imported source was reviewed for USD on this native currency ID.
+        self.env.ref("base.ZAR").write({"name": "ZZX"})
+        usd.write({"name": "ZAR"})
+        company.l10n_ae_edi_auto_prepare = True
+        following = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a, currency=usd
+        ).with_user(self.simple_accountman)
+        self.assertFalse(following.env.su)
+        with Form(following) as form:
+            form.invoice_date = "2026-08-27"
+            form.l10n_ae_binding_id = binding
+        self.assertEqual(following.currency_id.name, "ZAR")
+        self.assertEqual(following.l10n_ae_effective_tax_exchange_origin, "review")
+        self.assertIn(
+            "currency code",
+            following.l10n_ae_effective_tax_exchange_diagnostic,
+        )
+        self.assertFalse(following.l10n_ae_effective_cbuae_review_id)
+        following.action_post()
+        self.assertEqual(following.state, "posted")
+        self.assertEqual(following.amount_tax_signed, 18.36)
+        self.assertEqual(following.amount_total_signed, 385.61)
+        self.assertEqual(following.l10n_ae_preparation_state, "review")
+        self.assertFalse(following.l10n_ae_transmission_id)
+        self.assertFalse(following.l10n_ae_fiscal_uuid)
+        following.line_ids.flush_recordset()
+        following_ledger = following.line_ids.sorted("id").read(ledger_fields)
+        for action in (
+            following.action_l10n_ae_validate,
+            following.action_l10n_ae_prepare,
+        ):
+            with self.assertRaisesRegex(UserError, "currency code"):
+                action()
+        self.assertEqual(
+            following.line_ids.sorted("id").read(ledger_fields), following_ledger
+        )
+        self.assertEqual(
+            review.read(
+                [
+                    "quote_literal",
+                    "import_facts",
+                    "reviewed_at",
+                    "write_uid",
+                    "write_date",
+                ]
+            ),
+            retained,
+        )
+        original.action_l10n_ae_prepare()
+        self.assertTrue(original.validate_l10n_ae_pint()["valid"])
+        self.assertEqual(original.preview_l10n_ae_pint(), frozen[0]["xml_content"])
+        self.assertEqual(issue.read(immutable), frozen)
+        self.assertEqual(original.line_ids.sorted("id").read(ledger_fields), ledger)
+        self.assertEqual(
+            json.loads(issue.payload)["tax_exchange"]["source_currency"], "USD"
+        )
+        self.assertEqual(review.import_facts["currency_code"], "USD")
+
     def test_branch_invoice_reader_retains_imported_root_source_without_mutation(self):
         usd, _anchor, review = self._reviewed_cbuae_usd()
         root = self.env.company
