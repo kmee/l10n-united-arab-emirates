@@ -64,7 +64,9 @@ class AccountMove(models.Model):
         self.ensure_one()
         method = self.preferred_payment_method_line_id
         journal = method.journal_id
-        if journal.type == "cash":
+        if not method:
+            code, name = "1", "Instrument not defined"
+        elif journal.type == "cash":
             code, name = "10", "In cash"
         elif journal.type == "bank" and method.code == "manual":
             code, name = "30", "Credit transfer"
@@ -85,10 +87,10 @@ class AccountMove(models.Model):
             "code": code,
             "name": name,
             "payment_reference": self.payment_reference or self.name,
-            "method_line_id": method.id,
-            "method_code": method.code,
-            "journal_id": journal.id,
-            "journal_type": journal.type,
+            "method_line_id": method.id or None,
+            "method_code": method.code or None,
+            "journal_id": journal.id or None,
+            "journal_type": journal.type or None,
             "account_id": account.id or None,
             "account_identifier": identifier,
         }
