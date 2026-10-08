@@ -187,24 +187,14 @@ class AccountEdiUblUae(models.AbstractModel):
     def _ubl_add_invoice_period_nodes(self, vals):
         result = super()._ubl_add_invoice_period_nodes(vals)
         invoice = vals["invoice"]
-        if (
-            invoice.l10n_ae_invoicing_period_start
-            or invoice.l10n_ae_invoicing_period_end
-        ):
+        period_start, period_end, _origin = invoice._l10n_ae_invoicing_period_dates()
+        if period_start or period_end:
             vals["document_node"]["cac:InvoicePeriod"].update(
                 {
                     "cbc:StartDate": {
-                        "_text": fields.Date.to_string(
-                            invoice.l10n_ae_invoicing_period_start
-                        )
-                        or None
+                        "_text": fields.Date.to_string(period_start) or None
                     },
-                    "cbc:EndDate": {
-                        "_text": fields.Date.to_string(
-                            invoice.l10n_ae_invoicing_period_end
-                        )
-                        or None
-                    },
+                    "cbc:EndDate": {"_text": fields.Date.to_string(period_end) or None},
                 }
             )
         if invoice.l10n_ae_billing_frequency_code:
