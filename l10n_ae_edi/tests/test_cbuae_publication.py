@@ -403,3 +403,31 @@ class TestCbuaePublication(AccountTestInvoicingCommon):
             rates.read(["name", "rate", "company_id", "currency_id", "write_date"]),
             before,
         )
+
+    def test_changed_source_label_is_preserved_without_expanding_iso_aliases(self):
+        original = (
+            (Path(__file__).parent / "cassettes/cbuae/cbuae-2026-08-26.html")
+            .read_bytes()
+            .replace(b">US Dollar<", b"> US Dollar <")
+        )
+        response = Response()
+        response.status_code = 200
+        response.url = (
+            "https://centralbank.ae/umbraco/Surface/Exchange/"
+            "GetExchangeRateAllCurrencyDate?dateTime=2026-08-26"
+        )
+        response.headers["Content-Type"] = "text/html; charset=utf-8"
+        response._content = original
+        response._content_consumed = True
+        publication = (
+            self.env["l10n_ae.cbuae.publication"]
+            .with_user(self.simple_accountman)
+            .create({"requested_date": "2026-08-26"})
+        )
+        with patch("requests.get", return_value=response):
+            publication.action_capture()
+        self.assertEqual(publication.state, "captured")
+        self.assertEqual(publication.quotes[" US Dollar "], "3.6725")
+        self.assertNotIn("US Dollar", publication.quotes)
+        self.assertNotIn("USD", publication.quotes)
+        self.assertEqual(publication.source_body.content, original)
