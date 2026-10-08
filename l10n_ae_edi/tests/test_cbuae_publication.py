@@ -313,6 +313,13 @@ class TestCbuaePublication(AccountTestInvoicingCommon):
                 "text/html",
                 url,
             ),
+            (
+                "changed quote whitespace",
+                original.replace(b">3.6725<", b">3.6725 <"),
+                200,
+                "text/html",
+                url,
+            ),
             ("zero", original.replace(b">3.6725<", b">0<"), 200, "text/html", url),
             (
                 "negative",
