@@ -44,6 +44,7 @@ class CbuaePublication(models.Model):
     http_status = fields.Integer(readonly=True, copy=False)
     content_type = fields.Char(readonly=True, copy=False)
     source_body = fields.Binary(readonly=True, copy=False, attachment=False)
+    source_complete = fields.Boolean(readonly=True, copy=False)
     source_sha256 = fields.Char(readonly=True, copy=False)
     publication_stamp = fields.Char(readonly=True, copy=False)
     publication_date = fields.Date(readonly=True, copy=False)
@@ -58,6 +59,7 @@ class CbuaePublication(models.Model):
         "content_type",
         "source_body",
         "source_sha256",
+        "source_complete",
         "publication_stamp",
         "publication_date",
         "quotes",
@@ -246,21 +248,26 @@ class CbuaePublication(models.Model):
             "GetExchangeRateAllCurrencyDate?dateTime="
             + fields.Date.to_string(self.requested_date)
         )
-        with requests.get(
-            url, timeout=(5, 15), allow_redirects=False, stream=True
-        ) as response:
-            body = b"".join(response.iter_content(chunk_size=8192))
-            values = {
-                "state": "captured",
-                "diagnostic": False,
-                "source_url": response.url,
-                "retrieved_at": fields.Datetime.now(),
-                "http_status": response.status_code,
-                "content_type": response.headers.get("Content-Type", ""),
-                "source_body": BinaryBytes(body),
-                "source_sha256": hashlib.sha256(body).hexdigest(),
-            }
-            try:
+        values = {
+            "state": "captured",
+            "diagnostic": False,
+            "source_url": url,
+            "retrieved_at": fields.Datetime.now(),
+            "source_complete": False,
+        }
+        body = bytearray()
+        try:
+            with requests.get(
+                url, timeout=(5, 15), allow_redirects=False, stream=True
+            ) as response:
+                values.update(
+                    source_url=response.url,
+                    http_status=response.status_code,
+                    content_type=response.headers.get("Content-Type", ""),
+                )
+                for chunk in response.iter_content(chunk_size=8192):
+                    body.extend(chunk)
+                values["source_complete"] = True
                 if response.status_code != 200 or response.url != url:
                     raise ValueError(
                         self.env._("CBUAE HTTP status or URL requires review.")
@@ -272,9 +279,22 @@ class CbuaePublication(models.Model):
                     raise ValueError(
                         self.env._("CBUAE HTTP content type requires review.")
                     )
-                self._parse_publication(body, values)
-            except (ValueError, etree.ParserError) as exc:
-                values.update(state="error", diagnostic=str(exc), quotes=False)
-            super().write(values)
-            self.flush_recordset()
+                self._parse_publication(bytes(body), values)
+        except requests.RequestException as exc:
+            values.update(
+                state="error",
+                quotes=False,
+                diagnostic=self.env._(
+                    "CBUAE acquisition failed (%s); review the retained capture.",
+                    type(exc).__name__,
+                ),
+            )
+        except (ValueError, etree.ParserError) as exc:
+            values.update(state="error", diagnostic=str(exc), quotes=False)
+        values.update(
+            source_body=BinaryBytes(bytes(body)),
+            source_sha256=hashlib.sha256(body).hexdigest(),
+        )
+        super().write(values)
+        self.flush_recordset()
         return True
