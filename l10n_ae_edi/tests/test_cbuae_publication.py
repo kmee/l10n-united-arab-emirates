@@ -254,3 +254,102 @@ class TestCbuaePublication(AccountTestInvoicingCommon):
             http.assert_not_called()
         self.assertEqual(publication.state, "draft")
         self.assertFalse(publication.source_body)
+
+    def test_invalid_http_or_table_preserves_response_without_usable_quotes(self):
+        model = self.env["l10n_ae.cbuae.publication"].with_user(self.simple_accountman)
+        original = (
+            Path(__file__).parent / "cassettes/cbuae/cbuae-2026-08-26.html"
+        ).read_bytes()
+        url = (
+            "https://centralbank.ae/umbraco/Surface/Exchange/"
+            "GetExchangeRateAllCurrencyDate?dateTime=2026-08-26"
+        )
+        duplicate = b"<tr><td></td><td>US Dollar</td><td>3.6725</td></tr>"
+        cases = [
+            ("HTTP error", original, 503, "text/html", url),
+            ("redirect", original, 302, "text/html", url),
+            ("different URL", original, 200, "text/html", "https://example.invalid"),
+            ("wrong MIME", original, 200, "application/json", url),
+            (
+                "challenge",
+                b"<html><title>Just a moment...</title></html>",
+                200,
+                "text/html",
+                url,
+            ),
+            (
+                "heading",
+                original.replace(b"VAT related obligations", b"unrelated data"),
+                200,
+                "text/html",
+                url,
+            ),
+            (
+                "header",
+                original.replace(b"Currency", b"Unknown header", 1),
+                200,
+                "text/html",
+                url,
+            ),
+            (
+                "no stamp",
+                original.replace(b"Last updated:", b"Updated maybe:"),
+                200,
+                "text/html",
+                url,
+            ),
+            (
+                "weekday",
+                original.replace(b"Wednesday 26", b"Friday 26"),
+                200,
+                "text/html",
+                url,
+            ),
+            (
+                "duplicate",
+                original.replace(b"</tbody>", duplicate + b"</tbody>"),
+                200,
+                "text/html",
+                url,
+            ),
+            ("zero", original.replace(b">3.6725<", b">0<"), 200, "text/html", url),
+            (
+                "negative",
+                original.replace(b">3.6725<", b">-3.6725<"),
+                200,
+                "text/html",
+                url,
+            ),
+            (
+                "not finite",
+                original.replace(b">3.6725<", b">NaN<"),
+                200,
+                "text/html",
+                url,
+            ),
+        ]
+        rates = self.env["res.currency.rate"].search([])
+        before = rates.read(["name", "rate", "company_id", "currency_id", "write_date"])
+        for label, body, status, mime, actual_url in cases:
+            with self.subTest(label=label):
+                response = Response()
+                response.status_code = status
+                response.url = actual_url
+                response.headers["Content-Type"] = mime
+                response._content = body
+                response._content_consumed = True
+                publication = model.create({"requested_date": "2026-08-26"})
+                with patch("requests.get", return_value=response):
+                    publication.action_capture()
+                self.assertEqual(publication.state, "error")
+                self.assertTrue(publication.diagnostic)
+                self.assertFalse(publication.quotes)
+                self.assertEqual(publication.source_body.content, body)
+                self.assertEqual(publication.http_status, status)
+                self.assertEqual(publication.content_type, mime)
+                self.assertEqual(publication.source_url, actual_url)
+        self.assertEqual(self.env["res.currency.rate"].search([]), rates)
+        self.assertEqual(
+            rates.read(["name", "rate", "company_id", "currency_id", "write_date"]),
+            before,
+        )
