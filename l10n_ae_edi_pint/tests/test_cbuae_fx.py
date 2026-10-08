@@ -1,6 +1,7 @@
 # Copyright 2026 KMEE
 # License AGPL-3.0 or later (https://www.gnu.org/licenses/agpl).
 import json
+from functools import partial
 from pathlib import Path
 from unittest.mock import patch
 
@@ -111,6 +112,9 @@ class TestUaeCbuaeFx(TestUaeInvoiceXml):
         self.assertEqual(selected.read(["quote_literal"])[0]["quote_literal"], "3.6725")
         publication = selected.publication_id
         self.assertEqual(
+            publication.source_body.content, review.publication_id.source_body.content
+        )
+        self.assertEqual(
             publication.read(["source_sha256"])[0]["source_sha256"],
             evidence["cbuae_provenance"]["source"]["sha256"],
         )
@@ -149,6 +153,152 @@ class TestUaeCbuaeFx(TestUaeInvoiceXml):
             pending.with_user(operator).with_context(
                 allowed_company_ids=branch.ids
             ).read(["requested_date"])
+
+    def test_branch_manager_cannot_mutate_root_or_read_unimported_foreign_sources(self):
+        usd, _anchor, imported = self._reviewed_cbuae_usd()
+        root = self.env.company
+        branch = self.env["res.company"].create(
+            {"name": "Synthetic CBUAE restricted branch", "parent_id": root.id}
+        )
+        sibling = self.env["res.company"].create(
+            {"name": "Synthetic CBUAE sibling", "parent_id": root.id}
+        )
+        foreign = self.env["res.company"].create(
+            {
+                "name": "Synthetic CBUAE unrelated root",
+                "country_id": self.env.ref("base.ae").id,
+                "currency_id": self.env.ref("base.AED").id,
+            }
+        )
+        setup_manager = new_test_user(
+            self.env,
+            login="synthetic-cbuae-branch-source-setup",
+            groups="base.group_user,account.group_account_manager",
+            company_id=root.id,
+            company_ids=(root + sibling + foreign).ids,
+        )
+        manager = new_test_user(
+            self.env,
+            login="synthetic-cbuae-only-branch-manager",
+            groups="base.group_user,account.group_account_manager",
+            company_id=branch.id,
+            company_ids=branch.ids,
+        )
+        source = imported.publication_id
+        unimported = (
+            self.env["l10n_ae.cbuae.rate.review"]
+            .with_user(self.simple_accountman)
+            .create(
+                {
+                    "publication_id": source.id,
+                    "source_label": "US Dollar",
+                    "currency_id": usd.id,
+                    "review_note": "Separate review not imported.",
+                }
+            )
+        )
+        hidden_publications = self.env["l10n_ae.cbuae.publication"]
+        for company in (root, sibling, foreign):
+            publication = (
+                self.env["l10n_ae.cbuae.publication"]
+                .with_user(setup_manager)
+                .with_context(allowed_company_ids=company.ids)
+                .create({"requested_date": "2026-08-26", "company_id": company.id})
+            )
+            hidden_publications |= publication
+        foreign_publication = hidden_publications.filtered(
+            lambda record: record.company_id == foreign
+        )
+        response = Response()
+        response.status_code = 200
+        response.headers["Content-Type"] = "text/html; charset=utf-8"
+        response._content = source.source_body.content
+        response._content_consumed = True
+        with patch("requests.get", return_value=response):
+            foreign_publication.action_capture()
+        foreign_review = (
+            self.env["l10n_ae.cbuae.rate.review"]
+            .with_user(setup_manager)
+            .with_context(allowed_company_ids=foreign.ids)
+            .create(
+                {
+                    "publication_id": foreign_publication.id,
+                    "source_label": "US Dollar",
+                    "currency_id": usd.id,
+                    "review_note": "Unrelated root reviewed separately.",
+                }
+            )
+        )
+        foreign_review.action_import()
+        self.assertTrue(foreign_review.native_rate_id)
+        branch_reviews = (
+            self.env["l10n_ae.cbuae.rate.review"]
+            .with_user(manager)
+            .with_context(allowed_company_ids=branch.ids)
+        )
+        branch_sources = (
+            self.env["l10n_ae.cbuae.publication"]
+            .with_user(manager)
+            .with_context(allowed_company_ids=branch.ids)
+        )
+        self.assertFalse(branch_reviews.env.su)
+        self.assertEqual(branch_reviews.search([]), imported)
+        self.assertEqual(branch_sources.search([]), source)
+        for record in unimported + foreign_review:
+            with self.assertRaises(AccessError):
+                branch_reviews.browse(record.id).read(["review_note"])
+        for publication in hidden_publications:
+            with self.assertRaises(AccessError):
+                branch_sources.browse(publication.id).read(["source_body"])
+        reviewed_source = branch_reviews.browse(imported.id)
+        publication = branch_sources.browse(source.id)
+        self.assertEqual(publication.source_body.content, source.source_body.content)
+        source_before = source.read(["source_sha256", "write_uid", "write_date"])
+        review_before = imported.read(
+            ["native_rate_id", "reviewed_by", "reviewed_at", "write_uid", "write_date"]
+        )
+        for actor_review, actor_publication in (
+            (reviewed_source, publication),
+            (reviewed_source.sudo(), publication.sudo()),
+        ):
+            for action in [
+                actor_review.action_import,
+                actor_publication.action_capture,
+                partial(actor_review.write, {"review_note": "Unauthorized root edit"}),
+                actor_review.unlink,
+                actor_publication.unlink,
+                partial(actor_publication.write, {"requested_date": "2026-08-28"}),
+                partial(
+                    actor_publication.create,
+                    {"company_id": root.id, "requested_date": "2026-08-28"},
+                ),
+                partial(
+                    actor_review.create,
+                    {
+                        "publication_id": source.id,
+                        "source_label": "US Dollar",
+                        "currency_id": usd.id,
+                        "review_note": "Unauthorized review",
+                    },
+                ),
+            ]:
+                with self.assertRaises(AccessError):
+                    action()
+        self.assertEqual(
+            source.read(["source_sha256", "write_uid", "write_date"]), source_before
+        )
+        self.assertEqual(
+            imported.read(
+                [
+                    "native_rate_id",
+                    "reviewed_by",
+                    "reviewed_at",
+                    "write_uid",
+                    "write_date",
+                ]
+            ),
+            review_before,
+        )
 
     def _reviewed_cbuae_usd(self):
         manager = self.simple_accountman
