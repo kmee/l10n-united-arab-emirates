@@ -65,6 +65,14 @@ class TestUaeCbuaeFx(TestUaeInvoiceXml):
         # the imported source was reviewed for USD on this native currency ID.
         self.env.ref("base.ZAR").write({"name": "ZZX"})
         usd.write({"name": "ZAR"})
+        original.line_ids.flush_recordset()
+        after_rename = original.line_ids.sorted("id").read(ledger_fields)
+        for before, after in zip(ledger, after_rename, strict=True):
+            self.assertEqual(
+                {key: value for key, value in before.items() if key != "write_uid"},
+                {key: value for key, value in after.items() if key != "write_uid"},
+            )
+        self.assertEqual(issue.read(immutable), frozen)
         company.l10n_ae_edi_auto_prepare = True
         following = self.init_invoice(
             "out_invoice", amounts=[100], taxes=self.tax_sale_a, currency=usd
@@ -114,7 +122,9 @@ class TestUaeCbuaeFx(TestUaeInvoiceXml):
         self.assertTrue(original.validate_l10n_ae_pint()["valid"])
         self.assertEqual(original.preview_l10n_ae_pint(), frozen[0]["xml_content"])
         self.assertEqual(issue.read(immutable), frozen)
-        self.assertEqual(original.line_ids.sorted("id").read(ledger_fields), ledger)
+        self.assertEqual(
+            original.line_ids.sorted("id").read(ledger_fields), after_rename
+        )
         self.assertEqual(
             json.loads(issue.payload)["tax_exchange"]["source_currency"], "USD"
         )
