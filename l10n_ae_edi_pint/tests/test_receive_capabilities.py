@@ -22,6 +22,54 @@ class TestUaeReceiveCapabilities(AccountTestInvoicingCommon):
             company_ids=[(6, 0, cls.env.company.ids)],
         )
 
+    def test_receive_only_review_retains_original_and_deduplicates_delivery(self):
+        actor = (
+            self.env["l10n_ae.edi.binding"]
+            .with_user(self.manager)
+            .with_context(allowed_company_ids=self.env.company.ids)
+        )
+        binding = actor.create({"name": "Synthetic receive-only contract"})
+        review_controlled_binding(
+            binding,
+            self.manager,
+            capabilities=("receive",),
+            note="Synthetic receive-only contract; no outbound operation is declared.",
+        )
+        self.assertEqual(binding.capability_review_state, "ready")
+        self.assertEqual(binding.capability_ids.mapped("code"), ["receive"])
+        self.assertEqual(binding.capability_reviewed_by, self.manager)
+        self.assertFalse(binding.controlled_dispatch_enabled)
+        receiver = actor.env["l10n_ae.edi.inbox"]
+        original = receiver.receive_controlled_document(
+            binding.id,
+            "synthetic-receive-only-original",
+            b"<Invoice/>",
+            event_id="synthetic-receive-only-delivery",
+        )
+        self.assertEqual(original.original_xml.content, b"<Invoice/>")
+        self.assertEqual(
+            original.xml_hash,
+            "b8dbbfb2620e9346480364a8d935a0ff2038ce9bac7738f5ec58f22e639d2607",
+        )
+        self.assertEqual(original.company_id, self.env.company)
+        self.assertEqual(original.binding_id, binding)
+        self.assertEqual(original.state, "received")
+        self.assertFalse(original.move_id)
+        self.assertEqual(
+            receiver.receive_controlled_document(
+                binding.id,
+                "synthetic-receive-only-original",
+                b"<Invoice/>",
+                event_id="synthetic-receive-only-delivery",
+            ),
+            original,
+        )
+        self.assertEqual(
+            original.ingestion_event_ids.mapped("event_id"),
+            ["synthetic-receive-only-delivery"],
+        )
+        self.assertEqual(receiver.search_count([("binding_id", "=", binding.id)]), 1)
+
     def test_unreviewed_receive_contract_refuses_before_original_and_event(self):
         company = self.env.company
         actor = (
