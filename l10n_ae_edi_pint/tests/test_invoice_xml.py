@@ -133,7 +133,11 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         ]
         frozen = issue.read(immutable)
         self.assertTrue(invoice.validate_l10n_ae_pint()["valid"])
-        account.account_number = "SYNTH BANK 02"
+        self.assertTrue(account.allow_out_payment)
+        with self.assertRaisesRegex(UserError, "trusted"):
+            account.account_number = "SYNTH BANK 02"
+        account.account_holder_name = "Synthetic reviewed bank holder"
+        self.assertEqual(account.account_number, "SYNTH BANK 01")
         invoice.action_l10n_ae_prepare()
         self.assertEqual(invoice.preview_l10n_ae_pint(), frozen[0]["xml_content"])
         self.assertTrue(invoice.validate_l10n_ae_pint()["valid"])
