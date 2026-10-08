@@ -89,7 +89,7 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
             {
                 "partner_id": self.env.company.partner_id.id,
                 "company_id": self.env.company.id,
-                "acc_number": "SYNTH BANK 01",
+                "account_number": "SYNTH BANK 01",
             }
         )
         journal.bank_account_id = account
@@ -133,7 +133,7 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         ]
         frozen = issue.read(immutable)
         self.assertTrue(invoice.validate_l10n_ae_pint()["valid"])
-        account.acc_number = "SYNTH BANK 02"
+        account.account_number = "SYNTH BANK 02"
         invoice.action_l10n_ae_prepare()
         self.assertEqual(invoice.preview_l10n_ae_pint(), frozen[0]["xml_content"])
         self.assertTrue(invoice.validate_l10n_ae_pint()["valid"])
