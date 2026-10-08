@@ -399,10 +399,13 @@ Only for development or testing purpose, do not use in production.
 </div>
 <div class="section" id="configuration">
 <h1><a class="toc-backref" href="#toc-entry-1">Configuration</a></h1>
-<p>The addon installs automatically when both <tt class="docutils literal">l10n_ae_edi_pint</tt> and
-<tt class="docutils literal">account_peppol</tt> are installed. A Community installation without
-native Peppol does not need it. No new credentials, permissions or
-configuration are introduced.</p>
+<p>The manifest enables auto-install when its two dependencies are
+installed together. For an existing database, refresh the Apps list and
+explicitly install <tt class="docutils literal">l10n_ae_edi_pint_peppol</tt>. Updating previously
+installed UAE modules alone did not install the newly discovered addon
+in the disposable upgrade rehearsal.</p>
+<p>A Community installation without native Peppol does not need it. No new
+credentials, permissions or configuration are introduced.</p>
 </div>
 <div class="section" id="bug-tracker">
 <h1><a class="toc-backref" href="#toc-entry-2">Bug Tracker</a></h1>
