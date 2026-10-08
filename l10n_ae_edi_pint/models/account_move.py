@@ -75,7 +75,13 @@ class AccountMove(models.Model):
         elif journal.type == "bank" and method.code == "manual":
             code, name = "30", "Credit transfer"
         else:
-            return None
+            raise UserError(
+                self.env._(
+                    "Review UAE Payment Instrument on the selected journal method "
+                    "before preparation. Its native payment method does not "
+                    "identify a supported UAE instrument."
+                )
+            )
         account = self.partner_bank_id if code == "30" else self.env["res.partner.bank"]
         identifier = (
             sanitize_account_number(account.account_number) if account else None
