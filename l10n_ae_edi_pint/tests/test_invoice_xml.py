@@ -5910,6 +5910,74 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         self.assertEqual(inbox.move_id.state, "draft")
         self.assertEqual(inbox.original_xml.content, content)
 
+    def test_received_delivery_emirate_requires_review_and_preserves_original(self):
+        original = self._received_test_xml()
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {"name": "Synthetic received delivery emirate"}
+        )
+        receiver = self.env["l10n_ae.edi.inbox"].with_user(self.simple_accountman)
+        cases = (
+            ("AE", "Dubai", False),
+            ("AE", None, False),
+            ("AE", "RAK", True),
+            ("GB", "London", True),
+        )
+        for index, (country, subdivision, accepted) in enumerate(cases):
+            with self.subTest(country=country, subdivision=subdivision):
+                tree = etree.fromstring(etree.tostring(original))
+                tree.find("cbc:UUID", NS).text = f"ddddddde-8888-4888-8888-{index:012d}"
+                tree.find("cbc:ID", NS).text = f"SYNTH-DELIVERY-EMIRATE-{index}"
+                address = tree.find("cac:Delivery/cac:DeliveryLocation/cac:Address", NS)
+                self.assertIsNotNone(address)
+                address.find("cac:Country/cbc:IdentificationCode", NS).text = country
+                node = address.find("cbc:CountrySubentity", NS)
+                if subdivision is None:
+                    address.remove(node)
+                else:
+                    node.text = subdivision
+                content = etree.tostring(tree)
+                count = self.env["account.move"].search_count([])
+                inbox = receiver.receive_controlled_document(
+                    binding.id, f"delivery-emirate-{index}", content
+                )
+                self.assertEqual(inbox.action_process(), accepted, inbox.diagnostic)
+                self.assertEqual(inbox.original_xml.content, content)
+                self.assertEqual(inbox.xml_hash, hashlib.sha256(content).hexdigest())
+                history = inbox.processing_history_ids
+                self.assertEqual(len(history), 1)
+                self.assertEqual(history.operator_id, self.simple_accountman)
+                report = json.loads(history.validation_report)
+                self.assertTrue(report["xsd_valid"])
+                self.assertEqual(report["valid"], accepted)
+                self.assertTrue(all(not c["failures"] for c in report["layers"]))
+                self.assertEqual(
+                    history.validation_report_hash,
+                    hashlib.sha256(history.validation_report.encode()).hexdigest(),
+                )
+                check = next(
+                    c
+                    for c in report["supplemental_checks"]
+                    if c["name"] == "kmee-ae-delivery-address-v1"
+                )
+                if accepted:
+                    self.assertEqual(inbox.state, "processed")
+                    self.assertEqual(inbox.move_id.state, "draft")
+                    self.assertEqual(inbox.move_id.amount_total, 105)
+                    self.assertFalse(inbox.move_id.l10n_ae_transmission_id)
+                    self.assertEqual(check["failures"], [])
+                else:
+                    self.assertEqual(inbox.state, "review")
+                    self.assertFalse(inbox.move_id)
+                    self.assertEqual(self.env["account.move"].search_count([]), count)
+                    self.assertIn("KMEE supplemental ibr-128-ae", inbox.diagnostic)
+                    self.assertIn("delivery address", inbox.diagnostic)
+                    self.assertEqual(
+                        [f["code"] for f in check["failures"]], ["ibr-128-ae"]
+                    )
+                    self.assertIn("DeliveryLocation", check["failures"][0]["location"])
+                    with self.assertRaises(UserError):
+                        history.write({"validation_report": "{}"})
+
     def _received_test_xml(self, source=None):
         if source is None:
             source = self.init_invoice(

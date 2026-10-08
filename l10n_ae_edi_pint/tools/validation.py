@@ -294,35 +294,53 @@ def _validate_offline(content, directory, ruleset=DEFAULT_RULESET):
     # neither the official SVRL layers nor their resource identity are rewritten.
     cac = "urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2"
     basic = cbc["cbc"]
-    failures = []
-    for address in root.iter(f"{{{cac}}}PostalAddress"):
-        country = address.findtext(f"{{{cac}}}Country/{{{basic}}}IdentificationCode")
-        subdivision = address.findtext(f"{{{basic}}}CountrySubentity")
-        if country == "AE" and subdivision not in {
-            "AUH",
-            "DXB",
-            "SHJ",
-            "UAQ",
-            "FUJ",
-            "AJM",
-            "RAK",
-        }:
-            failures.append(
-                {
-                    "code": "ibr-128-ae",
-                    "location": root.getroottree().getpath(address),
-                    "message": "A UAE postal address requires a valid emirate code.",
-                }
-            )
-    report["supplemental_checks"].append(
-        {
-            "name": "kmee-ae-postal-address-v1",
-            "source": (
-                "https://docs.peppol.eu/poac/ae/pint-ae/trn-invoice/rule/ibr-128-ae/"
+    # IBR-128 also names delivery terms IBT-079/080, whose UBL binding uses
+    # DeliveryLocation/Address rather than its compiled PostalAddress context.
+    for name, addresses, message in (
+        (
+            "kmee-ae-postal-address-v1",
+            root.iter(f"{{{cac}}}PostalAddress"),
+            "A UAE postal address requires a valid emirate code.",
+        ),
+        (
+            "kmee-ae-delivery-address-v1",
+            root.findall(
+                f"{{{cac}}}Delivery/{{{cac}}}DeliveryLocation/{{{cac}}}Address"
             ),
-            "failures": failures,
-        }
-    )
+            "A UAE delivery address requires a valid emirate code.",
+        ),
+    ):
+        failures = []
+        for address in addresses:
+            country = address.findtext(
+                f"{{{cac}}}Country/{{{basic}}}IdentificationCode"
+            )
+            subdivision = address.findtext(f"{{{basic}}}CountrySubentity")
+            if country == "AE" and subdivision not in {
+                "AUH",
+                "DXB",
+                "SHJ",
+                "UAQ",
+                "FUJ",
+                "AJM",
+                "RAK",
+            }:
+                failures.append(
+                    {
+                        "code": "ibr-128-ae",
+                        "location": root.getroottree().getpath(address),
+                        "message": message,
+                    }
+                )
+        report["supplemental_checks"].append(
+            {
+                "name": name,
+                "source": (
+                    "https://docs.peppol.eu/poac/ae/pint-ae/trn-invoice/rule/ibr-128-ae/"
+                ),
+                "failures": failures,
+            }
+        )
     # IBR-126 exempts ItemPriceExtension from document-currency equality.
     # The UAE semantic terms still require its provided amounts to be in AED.
     # Keep this local check separate from official SVRL and presence/value rules.
