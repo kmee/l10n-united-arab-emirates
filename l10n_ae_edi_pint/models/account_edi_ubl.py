@@ -151,6 +151,9 @@ class AccountEdiUblUae(models.AbstractModel):
 
     def _ubl_add_payment_means_nodes(self, vals):
         result = super()._ubl_add_payment_means_nodes(vals)
+        account_builder = (
+            self._ubl_get_payment_means_payee_financial_account_node_from_partner_bank
+        )
         if instruction := vals["invoice"]._l10n_ae_payment_means():
             vals["document_node"]["cac:PaymentMeans"] = [
                 {
@@ -161,6 +164,10 @@ class AccountEdiUblUae(models.AbstractModel):
                     "cbc:PaymentID": {"_text": instruction["payment_reference"]},
                 }
             ]
+            if instruction["code"] == "30":
+                vals["document_node"]["cac:PaymentMeans"][0][
+                    "cac:PayeeFinancialAccount"
+                ] = account_builder(vals, vals["invoice"].partner_bank_id)
         return result
 
     def _ubl_add_invoice_period_nodes(self, vals):

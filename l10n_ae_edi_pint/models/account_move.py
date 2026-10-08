@@ -8,6 +8,8 @@ import re
 from odoo import api, fields, models
 from odoo.exceptions import UserError
 
+from odoo.addons.base.models.res_partner_bank import sanitize_account_number
+
 from ..tools.validation import (
     DEFAULT_RULESET,
     OfflinePintValidator,
@@ -62,18 +64,33 @@ class AccountMove(models.Model):
         self.ensure_one()
         method = self.preferred_payment_method_line_id
         journal = method.journal_id
-        if journal.type != "cash":
+        if journal.type == "cash":
+            code, name = "10", "In cash"
+        elif journal.type == "bank" and method.code == "manual":
+            code, name = "30", "Credit transfer"
+        else:
             return None
+        account = self.partner_bank_id if code == "30" else self.env["res.partner.bank"]
+        identifier = (
+            sanitize_account_number(account.account_number) if account else None
+        )
+        if code == "30" and not identifier:
+            raise UserError(
+                self.env._(
+                    "IBR-192-AE: credit transfer requires the recipient bank account. "
+                    "Review the native invoice recipient bank before preparation."
+                )
+            )
         return {
-            "code": "10",
-            "name": "In cash",
+            "code": code,
+            "name": name,
             "payment_reference": self.payment_reference or self.name,
             "method_line_id": method.id,
             "method_code": method.code,
             "journal_id": journal.id,
             "journal_type": journal.type,
-            "account_id": None,
-            "account_identifier": None,
+            "account_id": account.id or None,
+            "account_identifier": identifier,
         }
 
     def _l10n_ae_snapshot(self):
