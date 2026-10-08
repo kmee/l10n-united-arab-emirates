@@ -32,6 +32,110 @@ NS = {
 
 @tagged("post_install", "-at_install")
 class TestUaeInvoiceXml(AccountTestInvoicingCommon):
+    def test_reviewed_monthly_term_preserves_supply_period_and_native_due_date(self):
+        self.env.company.l10n_ae_edi_auto_prepare = False
+        with Form(
+            self.env["account.payment.term"]
+            .with_user(self.simple_accountman)
+            .with_context(default_company_id=self.env.company.id)
+        ) as form:
+            form.name = "Synthetic monthly billing with sixty-day payment"
+            with form.line_ids.edit(0) as line:
+                line.nb_days = 60
+                line.delay_type = "days_after"
+            form.l10n_ae_billing_frequency_code = "MTH"
+            term = form.save()
+        self.assertEqual(term.company_id, self.env.company)
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {
+                "name": "Synthetic monthly billing frequency",
+                "fiscal_uuid_policy": "controlled_local",
+            }
+        )
+        invoice = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a
+        ).with_user(self.simple_accountman)
+        self.assertFalse(invoice.env.su)
+        with Form(invoice) as form:
+            form.invoice_date = "2026-01-31"
+            form.invoice_payment_term_id = term
+            form.preferred_payment_method_line_id = self.env[
+                "account.payment.method.line"
+            ]
+            form.partner_bank_id = self.env["res.partner.bank"]
+            form.l10n_ae_summary = True
+            form.l10n_ae_invoicing_period_start = "2026-01-01"
+            form.l10n_ae_invoicing_period_end = "2026-01-31"
+            form.l10n_ae_binding_id = binding
+            self.assertEqual(form.l10n_ae_billing_frequency_code, "MTH")
+        invoice.action_post()
+        self.assertEqual(invoice.state, "posted")
+        self.assertEqual(str(invoice.invoice_date_due), "2026-04-01")
+        self.assertEqual(
+            (invoice.amount_untaxed, invoice.amount_tax, invoice.amount_total),
+            (100, 5, 105),
+        )
+        ledger_fields = [
+            "account_id",
+            "partner_id",
+            "currency_id",
+            "date",
+            "date_maturity",
+            "debit",
+            "credit",
+            "balance",
+            "amount_currency",
+            "tax_ids",
+            "create_date",
+            "write_date",
+        ]
+        ledger = invoice.line_ids.sorted("id").read(ledger_fields)
+        invoice.action_l10n_ae_validate()
+        invoice.action_l10n_ae_prepare()
+        issue = invoice.l10n_ae_transmission_id
+        tree = etree.fromstring(issue.xml_content.encode())
+        periods = tree.findall("cac:InvoicePeriod", namespaces=NS)
+        self.assertEqual(len(periods), 1)
+        self.assertEqual(
+            periods[0].findtext("cbc:StartDate", namespaces=NS), "2026-01-01"
+        )
+        self.assertEqual(
+            periods[0].findtext("cbc:EndDate", namespaces=NS), "2026-01-31"
+        )
+        self.assertEqual(
+            periods[0].findtext("cbc:DescriptionCode", namespaces=NS), "MTH"
+        )
+        self.assertIsNone(periods[0].find("cbc:Description", namespaces=NS))
+        self.assertEqual(tree.findtext("cbc:DueDate", namespaces=NS), "2026-04-01")
+        self.assertEqual(
+            json.loads(issue.payload)["invoicing_period"],
+            {
+                "start_date": "2026-01-01",
+                "end_date": "2026-01-31",
+                "billing_frequency_code": "MTH",
+            },
+        )
+        self.assertTrue(invoice.validate_l10n_ae_pint()["valid"])
+        immutable = [
+            "payload",
+            "payload_hash",
+            "xml_content",
+            "xml_hash",
+            "idempotency_key",
+        ]
+        frozen = issue.read(immutable)
+        with Form(term.with_user(self.simple_accountman)) as form:
+            form.l10n_ae_billing_frequency_code = "WKY"
+        self.assertEqual(invoice.l10n_ae_billing_frequency_code, "MTH")
+        with self.assertRaisesRegex(UserError, "frozen UAE"):
+            invoice.write({"l10n_ae_billing_frequency_code": "WKY"})
+        invoice.action_l10n_ae_prepare()
+        self.assertEqual(invoice.preview_l10n_ae_pint(), frozen[0]["xml_content"])
+        self.assertTrue(invoice.validate_l10n_ae_pint()["valid"])
+        self.assertEqual(issue.read(immutable), frozen)
+        self.assertEqual(invoice.line_ids.sorted("id").read(ledger_fields), ledger)
+        self.assertFalse(issue.attempt_ids or issue.event_ids)
+
     def test_reviewed_nine_codes_render_native_aed_invoice_instructions(self):
         # Independent literals from the published AE list; these are ordinary
         # 380/AED representations, not nine complete economic-direction matrices.
