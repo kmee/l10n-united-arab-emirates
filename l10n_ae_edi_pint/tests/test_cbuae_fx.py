@@ -206,8 +206,10 @@ class TestUaeCbuaeFx(TestUaeInvoiceXml):
                 .create({"requested_date": "2026-08-26", "company_id": company.id})
             )
             hidden_publications |= publication
-        foreign_publication = hidden_publications.filtered(
-            lambda record: record.company_id == foreign
+        foreign_publication = (
+            hidden_publications.filtered(lambda record: record.company_id == foreign)
+            .with_user(setup_manager)
+            .with_context(allowed_company_ids=foreign.ids)
         )
         response = Response()
         response.status_code = 200
