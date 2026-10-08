@@ -240,7 +240,23 @@ class AccountMove(models.Model):
             )
         if any("l10n_ae_received_document" in vals for vals in vals_list):
             raise UserError(self.env._("The received UAE origin is protected."))
-        return super().create(vals_list)
+        moves = super().create(vals_list)
+        frequency = "l10n_ae_billing_frequency_code"
+        if f"default_{frequency}" not in self.env.context:
+            for move, vals in zip(moves, vals_list, strict=True):
+                if (
+                    frequency not in vals
+                    and move.company_id.country_id.code == "AE"
+                    and move.is_invoice(include_receipts=False)
+                    and not (
+                        move.l10n_ae_transmission_id or move.l10n_ae_received_document
+                    )
+                    and move.invoice_payment_term_id.l10n_ae_billing_frequency_code
+                ):
+                    move.l10n_ae_billing_frequency_code = (
+                        move.invoice_payment_term_id.l10n_ae_billing_frequency_code
+                    )
+        return moves
 
     def _l10n_ae_mark_received(self):
         return super().write({"l10n_ae_received_document": True})
@@ -265,8 +281,9 @@ class AccountMove(models.Model):
         UAE_BILLING_FREQUENCIES,
         string="UAE Billing Frequency",
         copy=False,
-        help="Reviewed billing cadence. Selecting a payment term in the invoice "
-        "form supplies its reviewed default; you may override or clear it "
+        help="Reviewed billing cadence. The payment term supplies its reviewed "
+        "default when creating an invoice or selecting it in the form; "
+        "you may override or clear it "
         "before preparing the document. Due dates do not define a supply period.",
     )
     l10n_ae_billing_frequency_note = fields.Char(
