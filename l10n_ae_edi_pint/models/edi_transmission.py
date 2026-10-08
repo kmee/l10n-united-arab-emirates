@@ -58,5 +58,5 @@ class UaeEdiTransmission(models.Model):
         except UserError as error:
             if report["valid"] or error.__class__ is not UserError:
                 raise
-            raise UaeDocumentValidationError(str(error)) from error
+            raise UaeDocumentValidationError(str(error), report=report) from error
         return report
