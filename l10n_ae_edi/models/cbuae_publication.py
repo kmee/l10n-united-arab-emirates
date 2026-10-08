@@ -1,6 +1,5 @@
 # Copyright 2026 KMEE
 # License AGPL-3.0 or later (https://www.gnu.org/licenses/agpl).
-import base64
 import hashlib
 import time
 from datetime import date
@@ -9,6 +8,7 @@ import requests
 from lxml import html
 
 from odoo import fields, models
+from odoo.tools.binary import BinaryBytes
 
 
 class CbuaePublication(models.Model):
@@ -75,7 +75,7 @@ class CbuaePublication(models.Model):
                     "retrieved_at": fields.Datetime.now(),
                     "http_status": response.status_code,
                     "content_type": response.headers.get("Content-Type"),
-                    "source_body": base64.b64encode(body),
+                    "source_body": BinaryBytes(body),
                     "source_sha256": hashlib.sha256(body).hexdigest(),
                     "publication_stamp": stamp,
                     "publication_date": publication_date,

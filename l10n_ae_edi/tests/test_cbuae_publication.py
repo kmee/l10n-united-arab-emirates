@@ -1,6 +1,5 @@
 # Copyright 2026 KMEE
 # License AGPL-3.0 or later (https://www.gnu.org/licenses/agpl).
-import base64
 from pathlib import Path
 from unittest.mock import patch
 
@@ -48,7 +47,7 @@ class TestCbuaePublication(AccountTestInvoicingCommon):
         self.assertEqual(
             publication.publication_stamp, "Wednesday 26 August 2026 06:05:16 PM"
         )
-        self.assertEqual(base64.b64decode(publication.source_body), original)
+        self.assertEqual(publication.source_body.content, original)
         self.assertEqual(
             publication.source_sha256,
             "26998f220ca4b9e5376ef368e66206da41754b66ac545f9a24c3779b77932538",
