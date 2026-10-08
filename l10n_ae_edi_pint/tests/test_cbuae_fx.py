@@ -1,6 +1,7 @@
 # Copyright 2026 KMEE
 # License AGPL-3.0 or later (https://www.gnu.org/licenses/agpl).
 import json
+import logging
 from functools import partial
 from pathlib import Path
 from unittest.mock import patch
@@ -70,6 +71,17 @@ class TestUaeCbuaeFx(TestUaeInvoiceXml):
         # accounting-line write actor; values and the frozen issue must survive.
         self.env.flush_all()
         after_rename = original.line_ids.sorted("id").read(ledger_fields)
+
+        def trace_original(phase):
+            logging.getLogger(__name__).info(
+                "[DEBUG-cbuae-identity] %s %s",
+                phase,
+                original.line_ids.sorted("id").read(
+                    ["write_uid", "write_date", "balance"]
+                ),
+            )
+
+        trace_original("after_rename")
         for before, after in zip(ledger, after_rename, strict=True):
             self.assertEqual(
                 {key: value for key, value in before.items() if key != "write_uid"},
@@ -80,10 +92,12 @@ class TestUaeCbuaeFx(TestUaeInvoiceXml):
         following = self.init_invoice(
             "out_invoice", amounts=[100], taxes=self.tax_sale_a, currency=usd
         ).with_user(self.simple_accountman)
+        trace_original("after_following_create")
         self.assertFalse(following.env.su)
         with Form(following) as form:
             form.invoice_date = "2026-08-27"
             form.l10n_ae_binding_id = binding
+        trace_original("after_following_form")
         self.assertEqual(following.currency_id.name, "ZAR")
         self.assertEqual(following.l10n_ae_effective_tax_exchange_origin, "review")
         self.assertIn(
@@ -92,6 +106,7 @@ class TestUaeCbuaeFx(TestUaeInvoiceXml):
         )
         self.assertFalse(following.l10n_ae_effective_cbuae_review_id)
         following.action_post()
+        trace_original("after_following_post")
         self.assertEqual(following.state, "posted")
         self.assertEqual(following.amount_tax_signed, 18.36)
         self.assertEqual(following.amount_total_signed, 385.61)
@@ -106,6 +121,7 @@ class TestUaeCbuaeFx(TestUaeInvoiceXml):
         ):
             with self.assertRaisesRegex(UserError, "currency code"):
                 action()
+            trace_original("after_" + action.__name__)
         self.assertEqual(
             following.line_ids.sorted("id").read(ledger_fields), following_ledger
         )
@@ -122,6 +138,7 @@ class TestUaeCbuaeFx(TestUaeInvoiceXml):
             retained,
         )
         original.action_l10n_ae_prepare()
+        trace_original("after_original_prepare")
         self.assertTrue(original.validate_l10n_ae_pint()["valid"])
         self.assertEqual(original.preview_l10n_ae_pint(), frozen[0]["xml_content"])
         self.assertEqual(issue.read(immutable), frozen)
