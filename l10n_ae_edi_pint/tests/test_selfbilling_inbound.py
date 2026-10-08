@@ -15,6 +15,61 @@ from odoo.addons.account.tests.common import AccountTestInvoicingCommon
 
 @tagged("post_install", "-at_install")
 class TestUaeSelfBillingInbound(AccountTestInvoicingCommon):
+    def test_received_other_frequency_keeps_original_note_as_declared(self):
+        source, _agreement, binding = self._selfbilling_fixture()
+        source.write(
+            {
+                "l10n_ae_billing_frequency_code": "OTH",
+                "l10n_ae_billing_frequency_note": "Synthetic tenth business day.",
+                "narration": "<p>Synthetic supplied ordinary terms.</p>",
+            }
+        )
+        content = source.preview_l10n_ae_pint().encode()
+        tree = etree.fromstring(content)
+        note = tree.findtext("./{*}Note")
+        self.assertEqual(
+            [line for line in note.splitlines() if line.strip()],
+            ["Synthetic supplied ordinary terms.", "Synthetic tenth business day."],
+        )
+        manager = new_test_user(
+            self.env,
+            login="uae-received-other-frequency-manager",
+            groups="account.group_account_manager",
+            company_id=self.env.company.id,
+            company_ids=[Command.set(self.env.company.ids)],
+        )
+        inboxes = (
+            self.env["l10n_ae.edi.inbox"]
+            .with_user(manager)
+            .with_company(self.env.company)
+        )
+        inbox = inboxes.receive_controlled_document(
+            binding.id, "selfbilling-other-frequency", content
+        )
+        self.assertTrue(inbox.action_process(), inbox.diagnostic)
+        received = inbox.move_id
+        self.assertFalse(received.env.su)
+        self.assertEqual(received.l10n_ae_billing_frequency_code, "OTH")
+        # The original Note is one declared value; do not guess which portion
+        # was ordinary terms and which was the issuer's cadence explanation.
+        self.assertEqual(received.l10n_ae_billing_frequency_note, note)
+        self.assertEqual((received.move_type, received.state), ("out_invoice", "draft"))
+        self.assertTrue(received.l10n_ae_received_document)
+        self.assertFalse(received.l10n_ae_transmission_ids)
+        self.assertEqual(inbox.original_xml.content, content)
+        with self.assertRaisesRegex(UserError, "received UAE"):
+            received.write({"l10n_ae_billing_frequency_note": "Local rewritten note"})
+        with self.assertRaisesRegex(UserError, "received.*cannot be emitted"):
+            received.action_l10n_ae_prepare()
+        replay = inboxes.receive_controlled_document(
+            binding.id, "selfbilling-other-frequency", content
+        )
+        self.assertEqual(replay, inbox)
+        self.assertTrue(replay.action_process(), replay.diagnostic)
+        self.assertEqual(replay.move_id, received)
+        self.assertEqual(received.l10n_ae_billing_frequency_note, note)
+        self.assertEqual(replay.original_xml.content, content)
+
     def test_received_selfbilling_frequency_preserves_original_over_local_term(self):
         source, _agreement, binding = self._selfbilling_fixture()
         source.l10n_ae_billing_frequency_code = "MTH"
