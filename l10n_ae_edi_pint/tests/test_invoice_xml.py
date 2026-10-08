@@ -311,8 +311,10 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         pint = (
             self.env[action["res_model"]]
             .with_user(self.simple_accountman)
-            .create({"move_id": invoice.id, "invoice_edi_format": "kmee_ae_pint"})
+            .create({"move_id": invoice.id})
         )
+        pint.write({"invoice_edi_format": "kmee_ae_pint"})
+        self.assertEqual(pint.invoice_edi_format, "kmee_ae_pint")
         with self.cr.savepoint(), self.assertRaisesRegex(UserError, "IBR-007-AE"):
             pint.action_send_and_print()
         self.assertFalse(invoice.ubl_cii_xml_id)
