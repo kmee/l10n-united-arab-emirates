@@ -79,6 +79,22 @@ class TestUaeSelfBillingInbound(AccountTestInvoicingCommon):
             binding.id, "synthetic-margin-nominal5", content
         )
         self.assertFalse(inbox.env.su)
+        # Neither the nominal7 zero tax nor the native5 default may stand in
+        # for the missing nominal5/native0 reviewed purchase tax.
+        recipient_tax.l10n_ae_edi_additional_vat_rate = 7
+        before = self.env["account.move"].search_count(
+            [("company_id", "=", self.buyer.id)]
+        )
+        self.assertFalse(inbox.action_process())
+        self.assertEqual(inbox.state, "review")
+        self.assertIn("tax category requires master data review", inbox.diagnostic)
+        self.assertFalse(inbox.move_id)
+        self.assertEqual(
+            self.env["account.move"].search_count([("company_id", "=", self.buyer.id)]),
+            before,
+        )
+        self.assertEqual(inbox.original_xml.content, content)
+        recipient_tax.l10n_ae_edi_additional_vat_rate = 5
         self.assertTrue(inbox.action_process(), inbox.diagnostic)
         bill = inbox.move_id
         self.assertEqual(
