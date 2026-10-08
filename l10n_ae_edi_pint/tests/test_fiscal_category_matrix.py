@@ -1446,6 +1446,86 @@ class TestUaeFiscalCategoryMatrix(AccountTestInvoicingCommon):
         self.assertFalse(invoice.l10n_ae_fiscal_uuid)
         self.assertEqual(tax.ubl_cii_tax_exemption_reason_code, "DL8.46.2")
 
+    def test_e_o_only_invoice_and_credit_categories_are_refused_before_issue(self):
+        exempt = self.env.ref(
+            f"account.{self.env.company.id}_uae_sale_tax_exempted"
+        )
+        exempt.write(
+            {
+                "ubl_cii_tax_exemption_reason_code": "DL8.46.2",
+                "ubl_cii_tax_exemption_reason": "Synthetic reviewed residential lease",
+            }
+        )
+        outside = self.env.ref(f"account.{self.env.company.id}_uae_out_of_scope")
+        fixed_charge = self.tax_sale_a.copy(
+            {
+                "name": "Synthetic fixed charge is not a line VAT category",
+                "amount_type": "fixed",
+                "amount": 5,
+                "ubl_cii_tax_category_code": "S",
+            }
+        )
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {"name": "Synthetic E/O type boundary"}
+        )
+        # A line's fixed charge or an unclassified/no-tax line must not invent
+        # the non-E/O item category required by the published 380/381 predicate.
+        for kind in ("out_invoice", "out_refund"):
+            for label, line_taxes, total in (
+                ("E", [exempt], 25),
+                ("O", [outside], 25),
+                ("E plus O", [exempt, outside], 50),
+                ("no tax", [self.env["account.tax"]], 25),
+                ("E with fixed S charge", [exempt | fixed_charge], 30),
+            ):
+                with self.subTest(kind=kind, categories=label):
+                    values = {
+                        "move_type": kind,
+                        "partner_id": self.partner_a.id,
+                        "journal_id": self.company_data["default_journal_sale"].id,
+                        "invoice_date": "2019-01-01",
+                        "currency_id": self.env.ref("base.AED").id,
+                        "l10n_ae_binding_id": binding.id,
+                        "l10n_ae_document_category": "tax",
+                        "invoice_line_ids": [
+                            Command.create(
+                                {
+                                    "name": "Synthetic " + label,
+                                    "price_unit": 25,
+                                    "account_id": self.company_data[
+                                        "default_account_revenue"
+                                    ].id,
+                                    "tax_ids": [Command.set(taxes.ids)],
+                                }
+                            )
+                            for taxes in line_taxes
+                        ],
+                    }
+                    if kind == "out_refund":
+                        values.update(
+                            l10n_ae_credit_reason="DL8.61.1.C",
+                            l10n_ae_credit_reference_ids=[
+                                Command.create(
+                                    {
+                                        "number": "SYNTH-REVIEWED-ORIGINAL",
+                                        "issue_date": "2018-12-01",
+                                        "review_evidence": "Synthetic original review",
+                                        "allocated_net": total,
+                                        "allocated_tax": 0,
+                                    }
+                                )
+                            ],
+                        )
+                    invoice = self.env["account.move"].with_user(
+                        self.simple_accountman
+                    ).create(values)
+                    with self.assertRaisesRegex(UserError, "IBR-151-AE"):
+                        invoice.action_l10n_ae_validate()
+                    self.assertEqual(invoice.state, "draft")
+                    self.assertFalse(invoice.l10n_ae_transmission_ids)
+                    self.assertFalse(invoice.l10n_ae_fiscal_uuid)
+                    self.assertEqual(invoice.l10n_ae_document_category, "tax")
+
     def test_exempt_without_uae_legal_code_is_refused_before_preparation(self):
         tax = self.tax_sale_a.copy(
             {
