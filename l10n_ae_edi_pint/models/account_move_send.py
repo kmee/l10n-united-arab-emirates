@@ -53,7 +53,9 @@ class AccountMoveSend(models.AbstractModel):
                 "level": "warning",
                 "message": "\n".join(group["messages"]),
                 "action_text": self.env._("View Invoices"),
-                "action": group["moves"]._get_records_action(),
+                "action": group["moves"]._get_records_action(
+                    name=self.env._("Review UAE Invoices")
+                ),
             }
         return alerts
 
