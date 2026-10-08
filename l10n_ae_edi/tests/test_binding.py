@@ -1,7 +1,7 @@
 # Copyright 2026 KMEE
 # License AGPL-3.0 or later (https://www.gnu.org/licenses/agpl).
 from odoo.exceptions import AccessError, ValidationError
-from odoo.tests import tagged
+from odoo.tests import Form, tagged
 from odoo.tests.common import new_test_user
 
 from odoo.addons.account.tests.common import AccountTestInvoicingCommon
@@ -13,6 +13,37 @@ class TestUaeProviderBinding(AccountTestInvoicingCommon):
     @AccountTestInvoicingCommon.setup_country("ae")
     def setUpClass(cls):
         super().setUpClass()
+
+    def test_manager_reviews_contract_capabilities_before_enabling_sending(self):
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {"name": "Synthetic explicitly reviewed sending contract"}
+        ).with_user(self.simple_accountman)
+        self.assertFalse(binding.env.su)
+        with (
+            self.assertRaisesRegex(ValidationError, "Review.*capabilities"),
+            self.cr.savepoint(),
+            Form(binding) as form,
+        ):
+            form.controlled_dispatch_enabled = True
+        self.assertFalse(binding.controlled_dispatch_enabled)
+        self.assertFalse(binding.capability_reviewed_at)
+        capabilities = self.env["l10n_ae.edi.capability"].search(
+            [("code", "in", ["submit", "lookup", "report", "billing_invoice"])]
+        )
+        self.assertEqual(len(capabilities), 4)
+        with Form(binding) as form:
+            form.capability_profile = "kmee-controlled-1"
+            form.capability_review_note = "Compared with the KMEE simulation contract."
+            for capability in capabilities:
+                form.capability_ids.add(capability)
+        binding.action_review_capabilities()
+        self.assertEqual(binding.capability_reviewed_by, self.simple_accountman)
+        self.assertTrue(binding.capability_reviewed_at)
+        with Form(binding) as form:
+            form.controlled_dispatch_enabled = True
+        self.assertTrue(binding.controlled_dispatch_enabled)
+        self.assertEqual(binding.environment, "sandbox")
+        self.assertEqual(binding.capability_profile, "kmee-controlled-1")
 
     def test_only_one_active_production_provider_per_legal_entity(self):
         binding = self.env["l10n_ae.edi.binding"]
