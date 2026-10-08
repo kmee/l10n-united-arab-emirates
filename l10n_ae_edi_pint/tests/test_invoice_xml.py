@@ -32,6 +32,99 @@ NS = {
 
 @tagged("post_install", "-at_install")
 class TestUaeInvoiceXml(AccountTestInvoicingCommon):
+    def test_no_selected_method_freezes_undefined_payment_instruction(self):
+        self.env.company.l10n_ae_edi_auto_prepare = False
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {
+                "name": "Synthetic undefined payment instruction",
+                "fiscal_uuid_policy": "controlled_local",
+            }
+        )
+        account = self.env["res.partner.bank"].create(
+            {
+                "partner_id": self.env.company.partner_id.id,
+                "company_id": self.env.company.id,
+                "account_number": "SYNTH UNUSED ACCOUNT 01",
+            }
+        )
+        invoice = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a
+        ).with_user(self.simple_accountman)
+        self.assertFalse(invoice.env.su)
+        with Form(invoice) as form:
+            form.preferred_payment_method_line_id = self.env[
+                "account.payment.method.line"
+            ]
+            form.partner_bank_id = account
+            form.payment_reference = "SYNTH-UNDEFINED-2026"
+            form.l10n_ae_binding_id = binding
+        self.assertFalse(invoice.preferred_payment_method_line_id)
+        invoice.action_post()
+        self.assertEqual(invoice.state, "posted")
+        self.assertEqual(
+            (invoice.amount_untaxed, invoice.amount_tax, invoice.amount_total),
+            (100, 5, 105),
+        )
+        ledger_fields = [
+            "account_id",
+            "partner_id",
+            "currency_id",
+            "debit",
+            "credit",
+            "balance",
+            "amount_currency",
+            "tax_ids",
+            "create_date",
+            "write_date",
+        ]
+        ledger = invoice.line_ids.sorted("id").read(ledger_fields)
+        invoice.action_l10n_ae_validate()
+        invoice.action_l10n_ae_prepare()
+        issue = invoice.l10n_ae_transmission_id
+        tree = etree.fromstring(issue.xml_content.encode())
+        means = tree.findall("cac:PaymentMeans", namespaces=NS)
+        self.assertEqual(len(means), 1)
+        self.assertEqual(means[0].findtext("cbc:PaymentMeansCode", namespaces=NS), "1")
+        self.assertEqual(
+            means[0].findtext("cbc:PaymentID", namespaces=NS), "SYNTH-UNDEFINED-2026"
+        )
+        for group in ("PayeeFinancialAccount", "CardAccount", "PaymentMandate"):
+            self.assertIsNone(means[0].find(f"cac:{group}", namespaces=NS))
+        self.assertEqual(
+            json.loads(issue.payload)["payment_means"],
+            {
+                "code": "1",
+                "name": "Instrument not defined",
+                "payment_reference": "SYNTH-UNDEFINED-2026",
+                "method_line_id": None,
+                "method_code": None,
+                "journal_id": None,
+                "journal_type": None,
+                "account_id": None,
+                "account_identifier": None,
+            },
+        )
+        self.assertTrue(invoice.validate_l10n_ae_pint()["valid"])
+        immutable = [
+            "payload",
+            "payload_hash",
+            "xml_content",
+            "xml_hash",
+            "idempotency_key",
+        ]
+        frozen = issue.read(immutable)
+        cash = self.company_data["default_journal_cash"]
+        method = cash.inbound_payment_method_line_ids.filtered(
+            lambda line: line.code == "manual"
+        )[:1]
+        self.partner_a.property_inbound_payment_method_line_id = method
+        invoice.action_l10n_ae_prepare()
+        self.assertEqual(invoice.preview_l10n_ae_pint(), frozen[0]["xml_content"])
+        self.assertTrue(invoice.validate_l10n_ae_pint()["valid"])
+        self.assertEqual(issue.read(immutable), frozen)
+        self.assertEqual(invoice.line_ids.sorted("id").read(ledger_fields), ledger)
+        self.assertFalse(issue.attempt_ids or issue.event_ids)
+
     def test_native_partial_credit_freezes_selected_customer_payment_account(self):
         self.env.company.l10n_ae_edi_auto_prepare = False
         journal = self.company_data["default_journal_bank"]
