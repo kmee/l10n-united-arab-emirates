@@ -76,3 +76,26 @@ class TestUaePeppolSend(AccountTestInvoicingCommon):
         self.assertFalse(invoice.ubl_cii_xml_id)
         self.assertFalse(invoice.invoice_pdf_report_id)
         self.assertFalse(invoice.sending_data)
+
+    def test_non_uae_send_retains_native_partner_verification(self):
+        # Belgium/sender is a native eligible company. An unsupported format
+        # gives a deterministic native not_verified result without network I/O.
+        # The control is endpoint verification delegation, not Peppol delivery.
+        self.env.company.write(
+            {
+                "country_id": self.env.ref("base.be").id,
+                "account_peppol_proxy_state": "sender",
+            }
+        )
+        invoice = self.init_invoice("out_invoice", amounts=[100], taxes=self.tax_sale_a)
+        invoice.action_post()
+        partner = invoice.commercial_partner_id.with_company(invoice.company_id)
+        self.assertFalse(partner.peppol_verification_state)
+        with self.cr.savepoint(), self.assertRaises(AccessError):
+            invoice.with_user(self.simple_accountman).action_send_and_print()
+        self.assertFalse(partner.peppol_verification_state)
+        action = invoice.action_send_and_print()
+        self.assertEqual(action["res_model"], "account.move.send.wizard")
+        self.assertEqual(partner.peppol_verification_state, "not_verified")
+        self.assertFalse(invoice.l10n_ae_transmission_ids)
+        self.assertFalse(invoice.ubl_cii_xml_id)

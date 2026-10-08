@@ -15,7 +15,7 @@ class ResPartner(models.Model):
         company = partner.env.company
         company.check_access("read")
         partner.check_access("read")
-        if company.country_code == "AE" and not self.env[
+        if company.country_code == "AE" and not partner.env[
             "account.move.send"
         ]._is_applicable_to_company("peppol", company):
             return False
