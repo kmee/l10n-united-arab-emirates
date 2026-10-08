@@ -27,6 +27,13 @@ class CbuaeRateReview(models.Model):
     source_label = fields.Char(required=True)
     currency_id = fields.Many2one("res.currency", required=True)
     review_note = fields.Text(required=True)
+    publication_date = fields.Date(
+        related="publication_id.publication_date", readonly=True
+    )
+    selected_quote_literal = fields.Char(
+        string="Source Quote (AED per Unit)",
+        compute="_compute_selected_quote_literal",
+    )
     native_rate_id = fields.Many2one("res.currency.rate", readonly=True, copy=False)
     quote_literal = fields.Char(readonly=True, copy=False)
     reviewed_by = fields.Many2one("res.users", readonly=True, copy=False)
@@ -44,6 +51,19 @@ class CbuaeRateReview(models.Model):
         "anchor_rate_literal",
         "import_facts",
     }
+
+    @api.depends(
+        "publication_id.quotes", "source_label", "native_rate_id", "quote_literal"
+    )
+    def _compute_selected_quote_literal(self):
+        for review in self:
+            review.selected_quote_literal = (
+                review.quote_literal
+                if review.native_rate_id
+                else (review.publication_id.quotes or {}).get(
+                    review.source_label, False
+                )
+            )
 
     def _check_actor(self, operation):
         principal = self.env.user.with_user(self.env.uid)
