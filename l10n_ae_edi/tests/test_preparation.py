@@ -192,10 +192,45 @@ class TestUaeInvoicePreparation(AccountTestInvoicingCommon):
         )
         reviewed_at = binding.capability_reviewed_at
         reviewed_hash = binding.capability_review_hash
-        invoice = self.init_invoice("out_invoice", amounts=[100], taxes=self.tax_sale_a)
-        invoice.l10n_ae_binding_id = binding
-        actor = invoice.with_user(self.simple_accountman)
+        actor = (
+            self.env["account.move"]
+            .with_user(self.simple_accountman)
+            .create(
+                {
+                    "move_type": "out_invoice",
+                    "partner_id": self.partner_a.id,
+                    "invoice_date": "2019-01-01",
+                    "l10n_ae_binding_id": binding.id,
+                    "invoice_line_ids": [
+                        Command.create(
+                            {
+                                "name": "Synthetic reviewed-contract service",
+                                "quantity": 1,
+                                "price_unit": 100,
+                                "account_id": self.company_data[
+                                    "default_account_revenue"
+                                ].id,
+                                "tax_ids": [Command.set(self.tax_sale_a.ids)],
+                            }
+                        )
+                    ],
+                }
+            )
+        )
         actor.action_post()
+        # Observe durable native posting before UAE actions. A mixed-user helper's
+        # cached write_uid can differ from the ORM's later flushed audit value.
+        actor.env.flush_all()
+        actor.line_ids.invalidate_recordset()
+        ledger_fields = [
+            "balance",
+            "amount_currency",
+            "account_id",
+            "tax_ids",
+            "write_uid",
+            "write_date",
+        ]
+        ledger = actor.line_ids.read(ledger_fields)
         actor.action_l10n_ae_prepare()
         issue = actor.l10n_ae_transmission_id
         contract = json.loads(issue.payload).get("binding_contract")
@@ -211,15 +246,6 @@ class TestUaeInvoicePreparation(AccountTestInvoicingCommon):
         self.assertEqual(contract["reviewed_by"], self.simple_accountman.id)
         self.assertEqual(contract["reviewed_at"], str(reviewed_at))
         self.assertEqual(contract["review_hash"], reviewed_hash)
-        ledger_fields = [
-            "balance",
-            "amount_currency",
-            "account_id",
-            "tax_ids",
-            "write_uid",
-            "write_date",
-        ]
-        ledger = actor.line_ids.read(ledger_fields)
         evidence_fields = [
             "payload",
             "payload_hash",
@@ -228,10 +254,22 @@ class TestUaeInvoicePreparation(AccountTestInvoicingCommon):
             "idempotency_key",
         ]
         original = issue.read(evidence_fields)
+        actor.env.flush_all()
+        actor.line_ids.invalidate_recordset()
+        self.assertEqual(
+            actor.line_ids.read(ledger_fields),
+            ledger,
+            "Flushing the posted invoice must preserve its observed ledger",
+        )
         with Form(binding) as form:
             form.capability_review_note = "Proposed different provider contract."
         self.assertEqual(binding.capability_review_state, "review")
         self.assertFalse(binding.capability_reviewed_at)
+        self.assertEqual(
+            actor.line_ids.read(ledger_fields),
+            ledger,
+            "Reviewing a different contract must preserve the posted ledger",
+        )
         actor.action_l10n_ae_prepare()
         self.assertEqual(actor.l10n_ae_transmission_id, issue)
         self.assertEqual(issue.read(evidence_fields), original)
