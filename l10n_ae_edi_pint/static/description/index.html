@@ -561,6 +561,18 @@ agent/Free Zone combinations conserve principal and original bytes in
 draft accounting. Duplicate principal structure or an existing
 self-billed draft with a different principal requires review. These
 flows do not establish ASP/FTA acceptance.</p>
+<p>For a reviewed payment instrument, open the native Bank journal’s
+<strong>Incoming Payments</strong> or <strong>Outgoing Payments</strong> method lines and use
+<strong>UAE Payment Instrument</strong>. This optional country metadata changes only
+document classification. A blank value retains supported native
+cash/manual or bank/manual derivation; no preferred method means
+instrument <tt class="docutils literal">1</tt>, even when Recipient Bank is present. Cheque <tt class="docutils literal">20</tt>
+uses the selected method’s reviewed classification and remittance,
+without inferring bank/card/mandate details. Frozen originals remain
+unchanged after journal edits. Code <tt class="docutils literal">30</tt> still requires a recipient
+account. Scenario 57 in the PT/EN manuals records selected evidence and
+limitations; the nine offered choices are not qualification of every
+instrument/document matrix.</p>
 </div>
 <div class="section" id="known-issues-roadmap">
 <h1><a class="toc-backref" href="#toc-entry-2">Known issues / Roadmap</a></h1>

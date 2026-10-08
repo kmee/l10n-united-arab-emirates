@@ -135,3 +135,14 @@ and flags. Billing input accepts `l10n_ae_principal_id`; replay preserves the is
 Supported received agent/Free Zone combinations conserve principal and original bytes
 in draft accounting. Duplicate principal structure or an existing self-billed draft with
 a different principal requires review. These flows do not establish ASP/FTA acceptance.
+
+
+For a reviewed payment instrument, open the native Bank journal's **Incoming Payments**
+or **Outgoing Payments** method lines and use **UAE Payment Instrument**. This optional
+country metadata changes only document classification. A blank value retains supported
+native cash/manual or bank/manual derivation; no preferred method means instrument `1`,
+even when Recipient Bank is present. Cheque `20` uses the selected method's reviewed
+classification and remittance, without inferring bank/card/mandate details. Frozen
+originals remain unchanged after journal edits. Code `30` still requires a recipient
+account. Scenario 57 in the PT/EN manuals records selected evidence and limitations; the
+nine offered choices are not qualification of every instrument/document matrix.
