@@ -6792,20 +6792,33 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
             {"name": "Incoming FX line arithmetic"}
         )
         cases = (
-            ("cac:InvoiceLine/cac:ItemPriceExtension/cbc:Amount", "385.62", None),
+            (
+                "cac:InvoiceLine/cac:ItemPriceExtension/cbc:Amount",
+                "385.62",
+                None,
+                "fiscal AED",
+            ),
             (
                 "cac:InvoiceLine/cac:ItemPriceExtension/cac:TaxTotal/cbc:TaxAmount",
                 "18.37",
                 None,
+                "fiscal AED",
             ),
-            ("cac:InvoiceLine/cac:ItemPriceExtension/cbc:Amount", None, "USD"),
+            (
+                "cac:InvoiceLine/cac:ItemPriceExtension/cbc:Amount",
+                None,
+                "USD",
+                "KMEE supplemental BTAE-10-currency",
+            ),
             (
                 "cac:InvoiceLine/cac:ItemPriceExtension/cac:TaxTotal/cbc:TaxAmount",
                 None,
                 "USD",
+                "KMEE supplemental BTAE-08-currency",
             ),
         )
-        for index, (xpath, value, currency) in enumerate(cases):
+        before = self.env["account.move"].search_count([])
+        for index, (xpath, value, currency, diagnostic) in enumerate(cases):
             with self.subTest(index=index):
                 tree = etree.fromstring(etree.tostring(original))
                 tree.find("cbc:UUID", NS).text = f"aaaaaaac-3333-4333-8333-{index:012d}"
@@ -6827,8 +6840,31 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
                 self.assertFalse(inbox.action_process())
                 self.assertEqual(inbox.state, "review")
                 self.assertFalse(inbox.move_id)
-                self.assertIn("fiscal AED", inbox.diagnostic)
+                self.assertIn(diagnostic, inbox.diagnostic)
                 self.assertEqual(inbox.original_xml.content, content)
+                self.assertEqual(self.env["account.move"].search_count([]), before)
+                if currency:
+                    history = inbox.processing_history_ids
+                    self.assertEqual(len(history), 1)
+                    report = json.loads(history.validation_report)
+                    self.assertFalse(report["valid"])
+                    self.assertTrue(report["xsd_valid"])
+                    self.assertTrue(
+                        all(not layer["failures"] for layer in report["layers"])
+                    )
+                    supplement = next(
+                        check
+                        for check in report["supplemental_checks"]
+                        if check["name"] == "kmee-ae-line-aed-currency-v1"
+                    )
+                    self.assertEqual(
+                        [failure["code"] for failure in supplement["failures"]],
+                        [diagnostic.removeprefix("KMEE supplemental ")],
+                    )
+                    self.assertEqual(
+                        history.validation_report_hash,
+                        hashlib.sha256(history.validation_report.encode()).hexdigest(),
+                    )
 
     def test_received_fractional_quantity_retains_unrounded_aed_line_values(self):
         tree, _rate, _source = self._foreign_received_fixture()
