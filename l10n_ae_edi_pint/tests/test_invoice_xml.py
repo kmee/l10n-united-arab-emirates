@@ -32,6 +32,89 @@ NS = {
 
 @tagged("post_install", "-at_install")
 class TestUaeInvoiceXml(AccountTestInvoicingCommon):
+    def test_native_batch_send_groups_category_review_without_emitting(self):
+        self.env.company.l10n_ae_edi_auto_prepare = False
+        self.partner_a.invoice_sending_method = "manual"
+        exempt = self.env.ref(f"account.{self.env.company.id}_uae_sale_tax_exempted")
+        exempt.ubl_cii_tax_exemption_reason_code = "DL8.46.2"
+        invoices = self.env["account.move"]
+        for tax in (exempt, exempt, self.tax_sale_a):
+            invoice = self.init_invoice("out_invoice", amounts=[25], taxes=tax)
+            invoices |= invoice
+        invoices = invoices.with_user(self.simple_accountman)
+        self.assertFalse(invoices.env.su)
+        invoices.action_post()
+        self.assertEqual(invoices.mapped("state"), ["posted"] * 3)
+        self.assertEqual(
+            [(m.amount_untaxed, m.amount_tax, m.amount_total) for m in invoices],
+            [(25, 0, 25), (25, 0, 25), (25, 1.25, 26.25)],
+        )
+        move_fields = [
+            "write_date",
+            "l10n_ae_fiscal_uuid",
+            "l10n_ae_transmission_ids",
+            "l10n_ae_preparation_state",
+            "l10n_ae_preparation_error",
+            "ubl_cii_xml_id",
+            "invoice_pdf_report_id",
+            "sending_data",
+        ]
+        ledger_fields = [
+            "account_id",
+            "debit",
+            "credit",
+            "amount_currency",
+            "currency_id",
+            "tax_ids",
+            "create_date",
+            "write_date",
+        ]
+        before = invoices.read(move_fields)
+        ledger = invoices.line_ids.read(ledger_fields)
+        artifacts = (
+            self.env["ir.attachment"]
+            .search(
+                [("res_model", "=", "account.move"), ("res_id", "in", invoices.ids)]
+            )
+            .ids
+        )
+        action = invoices.action_send_and_print()
+        self.assertEqual(action["res_model"], "account.move.send.batch.wizard")
+        wizard = (
+            self.env[action["res_model"]]
+            .with_user(self.simple_accountman)
+            .with_context(**action["context"])
+            .create({})
+        )
+        grouped = {
+            key: alert
+            for key, alert in wizard.alerts.items()
+            if key.startswith("l10n_ae_edi_")
+        }
+        self.assertEqual(len(grouped), 1)
+        alert = next(iter(grouped.values()))
+        self.assertEqual(alert["level"], "warning")
+        self.assertIn("IBR-151-AE", alert["message"])
+        self.assertEqual(alert["action_text"], "View Invoices")
+        self.assertEqual(alert["action"]["res_model"], "account.move")
+        self.assertCountEqual(
+            self.env["account.move"]
+            .with_user(self.simple_accountman)
+            .search(alert["action"]["domain"])
+            .ids,
+            invoices[:2].ids,
+        )
+        self.assertEqual(invoices.read(move_fields), before)
+        self.assertEqual(invoices.line_ids.read(ledger_fields), ledger)
+        self.assertEqual(
+            self.env["ir.attachment"]
+            .search(
+                [("res_model", "=", "account.move"), ("res_id", "in", invoices.ids)]
+            )
+            .ids,
+            artifacts,
+        )
+
     def test_prepared_native_send_refuses_explicit_conflicting_format(self):
         binding = self.env["l10n_ae.edi.binding"].create(
             {"name": "Synthetic native-send conflict sandbox"}
