@@ -3,6 +3,7 @@
 from . import res_company
 from . import cbuae_publication
 from . import cbuae_rate_review
+from . import res_currency_rate
 from . import res_partner
 from . import product_product
 from . import product_template
