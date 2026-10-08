@@ -163,6 +163,64 @@ class TestUaeProviderBinding(AccountTestInvoicingCommon):
                     actor.write({"company_id": other.id})
                 self.assertEqual(binding.read(evidence_fields), original)
 
+    def test_company_change_requires_active_destination_and_new_contract_review(self):
+        company = self.env.company
+        other = self.env["res.company"].create(
+            {"name": "Synthetic authorized capability destination"}
+        )
+        manager = new_test_user(
+            self.env,
+            login="uae-capability-active-company-manager",
+            groups="account.group_account_manager",
+            company_id=company.id,
+            company_ids=[(6, 0, (company + other).ids)],
+        )
+        capabilities = self.env["l10n_ae.edi.capability"].search(
+            [("code", "in", ["submit", "lookup", "report", "billing_invoice"])]
+        )
+        binding = (
+            self.env["l10n_ae.edi.binding"]
+            .create(
+                {
+                    "name": "Synthetic destination context review",
+                    "company_id": company.id,
+                    "capability_profile": "kmee-controlled-1",
+                    "capability_ids": [(6, 0, capabilities.ids)],
+                    "capability_review_note": "Original company contract review.",
+                }
+            )
+            .with_user(manager)
+            .with_context(allowed_company_ids=company.ids)
+        )
+        binding.action_review_capabilities()
+        binding.controlled_dispatch_enabled = True
+        review_fields = [
+            "company_id",
+            "capability_reviewed_by",
+            "capability_reviewed_at",
+            "capability_review_hash",
+            "controlled_dispatch_enabled",
+        ]
+        original = binding.read(review_fields)
+        for elevated in (False, True):
+            actor = binding.sudo() if elevated else binding
+            with self.subTest(elevated=elevated):
+                with self.cr.savepoint(), self.assertRaises(AccessError):
+                    actor.write({"company_id": other.id})
+                self.assertEqual(binding.read(review_fields), original)
+        selected = binding.with_context(allowed_company_ids=(company + other).ids)
+        self.assertFalse(selected.env.su)
+        selected.write({"company_id": other.id})
+        self.assertEqual(selected.company_id, other)
+        self.assertEqual(selected.capability_review_state, "review")
+        self.assertFalse(selected.capability_reviewed_by)
+        self.assertFalse(selected.capability_reviewed_at)
+        self.assertFalse(selected.capability_review_hash)
+        self.assertFalse(selected.controlled_dispatch_enabled)
+        selected.action_review_capabilities()
+        self.assertEqual(selected.capability_reviewed_by, manager)
+        self.assertEqual(selected.capability_review_state, "ready")
+
     def test_controlled_local_uuid_assignment_cannot_be_enabled_in_production(self):
         binding = self.env["l10n_ae.edi.binding"].create(
             {
