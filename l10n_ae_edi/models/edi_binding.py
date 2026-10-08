@@ -397,6 +397,15 @@ class UaeEdiBinding(models.Model):
     def write(self, vals):
         if CAPABILITY_REVIEW_FIELDS.intersection(vals):
             raise UserError(self.env._("Use the contract capability review action."))
+        if CAPABILITY_DECLARATION_FIELDS.intersection(vals) and vals.get(
+            "controlled_dispatch_enabled"
+        ):
+            raise ValidationError(
+                self.env._(
+                    "Review the changed contract capabilities separately "
+                    "before enabling sending."
+                )
+            )
         if CAPABILITY_DECLARATION_FIELDS.intersection(vals) or vals.get(
             "controlled_dispatch_enabled"
         ):
