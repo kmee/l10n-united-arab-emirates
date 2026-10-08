@@ -323,6 +323,34 @@ def _validate_offline(content, directory, ruleset=DEFAULT_RULESET):
             "failures": failures,
         }
     )
+    # IBR-126 exempts ItemPriceExtension from document-currency equality.
+    # The UAE semantic terms still require its provided amounts to be in AED.
+    # Keep this local check separate from official SVRL and presence/value rules.
+    failures = []
+    for line_name in ("InvoiceLine", "CreditNoteLine"):
+        for extension in root.findall(
+            f"{{{cac}}}{line_name}/{{{cac}}}ItemPriceExtension"
+        ):
+            for path, term in (
+                (f"{{{basic}}}Amount", "BTAE-10"),
+                (f"{{{cac}}}TaxTotal/{{{basic}}}TaxAmount", "BTAE-08"),
+            ):
+                for amount in extension.findall(path):
+                    if amount.get("currencyID") != "AED":
+                        failures.append(
+                            {
+                                "code": term + "-currency",
+                                "location": root.getroottree().getpath(amount),
+                                "message": term + " must be expressed in AED.",
+                                "source": (
+                                    "https://docs.peppol.eu/poac/ae/pint-ae/"
+                                    "trn-invoice/semantic-model/" + term.lower() + "/"
+                                ),
+                            }
+                        )
+    report["supplemental_checks"].append(
+        {"name": "kmee-ae-line-aed-currency-v1", "failures": failures}
+    )
     report["valid"] = all(
         not check["failures"]
         for check in report["layers"] + report["supplemental_checks"]
