@@ -8302,6 +8302,86 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
             ledger,
         )
 
+    def test_future_manual_quote_posts_in_review_until_date_repaired(
+        self,
+    ):
+        usd = self.env.ref("base.USD")
+        usd.active = True
+        self.env["res.currency.rate"].create(
+            {
+                "currency_id": usd.id,
+                "company_id": self.env.company.id,
+                "name": "2018-12-31",
+                "rate": 1 / 3.6725,
+            }
+        )
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {
+                "name": "Synthetic manual quote source date review",
+                "fiscal_uuid_policy": "controlled_local",
+            }
+        )
+        self.env.company.write(
+            {"l10n_ae_edi_auto_prepare": True, "l10n_ae_edi_binding_id": binding.id}
+        )
+        invoice = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a, currency=usd
+        ).with_user(self.simple_accountman)
+        self.assertFalse(invoice.env.su)
+        with Form(invoice) as form:
+            form.invoice_date = "2019-01-02"
+            form.taxable_supply_date = "2019-01-01"
+            form.l10n_ae_tax_exchange_rate = "3.672500"
+            form.l10n_ae_tax_exchange_date = "2019-01-02"
+            form.l10n_ae_tax_exchange_source = "SYNTHETIC-UNVERIFIED-QUOTE"
+        invoice.action_post()
+        self.assertEqual(invoice.state, "posted")
+        self.assertEqual(invoice.l10n_ae_preparation_state, "review")
+        self.assertIn("after the VAT point date", invoice.l10n_ae_preparation_error)
+        self.assertFalse(invoice.l10n_ae_transmission_id)
+        self.assertFalse(invoice.l10n_ae_fiscal_uuid)
+        displayed = Form(invoice)
+        self.assertEqual(displayed.l10n_ae_effective_tax_exchange_origin, "review")
+        self.assertIn(
+            "after the VAT point date",
+            displayed.l10n_ae_effective_tax_exchange_diagnostic,
+        )
+        for action in (invoice.action_l10n_ae_validate, invoice.action_l10n_ae_prepare):
+            with self.assertRaisesRegex(UserError, "after the VAT point date"):
+                action()
+        ledger = invoice.line_ids.read(
+            ["account_id", "debit", "credit", "amount_currency", "tax_ids"]
+        )
+        with Form(invoice) as form:
+            form.l10n_ae_tax_exchange_date = "2019-01-01"
+        invoice.action_l10n_ae_prepare()
+        self.assertEqual(invoice.l10n_ae_preparation_state, "ready")
+        issue = invoice.l10n_ae_transmission_id
+        exchange = json.loads(issue.payload)["tax_exchange"]
+        self.assertEqual(exchange["rate"], "3.672500")
+        self.assertEqual(exchange["date"], "2019-01-01")
+        self.assertEqual(exchange["source"], "SYNTHETIC-UNVERIFIED-QUOTE")
+        prepared = Form(invoice)
+        self.assertEqual(
+            prepared.l10n_ae_effective_tax_exchange_origin, "manual_unverified"
+        )
+        tree = etree.fromstring(issue.xml_content.encode())
+        self.assertEqual(tree.findtext("cbc:TaxPointDate", namespaces=NS), "2019-01-01")
+        self.assertEqual(
+            tree.findtext("cac:TaxExchangeRate/cbc:CalculationRate", namespaces=NS),
+            "3.672500",
+        )
+        self.assertEqual(invoice.amount_total, 105)
+        self.assertEqual(invoice.amount_tax_signed, 18.36)
+        self.assertEqual(invoice.amount_total_signed, 385.61)
+        self.assertTrue(invoice.validate_l10n_ae_pint()["valid"])
+        self.assertEqual(
+            invoice.line_ids.read(
+                ["account_id", "debit", "credit", "amount_currency", "tax_ids"]
+            ),
+            ledger,
+        )
+
     def test_usd_invoice_preserves_the_quote_and_unrounded_line_aed_amounts(self):
         usd = self.env.ref("base.USD")
         usd.active = True
