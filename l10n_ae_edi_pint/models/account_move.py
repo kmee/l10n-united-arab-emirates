@@ -154,8 +154,9 @@ class AccountMove(models.Model):
             ):
                 party._l10n_ae_country_subentity()
         for move in self.filtered(
-            lambda record: record.l10n_ae_document_category == "tax"
-            and not record.is_self_billing
+            lambda record: (
+                record.l10n_ae_document_category == "tax" and not record.is_self_billing
+            )
         ):
             # Check the same generated categories used by Preview/Prepare/Send;
             # the public core decides which taxes become actual item nodes.

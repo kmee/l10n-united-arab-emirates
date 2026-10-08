@@ -1382,9 +1382,7 @@ class TestUaeFiscalCategoryMatrix(AccountTestInvoicingCommon):
             )
 
     def test_all_exempt_tax_invoice_requires_review_without_blocking_posting(self):
-        tax = self.env.ref(
-            f"account.{self.env.company.id}_uae_sale_tax_exempted"
-        )
+        tax = self.env.ref(f"account.{self.env.company.id}_uae_sale_tax_exempted")
         tax.write(
             {
                 "ubl_cii_tax_exemption_reason_code": "DL8.46.2",
@@ -1394,28 +1392,32 @@ class TestUaeFiscalCategoryMatrix(AccountTestInvoicingCommon):
         binding = self.env["l10n_ae.edi.binding"].create(
             {"name": "Synthetic all-E tax invoice"}
         )
-        invoice = self.env["account.move"].with_user(self.simple_accountman).create(
-            {
-                "move_type": "out_invoice",
-                "partner_id": self.partner_a.id,
-                "journal_id": self.company_data["default_journal_sale"].id,
-                "invoice_date": "2019-01-01",
-                "currency_id": self.env.ref("base.AED").id,
-                "l10n_ae_binding_id": binding.id,
-                "l10n_ae_document_category": "tax",
-                "invoice_line_ids": [
-                    Command.create(
-                        {
-                            "name": "Synthetic reviewed residential lease",
-                            "price_unit": 25,
-                            "account_id": self.company_data[
-                                "default_account_revenue"
-                            ].id,
-                            "tax_ids": [Command.set(tax.ids)],
-                        }
-                    )
-                ],
-            }
+        invoice = (
+            self.env["account.move"]
+            .with_user(self.simple_accountman)
+            .create(
+                {
+                    "move_type": "out_invoice",
+                    "partner_id": self.partner_a.id,
+                    "journal_id": self.company_data["default_journal_sale"].id,
+                    "invoice_date": "2019-01-01",
+                    "currency_id": self.env.ref("base.AED").id,
+                    "l10n_ae_binding_id": binding.id,
+                    "l10n_ae_document_category": "tax",
+                    "invoice_line_ids": [
+                        Command.create(
+                            {
+                                "name": "Synthetic reviewed residential lease",
+                                "price_unit": 25,
+                                "account_id": self.company_data[
+                                    "default_account_revenue"
+                                ].id,
+                                "tax_ids": [Command.set(tax.ids)],
+                            }
+                        )
+                    ],
+                }
+            )
         )
         self.assertFalse(invoice.env.su)
         with self.assertRaisesRegex(UserError, "IBR-151-AE"):
@@ -1435,7 +1437,12 @@ class TestUaeFiscalCategoryMatrix(AccountTestInvoicingCommon):
         self.assertFalse(invoice.l10n_ae_transmission_ids)
         self.assertFalse(invoice.l10n_ae_fiscal_uuid)
         ledger_fields = [
-            "account_id", "debit", "credit", "amount_currency", "create_date", "write_date"
+            "account_id",
+            "debit",
+            "credit",
+            "amount_currency",
+            "create_date",
+            "write_date",
         ]
         ledger = invoice.line_ids.read(ledger_fields)
         with self.assertRaisesRegex(UserError, "IBR-151-AE"):
@@ -1447,9 +1454,7 @@ class TestUaeFiscalCategoryMatrix(AccountTestInvoicingCommon):
         self.assertEqual(tax.ubl_cii_tax_exemption_reason_code, "DL8.46.2")
 
     def test_e_o_only_invoice_and_credit_categories_are_refused_before_issue(self):
-        exempt = self.env.ref(
-            f"account.{self.env.company.id}_uae_sale_tax_exempted"
-        )
+        exempt = self.env.ref(f"account.{self.env.company.id}_uae_sale_tax_exempted")
         exempt.write(
             {
                 "ubl_cii_tax_exemption_reason_code": "DL8.46.2",
@@ -1517,9 +1522,11 @@ class TestUaeFiscalCategoryMatrix(AccountTestInvoicingCommon):
                                 )
                             ],
                         )
-                    invoice = self.env["account.move"].with_user(
-                        self.simple_accountman
-                    ).create(values)
+                    invoice = (
+                        self.env["account.move"]
+                        .with_user(self.simple_accountman)
+                        .create(values)
+                    )
                     with self.assertRaisesRegex(UserError, "IBR-151-AE"):
                         invoice.action_l10n_ae_validate()
                     self.assertEqual(invoice.state, "draft")
@@ -1528,9 +1535,7 @@ class TestUaeFiscalCategoryMatrix(AccountTestInvoicingCommon):
                     self.assertEqual(invoice.l10n_ae_document_category, "tax")
 
     def test_commercial_e_o_documents_keep_their_explicit_non_tax_types(self):
-        exempt = self.env.ref(
-            f"account.{self.env.company.id}_uae_sale_tax_exempted"
-        )
+        exempt = self.env.ref(f"account.{self.env.company.id}_uae_sale_tax_exempted")
         exempt.write(
             {
                 "ubl_cii_tax_exemption_reason_code": "DL8.46.2",
@@ -1539,7 +1544,10 @@ class TestUaeFiscalCategoryMatrix(AccountTestInvoicingCommon):
         )
         outside = self.env.ref(f"account.{self.env.company.id}_uae_out_of_scope")
         binding = self.env["l10n_ae.edi.binding"].create(
-            {"name": "Synthetic commercial E/O", "fiscal_uuid_policy": "controlled_local"}
+            {
+                "name": "Synthetic commercial E/O",
+                "fiscal_uuid_policy": "controlled_local",
+            }
         )
         for kind, node, code in (
             ("out_invoice", "cbc:InvoiceTypeCode", "480"),
@@ -1581,20 +1589,26 @@ class TestUaeFiscalCategoryMatrix(AccountTestInvoicingCommon):
                                     {
                                         "number": "SYNTH-REVIEWED-COMMERCIAL-ORIGINAL",
                                         "issue_date": "2018-12-01",
-                                        "review_evidence": "Synthetic commercial review",
+                                        "review_evidence": "Synthetic review",
                                         "allocated_net": net,
                                         "allocated_tax": 0,
                                     }
                                 )
                             ],
                         )
-                    invoice = self.env["account.move"].with_user(
-                        self.simple_accountman
-                    ).create(values)
+                    invoice = (
+                        self.env["account.move"]
+                        .with_user(self.simple_accountman)
+                        .create(values)
+                    )
                     invoice.action_l10n_ae_validate()
                     invoice.action_post()
                     ledger_fields = [
-                        "debit", "credit", "amount_currency", "create_date", "write_date"
+                        "debit",
+                        "credit",
+                        "amount_currency",
+                        "create_date",
+                        "write_date",
                     ]
                     ledger = invoice.line_ids.read(ledger_fields)
                     invoice.action_l10n_ae_prepare()
@@ -1608,7 +1622,9 @@ class TestUaeFiscalCategoryMatrix(AccountTestInvoicingCommon):
                     self.assertEqual(invoice.line_ids.read(ledger_fields), ledger)
                     self.assertEqual(invoice.l10n_ae_document_category, "commercial")
                     issue = invoice.l10n_ae_transmission_id
-                    self.assertFalse(issue.attempt_ids or issue.event_ids or issue.remote_id)
+                    self.assertFalse(
+                        issue.attempt_ids or issue.event_ids or issue.remote_id
+                    )
 
     def test_exempt_without_uae_legal_code_is_refused_before_preparation(self):
         tax = self.tax_sale_a.copy(
