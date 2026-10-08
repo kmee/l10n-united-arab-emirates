@@ -41,6 +41,8 @@ BILLING_HEADER_FIELDS = {
     "l10n_ae_tax_exchange_source",
     "l10n_ae_invoicing_period_start",
     "l10n_ae_invoicing_period_end",
+    "l10n_ae_billing_frequency_code",
+    "l10n_ae_billing_frequency_note",
     "l10n_ae_buyer_not_implemented",
     "l10n_ae_export_buyer_no_peppol",
     "l10n_ae_buyer_onboarding_review_date",
@@ -206,7 +208,12 @@ class UaeEdiBilling(models.AbstractModel):
                 except ValueError:
                     valid = False
             elif field.type == "selection":
-                valid = isinstance(value, str) and value in field.get_values(model.env)
+                valid = (
+                    isinstance(value, str) and value in field.get_values(model.env)
+                ) or (
+                    name == "l10n_ae_billing_frequency_code"
+                    and (value is False or value is None)
+                )
             elif field.type in {"char", "text", "html"}:
                 valid = isinstance(value, str)
             if not valid:
