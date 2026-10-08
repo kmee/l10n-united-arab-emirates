@@ -21,7 +21,9 @@ class TestUaeSelfBillingInbound(AccountTestInvoicingCommon):
     def test_summary_selfbilling_partial_credit_roundtrip_preserves_each_period(self):
         # Reviewed January services:100 +5 VAT; partial credit40 +2 VAT.
         # Native reversal reconciles42, leaving63 on the buyer's payable.
-        source, supplier_agreement, receiver_binding = self._selfbilling_fixture()
+        source, supplier_agreement, receiver_binding = self._selfbilling_fixture(
+            post=False
+        )
         self.buyer.l10n_ae_edi_auto_prepare = False
         buyer_manager = new_test_user(
             self.env,
@@ -1240,7 +1242,7 @@ class TestUaeSelfBillingInbound(AccountTestInvoicingCommon):
                 }
             )
 
-    def _selfbilling_fixture(self):
+    def _selfbilling_fixture(self, *, post=True):
         supplier = self.env.company
         journal = self.buyer_data["default_journal_purchase"]
         journal.is_self_billing = True
@@ -1295,7 +1297,8 @@ class TestUaeSelfBillingInbound(AccountTestInvoicingCommon):
                 }
             )
         )
-        source.action_post()
+        if post:
+            source.action_post()
         binding = self.env["l10n_ae.edi.binding"].create(
             {
                 "name": "Supplier receiving binding",
