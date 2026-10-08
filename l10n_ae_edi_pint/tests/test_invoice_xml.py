@@ -8328,9 +8328,10 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
             "out_invoice", amounts=[100], taxes=self.tax_sale_a, currency=usd
         ).with_user(self.simple_accountman)
         self.assertFalse(invoice.env.su)
+        invoice.write(
+            {"invoice_date": "2019-01-02", "taxable_supply_date": "2019-01-01"}
+        )
         with Form(invoice) as form:
-            form.invoice_date = "2019-01-02"
-            form.taxable_supply_date = "2019-01-01"
             form.l10n_ae_tax_exchange_rate = "3.672500"
             form.l10n_ae_tax_exchange_date = "2019-01-02"
             form.l10n_ae_tax_exchange_source = "SYNTHETIC-UNVERIFIED-QUOTE"
