@@ -218,6 +218,16 @@ class AccountMove(models.Model):
             for name, value in values.items():
                 move[name] = value
 
+    @api.depends("company_id.account_fiscal_country_id", "move_type")
+    def _compute_show_taxable_supply_date(self):
+        result = super()._compute_show_taxable_supply_date()
+        for move in self:
+            if move.company_id.account_fiscal_country_id.code == "AE" and (
+                move.is_invoice()
+            ):
+                move.show_taxable_supply_date = True
+        return result
+
     @api.model_create_multi
     def create(self, vals_list):
         if any(
@@ -590,6 +600,7 @@ class AccountMove(models.Model):
             "l10n_ae_tax_exchange_rate",
             "l10n_ae_tax_exchange_date",
             "l10n_ae_tax_exchange_source",
+            "taxable_supply_date",
             "l10n_ae_invoicing_period_start",
             "l10n_ae_invoicing_period_end",
             "l10n_ae_billing_frequency_code",
@@ -868,6 +879,7 @@ class AccountMove(models.Model):
             else None,
             "invoice_number": self.name,
             "issue_date": fields.Date.to_string(self.invoice_date),
+            "tax_point_date": fields.Date.to_string(self.taxable_supply_date),
             "document_category": self.l10n_ae_document_category,
             "transaction_flags": self._l10n_ae_transaction_flags(),
             "beneficiary_id": self.l10n_ae_beneficiary_id or None,
@@ -1522,6 +1534,19 @@ class AccountMove(models.Model):
         }
         # A partial override requires repair, never silent replacement by a default.
         if any(exchange[key] for key in ("rate", "date", "source")):
+            tax_point_date = self.taxable_supply_date or self.invoice_date
+            if (
+                self.l10n_ae_tax_exchange_date
+                and tax_point_date
+                and self.l10n_ae_tax_exchange_date > tax_point_date
+            ):
+                raise UserError(
+                    self.env._(
+                        "The reviewed AED quote source date is after the VAT point "
+                        "date. Review the publication applicable to the declared "
+                        "supply date."
+                    )
+                )
             return exchange
         if self.company_currency_id.name != "AED":
             raise UserError(
