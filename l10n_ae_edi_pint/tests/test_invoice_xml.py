@@ -8329,6 +8329,55 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         self.assertEqual(invoice.amount_total, 105)
         self.assertTrue(invoice.validate_l10n_ae_pint()["valid"])
 
+    def test_manual_quote_review_preserves_posted_line_audit_actor(self):
+        usd = self.env.ref("base.USD")
+        usd.active = True
+        self.env["res.currency.rate"].create(
+            {
+                "currency_id": usd.id,
+                "company_id": self.env.company.id,
+                "name": "2018-12-31",
+                "rate": 1 / 3.6725,
+            }
+        )
+        self.env.company.l10n_ae_edi_auto_prepare = False
+        invoice = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a, currency=usd
+        ).with_user(self.simple_accountman)
+        invoice.write(
+            {"invoice_date": "2019-01-02", "taxable_supply_date": "2019-01-01"}
+        )
+        with Form(invoice) as form:
+            form.l10n_ae_tax_exchange_rate = "3.672500"
+            form.l10n_ae_tax_exchange_date = "2019-01-02"
+            form.l10n_ae_tax_exchange_source = "SYNTHETIC-UNVERIFIED-QUOTE"
+        invoice.action_post()
+        audit_fields = [
+            "account_id",
+            "debit",
+            "credit",
+            "amount_currency",
+            "tax_ids",
+            "name",
+            "create_date",
+            "write_date",
+            "write_uid",
+        ]
+        original = invoice.line_ids.read(audit_fields)
+        reviewer = new_test_user(
+            self.env,
+            login="uae-quote-source-date-reviewer",
+            groups="account.group_account_manager,base.group_multi_currency",
+        )
+        reviewed = invoice.with_user(reviewer)
+        self.assertFalse(reviewed.env.su)
+        with Form(reviewed) as form:
+            form.l10n_ae_tax_exchange_date = "2019-01-01"
+        self.assertEqual(reviewed.l10n_ae_tax_exchange_date.isoformat(), "2019-01-01")
+        self.assertEqual(invoice.line_ids.read(audit_fields), original)
+        self.assertEqual(invoice.amount_total_signed, 385.61)
+        self.assertFalse(invoice.l10n_ae_transmission_id)
+
     def test_future_manual_quote_posts_in_review_until_date_repaired(
         self,
     ):
