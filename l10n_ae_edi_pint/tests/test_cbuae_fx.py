@@ -213,11 +213,16 @@ class TestUaeCbuaeFx(TestUaeInvoiceXml):
         )
         response = Response()
         response.status_code = 200
+        response.url = (
+            "https://centralbank.ae/umbraco/Surface/Exchange/"
+            "GetExchangeRateAllCurrencyDate?dateTime=2026-08-26"
+        )
         response.headers["Content-Type"] = "text/html; charset=utf-8"
         response._content = source.source_body.content
         response._content_consumed = True
         with patch("requests.get", return_value=response):
             foreign_publication.action_capture()
+        self.assertEqual(foreign_publication.state, "captured")
         foreign_review = (
             self.env["l10n_ae.cbuae.rate.review"]
             .with_user(setup_manager)
