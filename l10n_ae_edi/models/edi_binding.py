@@ -412,6 +412,15 @@ class UaeEdiBinding(models.Model):
             self.with_user(self.env.uid).check_access("write")
             self._lock_capability_contract()
             self.with_user(self.env.uid).check_access("write")
+        if "company_id" in vals:
+            principal = self.env.user.with_user(self.env.uid)
+            if (
+                vals["company_id"] not in principal.company_ids.ids
+                or vals["company_id"] not in self.env.companies.ids
+            ):
+                raise AccessError(
+                    self.env._("Assign bindings only to an authorized active company.")
+                )
         if CAPABILITY_DECLARATION_FIELDS.intersection(vals):
             vals = {
                 **vals,
