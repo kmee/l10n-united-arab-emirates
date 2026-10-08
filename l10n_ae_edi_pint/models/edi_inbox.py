@@ -173,6 +173,7 @@ class UaeEdiInbox(models.Model):
             not isinstance(event_id, str) or not 1 <= len(event_id) <= 256
         ):
             raise UserError(self.env._("Invalid received delivery event identifier."))
+        binding._require_receiving_capabilities()
         digest = hashlib.sha256(content).hexdigest()
         # Change the row version without altering binding facts. A lock alone
         # cannot refresh another transaction's repeatable-read identity snapshot.
