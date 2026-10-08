@@ -68,6 +68,19 @@ suppliers/taxes, invalid XML and unsupported scenarios remain in review
 with diagnostics. The original evidence cannot be edited, and a received
 document cannot be emitted again.
 
+Before a new controlled receipt, an ordinary company-authorized
+Accounting Manager must declare **Retrieve Incoming Documents** in the
+binding's controlled contract, enter a review note and select **Review
+Contract Capabilities**. A receive-only contract is allowed. Unreviewed
+contracts or contracts missing that operation refuse before any original
+or delivery event is retained, including elevated calls. Editing the
+declaration invalidates current approval; already retained originals
+remain available for inspection and local manager processing. The
+technical receiving role does not grant contract review or accounting
+processing. Scenario74 in the PT/EN manuals covers this boundary;
+pre-HTTP refusal and scheduled retrieval still require separate
+requalification.
+
 This inbox currently receives from the separately configured KMEE
 loopback mock worker. It does not connect to an accredited provider
 sandbox or constitute FTA acceptance.
