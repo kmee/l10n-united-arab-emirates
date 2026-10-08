@@ -59,6 +59,21 @@ class AccountMove(models.Model):
 
     def _l10n_ae_snapshot(self):
         snapshot = super()._l10n_ae_snapshot()
+        product_lines = self.invoice_line_ids.filtered(
+            lambda line: not line.display_type or line.display_type == "product"
+        )
+        for line, snapshot_line in zip(product_lines, snapshot["lines"], strict=True):
+            additional_taxes = line.tax_ids.flatten_taxes_hierarchy().filtered(
+                lambda tax: tax.ubl_cii_tax_category_code == "N"
+            )
+            if additional_taxes:
+                snapshot_line["additional_vat_rates"] = [
+                    {
+                        "category": "N",
+                        "nominal_rate": str(tax.l10n_ae_edi_additional_vat_rate),
+                    }
+                    for tax in additional_taxes
+                ]
         ruleset = os.environ.get("KMEE_UAE_NORMATIVE_RULESET", DEFAULT_RULESET)
         try:
             snapshot["normative"] = describe_ruleset(ruleset)

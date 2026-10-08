@@ -16,6 +16,18 @@ class AccountEdiUblUae(models.AbstractModel):
     _inherit = "account.edi.ubl_pint"
     _description = "UAE PINT Billing"
 
+    def _ubl_default_tax_category_grouping_key(
+        self, base_line, tax_data, vals, currency
+    ):
+        key = super()._ubl_default_tax_category_grouping_key(
+            base_line, tax_data, vals, currency
+        )
+        if key and tax_data and key["tax_category_code"] == "N":
+            # IBR-111-AE requires a positive nominal rate even though the
+            # disclosed VAT is zero (IBR-108-AE). Keep native amounts intact.
+            key["percent"] = tax_data["tax"].l10n_ae_edi_additional_vat_rate
+        return key
+
     def _export_invoice_filename(self, invoice):
         # The native Send placeholder still uses the legacy filename interface.
         return invoice._get_invoice_report_filename(extension="xml")

@@ -15,6 +15,18 @@ UAE_EXEMPTION_REASONS = [
 class AccountTax(models.Model):
     _inherit = "account.tax"
 
+    ubl_cii_tax_category_code = fields.Selection(
+        selection_add=[("N", "Standard rate additional VAT (UAE)")],
+        ondelete={"N": "set null"},
+    )
+    l10n_ae_edi_additional_vat_rate = fields.Float(
+        string="UAE Additional VAT Nominal Rate",
+        digits=(16, 6),
+        help="Reviewed nominal rate for PINT category N. This electronic document "
+        "metadata does not change the native tax calculation or calculate VAT "
+        "due on the supplier's profit margin.",
+    )
+
     ubl_cii_tax_exemption_reason_code = fields.Selection(
         selection_add=UAE_EXEMPTION_REASONS,
         ondelete={code: "set null" for code, _label in UAE_EXEMPTION_REASONS},

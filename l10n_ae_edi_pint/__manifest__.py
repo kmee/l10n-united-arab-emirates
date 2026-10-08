@@ -17,6 +17,7 @@
         "data/ir_cron.xml",
         "views/edi_binding_views.xml",
         "views/account_move_views.xml",
+        "views/account_tax_views.xml",
         "views/account_move_send_wizard_views.xml",
         "views/edi_inbox_views.xml",
         "views/edi_inbox_selection_views.xml",
