@@ -62,6 +62,40 @@ class TestUaeProviderBinding(AccountTestInvoicingCommon):
         ):
             binding.create(values)
 
+    def test_contract_edit_and_enable_requires_a_separate_review(self):
+        capabilities = self.env["l10n_ae.edi.capability"].search(
+            [("code", "in", ["submit", "lookup", "report", "billing_invoice"])]
+        )
+        binding = (
+            self.env["l10n_ae.edi.binding"]
+            .create(
+                {
+                    "name": "Synthetic changed contract enable refusal",
+                    "capability_profile": "kmee-controlled-1",
+                    "capability_ids": [(6, 0, capabilities.ids)],
+                    "capability_review_note": "Original reviewed simulation contract.",
+                }
+            )
+            .with_user(self.simple_accountman)
+        )
+        binding.action_review_capabilities()
+        review_fields = [
+            "capability_review_note",
+            "capability_reviewed_by",
+            "capability_reviewed_at",
+            "capability_review_hash",
+            "controlled_dispatch_enabled",
+        ]
+        original = binding.read(review_fields)
+        with (
+            self.assertRaisesRegex(ValidationError, "Review.*changed.*capabilities"),
+            self.cr.savepoint(),
+            Form(binding) as form,
+        ):
+            form.capability_review_note = "Different proposed simulation contract."
+            form.controlled_dispatch_enabled = True
+        self.assertEqual(binding.read(review_fields), original)
+
     def test_accounting_user_cannot_read_another_company_binding(self):
         other = self.env["res.company"].create({"name": "Other synthetic legal entity"})
         binding = self.env["l10n_ae.edi.binding"].create(
