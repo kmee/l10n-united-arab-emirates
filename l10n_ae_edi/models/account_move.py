@@ -643,6 +643,30 @@ class AccountMove(models.Model):
                     "changed."
                 )
             )
+        manual_quote_fields = {
+            "l10n_ae_tax_exchange_rate",
+            "l10n_ae_tax_exchange_date",
+            "l10n_ae_tax_exchange_source",
+        }
+        if vals and set(vals).issubset(manual_quote_fields):
+            posted_invoices = self.filtered(
+                lambda move: (
+                    move.state == "posted"
+                    and move.company_id.country_code == "AE"
+                    and move.is_invoice(include_receipts=False)
+                )
+            )
+            if posted_invoices:
+                # Quote review changes no accounting input. Native invoice sync
+                # otherwise recomputes stored debit/credit and rewrites line audits.
+                result = super(
+                    AccountMove,
+                    posted_invoices.with_context(skip_invoice_sync=True),
+                ).write(dict(vals))
+                remaining = self - posted_invoices
+                if remaining:
+                    result = super(AccountMove, remaining).write(dict(vals)) and result
+                return result
         return super().write(vals)
 
     def _l10n_ae_transaction_flags(self):
