@@ -161,7 +161,7 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         self.assertFalse(invoice.invoice_pdf_report_id)
         # Changing live master data must not reinterpret a frozen original when
         # opening Send. The original still carries its reviewed DXB address.
-        invoice.partner_id.state_id = False
+        self.partner_a.state_id = False
         artifacts_before = (
             self.env["ir.attachment"]
             .search([("res_model", "=", "account.move"), ("res_id", "=", invoice.id)])
