@@ -75,6 +75,13 @@ class AccountMoveSend(models.AbstractModel):
                     "the frozen UAE PINT-AE issue."
                 )
             )
+        if (
+            not move.l10n_ae_transmission_id
+            and settings.get("invoice_edi_format") == "kmee_ae_pint"
+        ):
+            # The warning does not certify eligibility. Native generation must
+            # retain the same local refusals as the explicit Check/Prepare path.
+            move.action_l10n_ae_validate()
         return settings
 
     @api.model
