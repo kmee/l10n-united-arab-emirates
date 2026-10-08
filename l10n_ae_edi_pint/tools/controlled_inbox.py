@@ -64,6 +64,7 @@ class ControlledInboxWorker:
             raise ValueError("Invalid controlled incoming event identifier.")
         with self.registry.cursor() as cursor:
             binding = self._binding(cursor, binding_id, process=process)
+            binding._require_receiving_capabilities()
             tin, provider = binding.company_id.l10n_ae_tin, binding.provider
             if not tin or not binding.company_id.l10n_ae_tin_confirmed:
                 raise UserError(
