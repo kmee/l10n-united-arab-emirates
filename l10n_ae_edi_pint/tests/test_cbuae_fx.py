@@ -262,3 +262,78 @@ class TestUaeCbuaeFx(TestUaeInvoiceXml):
             other_publication.with_user(operator).with_context(
                 allowed_company_ids=self.env.company.ids
             ).read(["requested_date"])
+
+    def test_only_selected_native_row_carries_cbuae_provenance(self):
+        usd, _anchor, review = self._reviewed_cbuae_usd()
+        self.env.company.l10n_ae_edi_auto_prepare = False
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {
+                "name": "Synthetic root-global CBUAE precedence",
+                "fiscal_uuid_policy": "controlled_local",
+            }
+        )
+        self.env["res.currency.rate"].create(
+            {
+                "currency_id": usd.id,
+                "company_id": False,
+                "name": "2026-08-28",
+                "rate": 1 / 4.1,
+            }
+        )
+        invoice = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a, currency=usd
+        ).with_user(self.simple_accountman)
+        with Form(invoice) as form:
+            form.invoice_date = "2026-08-29"
+            form.l10n_ae_binding_id = binding
+        invoice.action_post()
+        invoice.action_l10n_ae_prepare()
+        imported_exchange = json.loads(invoice.l10n_ae_transmission_id.payload)[
+            "tax_exchange"
+        ]
+        self.assertEqual(imported_exchange["rate"], "3.672500")
+        self.assertEqual(imported_exchange["date"], "2026-08-26")
+        self.assertEqual(
+            imported_exchange["evidence"]["cbuae_provenance"]["native_rate_id"],
+            review.native_rate_id.id,
+        )
+        self.assertEqual(invoice.amount_total_signed, 385.61)
+        original = invoice.l10n_ae_transmission_id.read(
+            ["payload", "xml_content", "xml_hash"]
+        )
+
+        ordinary_rate = self.env["res.currency.rate"].create(
+            {
+                "currency_id": usd.id,
+                "company_id": self.env.company.id,
+                "name": "2026-08-28",
+                "rate": 0.25,
+            }
+        )
+        following = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a, currency=usd
+        ).with_user(self.simple_accountman)
+        with Form(following) as form:
+            form.invoice_date = "2026-08-29"
+            form.l10n_ae_binding_id = binding
+        following.action_post()
+        following.action_l10n_ae_prepare()
+        exchange = json.loads(following.l10n_ae_transmission_id.payload)["tax_exchange"]
+        self.assertEqual(exchange["rate"], "4.000000")
+        self.assertEqual(exchange["date"], "2026-08-28")
+        self.assertEqual(following.amount_tax_signed, 20)
+        self.assertEqual(following.amount_total_signed, 420)
+        self.assertFalse(exchange["evidence"].get("cbuae_provenance"))
+        self.assertFalse(exchange["evidence"]["cbuae_origin_verified"])
+        self.assertEqual(
+            next(f for f in exchange["evidence"]["rates"] if f["currency"] == "USD")[
+                "record_id"
+            ],
+            ordinary_rate.id,
+        )
+        self.assertEqual(
+            invoice.l10n_ae_transmission_id.read(
+                ["payload", "xml_content", "xml_hash"]
+            ),
+            original,
+        )
