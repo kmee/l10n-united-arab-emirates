@@ -181,6 +181,62 @@ class TestUaeInvoicePreparation(AccountTestInvoicingCommon):
         )
         self.assertEqual(inherited.l10n_ae_billing_frequency_code, "MTH")
 
+    def test_frozen_issue_preserves_contract_review_after_binding_changes(self):
+        binding = self.binding.with_user(self.simple_accountman)
+        binding.fiscal_uuid_policy = "controlled_local"
+        review_controlled_binding(
+            binding,
+            self.simple_accountman,
+            capabilities=("submit", "lookup", "report", "billing_invoice"),
+            note="Original standard-invoice simulation contract.",
+        )
+        reviewed_at = binding.capability_reviewed_at
+        reviewed_hash = binding.capability_review_hash
+        invoice = self.init_invoice("out_invoice", amounts=[100], taxes=self.tax_sale_a)
+        invoice.l10n_ae_binding_id = binding
+        actor = invoice.with_user(self.simple_accountman)
+        actor.action_post()
+        actor.action_l10n_ae_prepare()
+        issue = actor.l10n_ae_transmission_id
+        contract = json.loads(issue.payload).get("binding_contract")
+        self.assertIsNotNone(contract, "Frozen issue must retain its reviewed contract")
+        self.assertEqual(contract["profile"], "kmee-controlled-1")
+        self.assertEqual(
+            contract["capabilities"],
+            ["billing_invoice", "lookup", "report", "submit"],
+        )
+        self.assertEqual(contract["company_id"], actor.company_id.id)
+        self.assertEqual(contract["provider"], "controlled")
+        self.assertEqual(contract["environment"], "sandbox")
+        self.assertEqual(contract["reviewed_by"], self.simple_accountman.id)
+        self.assertEqual(contract["reviewed_at"], str(reviewed_at))
+        self.assertEqual(contract["review_hash"], reviewed_hash)
+        ledger_fields = [
+            "balance",
+            "amount_currency",
+            "account_id",
+            "tax_ids",
+            "write_uid",
+            "write_date",
+        ]
+        ledger = actor.line_ids.read(ledger_fields)
+        evidence_fields = [
+            "payload",
+            "payload_hash",
+            "xml_content",
+            "xml_hash",
+            "idempotency_key",
+        ]
+        original = issue.read(evidence_fields)
+        with Form(binding) as form:
+            form.capability_review_note = "Proposed different provider contract."
+        self.assertEqual(binding.capability_review_state, "review")
+        self.assertFalse(binding.capability_reviewed_at)
+        actor.action_l10n_ae_prepare()
+        self.assertEqual(actor.l10n_ae_transmission_id, issue)
+        self.assertEqual(issue.read(evidence_fields), original)
+        self.assertEqual(actor.line_ids.read(ledger_fields), ledger)
+
     def test_frozen_invoice_line_price_cannot_be_rewritten(self):
         invoice = self.init_invoice(
             "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
