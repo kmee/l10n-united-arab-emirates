@@ -32,6 +32,94 @@ NS = {
 
 @tagged("post_install", "-at_install")
 class TestUaeInvoiceXml(AccountTestInvoicingCommon):
+    def test_reviewed_native_journal_cheque_instruction_preserves_original(self):
+        self.env.company.l10n_ae_edi_auto_prepare = False
+        journal = self.company_data["default_journal_bank"]
+        method = journal.inbound_payment_method_line_ids.filtered(
+            lambda line: line.code == "manual"
+        )[:1]
+        self.assertTrue(method)
+        index = journal.inbound_payment_method_line_ids.ids.index(method.id)
+        with Form(journal.with_user(self.simple_accountman)) as form:
+            with form.inbound_payment_method_line_ids.edit(index) as line:
+                line.l10n_ae_edi_payment_means_code = "20"
+        self.assertEqual(method.code, "manual")
+        self.assertEqual(method.payment_type, "inbound")
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {
+                "name": "Synthetic reviewed cheque instruction",
+                "fiscal_uuid_policy": "controlled_local",
+            }
+        )
+        invoice = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a
+        ).with_user(self.simple_accountman)
+        self.assertFalse(invoice.env.su)
+        with Form(invoice) as form:
+            form.preferred_payment_method_line_id = method
+            form.partner_bank_id = self.env["res.partner.bank"]
+            form.payment_reference = "SYNTH-CHEQUE-2026"
+            form.l10n_ae_binding_id = binding
+        invoice.action_post()
+        self.assertEqual(invoice.state, "posted")
+        self.assertEqual(
+            (invoice.amount_untaxed, invoice.amount_tax, invoice.amount_total),
+            (100, 5, 105),
+        )
+        ledger_fields = [
+            "account_id",
+            "partner_id",
+            "currency_id",
+            "debit",
+            "credit",
+            "balance",
+            "amount_currency",
+            "tax_ids",
+            "create_date",
+            "write_date",
+        ]
+        ledger = invoice.line_ids.sorted("id").read(ledger_fields)
+        invoice.action_l10n_ae_validate()
+        invoice.action_l10n_ae_prepare()
+        issue = invoice.l10n_ae_transmission_id
+        tree = etree.fromstring(issue.xml_content.encode())
+        means = tree.findall("cac:PaymentMeans", namespaces=NS)
+        self.assertEqual(len(means), 1)
+        self.assertEqual(means[0].findtext("cbc:PaymentMeansCode", namespaces=NS), "20")
+        self.assertEqual(
+            means[0].findtext("cbc:PaymentID", namespaces=NS), "SYNTH-CHEQUE-2026"
+        )
+        for group in ("PayeeFinancialAccount", "CardAccount", "PaymentMandate"):
+            self.assertIsNone(means[0].find(f"cac:{group}", namespaces=NS))
+        snapshot = json.loads(issue.payload)["payment_means"]
+        self.assertEqual(snapshot["code"], "20")
+        self.assertEqual(snapshot["configured_code"], "20")
+        self.assertEqual(snapshot["name"], "Cheque")
+        self.assertEqual(snapshot["method_line_id"], method.id)
+        self.assertEqual(snapshot["method_code"], "manual")
+        self.assertEqual(snapshot["journal_id"], journal.id)
+        self.assertIsNone(snapshot["account_id"])
+        self.assertIsNone(snapshot["account_identifier"])
+        self.assertTrue(invoice.validate_l10n_ae_pint()["valid"])
+        immutable = [
+            "payload",
+            "payload_hash",
+            "xml_content",
+            "xml_hash",
+            "idempotency_key",
+        ]
+        frozen = issue.read(immutable)
+        with Form(journal.with_user(self.simple_accountman)) as form:
+            with form.inbound_payment_method_line_ids.edit(index) as line:
+                line.l10n_ae_edi_payment_means_code = "30"
+        invoice.action_l10n_ae_prepare()
+        self.assertEqual(invoice.preview_l10n_ae_pint(), frozen[0]["xml_content"])
+        self.assertTrue(invoice.validate_l10n_ae_pint()["valid"])
+        self.assertEqual(issue.read(immutable), frozen)
+        self.assertEqual(invoice.line_ids.sorted("id").read(ledger_fields), ledger)
+        self.assertEqual(method.code, "manual")
+        self.assertFalse(issue.attempt_ids or issue.event_ids)
+
     def test_no_selected_method_freezes_undefined_payment_instruction(self):
         self.env.company.l10n_ae_edi_auto_prepare = False
         binding = self.env["l10n_ae.edi.binding"].create(
