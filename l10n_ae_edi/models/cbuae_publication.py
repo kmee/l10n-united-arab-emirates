@@ -2,6 +2,7 @@
 # License AGPL-3.0 or later (https://www.gnu.org/licenses/agpl).
 import hashlib
 import re
+import time
 from datetime import date
 from decimal import Decimal, InvalidOperation
 from typing import ClassVar
@@ -49,6 +50,9 @@ class CbuaePublication(models.Model):
     publication_stamp = fields.Char(readonly=True, copy=False)
     publication_date = fields.Date(readonly=True, copy=False)
     quotes = fields.Json(readonly=True, copy=False)
+
+    _max_source_bytes: ClassVar[int] = 2 * 1024 * 1024
+    _max_elapsed_seconds: ClassVar[int] = 30
 
     _captured_fields: ClassVar[set[str]] = {
         "state",
@@ -256,6 +260,7 @@ class CbuaePublication(models.Model):
             "source_complete": False,
         }
         body = bytearray()
+        deadline = time.monotonic() + self._max_elapsed_seconds
         try:
             with requests.get(
                 url, timeout=(5, 15), allow_redirects=False, stream=True
@@ -266,7 +271,17 @@ class CbuaePublication(models.Model):
                     content_type=response.headers.get("Content-Type", ""),
                 )
                 for chunk in response.iter_content(chunk_size=8192):
-                    body.extend(chunk)
+                    if time.monotonic() > deadline:
+                        raise requests.Timeout("CBUAE capture elapsed-time limit")
+                    remaining = self._max_source_bytes - len(body)
+                    body.extend(chunk[:remaining])
+                    if len(chunk) > remaining:
+                        raise ValueError(
+                            self.env._(
+                                "CBUAE response exceeds the byte limit; "
+                                "the retained source is incomplete."
+                            )
+                        )
                 values["source_complete"] = True
                 if response.status_code != 200 or response.url != url:
                     raise ValueError(
