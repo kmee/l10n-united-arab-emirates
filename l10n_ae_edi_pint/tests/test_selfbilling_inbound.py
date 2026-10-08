@@ -95,7 +95,9 @@ class TestUaeSelfBillingInbound(AccountTestInvoicingCommon):
         self.assertFalse(bill.l10n_ae_transmission_ids)
         self.assertEqual(inbox.original_xml.content, content)
         self.assertEqual(inbox.xml_hash, hashlib.sha256(content).hexdigest())
-        self.assertEqual(bill.preview_l10n_ae_pint().encode(), content)
+        with self.assertRaisesRegex(UserError, "cannot be emitted again"):
+            bill.preview_l10n_ae_pint()
+        self.assertEqual(inbox.original_xml.content, content)
         ledger_fields = [
             "account_id",
             "debit",
@@ -114,7 +116,9 @@ class TestUaeSelfBillingInbound(AccountTestInvoicingCommon):
         self.assertTrue(replay.action_process(), replay.diagnostic)
         self.assertEqual(replay.move_id, bill)
         self.assertEqual(bill.line_ids.read(ledger_fields), ledger)
-        self.assertEqual(bill.preview_l10n_ae_pint().encode(), content)
+        with self.assertRaisesRegex(UserError, "cannot be emitted again"):
+            bill.preview_l10n_ae_pint()
+        self.assertEqual(inbox.original_xml.content, content)
         self.assertEqual((recipient_tax.amount, decoy.amount), (0, 5))
 
     @classmethod
