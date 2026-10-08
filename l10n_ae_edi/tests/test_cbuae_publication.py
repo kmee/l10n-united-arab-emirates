@@ -406,10 +406,12 @@ class TestCbuaePublication(AccountTestInvoicingCommon):
                     refused.action_import()
                 self.assertFalse(refused.native_rate_id)
                 self.assertFalse(refused.import_facts)
-        usd.active = False
+        inactive = self.env["res.currency"].create(
+            {"name": "XCU", "symbol": "XCU", "active": False}
+        )
+        inactive_review = reviews.create({**values, "currency_id": inactive.id})
         with self.assertRaises(UserError):
-            good.action_import()
-        usd.active = True
+            inactive_review.action_import()
         self.assertEqual(
             self.env["res.currency.rate"]
             .search([])
