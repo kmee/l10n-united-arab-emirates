@@ -269,6 +269,12 @@ class AccountMove(models.Model):
         "form supplies its reviewed default; you may override or clear it "
         "before preparing the document. Due dates do not define a supply period.",
     )
+    l10n_ae_billing_frequency_note = fields.Char(
+        string="Other UAE Billing Frequency",
+        copy=False,
+        help="Reviewed explanation of the billing cadence when frequency is Other. "
+        "It is appended to the invoice note, preserving native terms and conditions.",
+    )
 
     @api.onchange("invoice_payment_term_id")
     def _onchange_l10n_ae_billing_frequency(self):
@@ -566,6 +572,7 @@ class AccountMove(models.Model):
             "l10n_ae_invoicing_period_start",
             "l10n_ae_invoicing_period_end",
             "l10n_ae_billing_frequency_code",
+            "l10n_ae_billing_frequency_note",
             "l10n_ae_beneficiary_id",
             "l10n_ae_principal_id",
             "l10n_ae_document_category",
@@ -919,6 +926,10 @@ class AccountMove(models.Model):
                 snapshot["invoicing_period"]["billing_frequency_code"] = (
                     self.l10n_ae_billing_frequency_code
                 )
+            if self.l10n_ae_billing_frequency_code == "OTH":
+                snapshot["invoicing_period"]["other_frequency_note"] = (
+                    self.l10n_ae_billing_frequency_note or ""
+                ).strip()
         return snapshot
 
     def _l10n_ae_prepare_xml(self):
@@ -1337,6 +1348,17 @@ class AccountMove(models.Model):
 
     def _check_l10n_ae_invoicing_period(self):
         self.ensure_one()
+        if (
+            self.l10n_ae_billing_frequency_code == "OTH"
+            and not (self.l10n_ae_billing_frequency_note or "").strip()
+        ):
+            raise UserError(
+                self.env._(
+                    "IBR-160-AE: review Other UAE Billing Frequency to explain "
+                    "the cadence before preparation. Existing terms and conditions "
+                    "do not supply a reviewed cadence explanation."
+                )
+            )
         if (
             self.l10n_ae_invoicing_period_start
             and self.l10n_ae_invoicing_period_end
