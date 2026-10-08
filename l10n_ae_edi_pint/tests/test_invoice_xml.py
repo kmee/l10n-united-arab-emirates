@@ -32,6 +32,114 @@ NS = {
 
 @tagged("post_install", "-at_install")
 class TestUaeInvoiceXml(AccountTestInvoicingCommon):
+    def test_other_billing_frequency_reviews_explanation_without_replacing_terms(self):
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {
+                "name": "Synthetic other billing cadence",
+                "fiscal_uuid_policy": "controlled_local",
+            }
+        )
+        self.env.company.write(
+            {
+                "l10n_ae_edi_auto_prepare": True,
+                "l10n_ae_edi_binding_id": binding.id,
+            }
+        )
+        invoice = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a
+        ).with_user(self.simple_accountman)
+        self.assertFalse(invoice.env.su)
+        with Form(invoice) as form:
+            form.invoice_payment_term_id = self.env["account.payment.term"]
+            form.preferred_payment_method_line_id = self.env[
+                "account.payment.method.line"
+            ]
+            form.partner_bank_id = self.env["res.partner.bank"]
+            form.narration = "<p>Synthetic ordinary terms.</p>"
+            form.l10n_ae_billing_frequency_code = "OTH"
+            form.l10n_ae_binding_id = binding
+        self.assertFalse(invoice.l10n_ae_invoicing_period_start)
+        self.assertFalse(invoice.l10n_ae_invoicing_period_end)
+        with self.assertRaisesRegex(UserError, "IBR-160-AE"):
+            invoice.action_l10n_ae_validate()
+        invoice.action_post()
+        self.assertEqual(invoice.state, "posted")
+        self.assertEqual(invoice.l10n_ae_preparation_state, "review")
+        self.assertIn("IBR-160-AE", invoice.l10n_ae_preparation_error)
+        self.assertFalse(invoice.l10n_ae_fiscal_uuid or invoice.l10n_ae_transmission_id)
+        self.assertEqual(
+            (invoice.amount_untaxed, invoice.amount_tax, invoice.amount_total),
+            (100, 5, 105),
+        )
+        with self.assertRaisesRegex(UserError, "IBR-160-AE"):
+            invoice.action_l10n_ae_prepare()
+        with Form(invoice) as form:
+            form.l10n_ae_billing_frequency_note = (
+                "Synthetic cadence: tenth business day."
+            )
+        ledger_fields = [
+            "account_id",
+            "partner_id",
+            "currency_id",
+            "date",
+            "date_maturity",
+            "debit",
+            "credit",
+            "balance",
+            "amount_currency",
+            "tax_ids",
+            "create_date",
+            "write_date",
+        ]
+        ledger = invoice.line_ids.sorted("id").read(ledger_fields)
+        invoice.action_l10n_ae_validate()
+        invoice.action_l10n_ae_prepare()
+        issue = invoice.l10n_ae_transmission_id
+        tree = etree.fromstring(issue.xml_content.encode())
+        periods = tree.findall("cac:InvoicePeriod", namespaces=NS)
+        self.assertEqual(len(periods), 1)
+        self.assertEqual(
+            periods[0].findtext("cbc:DescriptionCode", namespaces=NS), "OTH"
+        )
+        self.assertIsNone(periods[0].find("cbc:StartDate", namespaces=NS))
+        self.assertIsNone(periods[0].find("cbc:EndDate", namespaces=NS))
+        self.assertIsNone(periods[0].find("cbc:Description", namespaces=NS))
+        notes = tree.findall("cbc:Note", namespaces=NS)
+        self.assertEqual(len(notes), 1)
+        self.assertEqual(
+            [line for line in notes[0].text.splitlines() if line.strip()],
+            [
+                "Synthetic ordinary terms.",
+                "Synthetic cadence: tenth business day.",
+            ],
+        )
+        self.assertEqual(
+            json.loads(issue.payload)["invoicing_period"],
+            {
+                "start_date": None,
+                "end_date": None,
+                "billing_frequency_code": "OTH",
+                "other_frequency_note": "Synthetic cadence: tenth business day.",
+            },
+        )
+        self.assertTrue(invoice.validate_l10n_ae_pint()["valid"])
+        immutable = [
+            "payload",
+            "payload_hash",
+            "xml_content",
+            "xml_hash",
+            "idempotency_key",
+        ]
+        frozen = issue.read(immutable)
+        with self.assertRaisesRegex(UserError, "frozen UAE"):
+            invoice.write({"l10n_ae_billing_frequency_note": "Changed cadence"})
+        invoice.action_l10n_ae_prepare()
+        self.assertEqual(invoice.preview_l10n_ae_pint(), frozen[0]["xml_content"])
+        self.assertTrue(invoice.validate_l10n_ae_pint()["valid"])
+        self.assertEqual(issue.read(immutable), frozen)
+        self.assertEqual(invoice.line_ids.sorted("id").read(ledger_fields), ledger)
+        self.assertFalse(issue.attempt_ids or issue.event_ids)
+
     def test_reviewed_monthly_term_preserves_supply_period_and_native_due_date(self):
         self.env.company.l10n_ae_edi_auto_prepare = False
         with Form(
