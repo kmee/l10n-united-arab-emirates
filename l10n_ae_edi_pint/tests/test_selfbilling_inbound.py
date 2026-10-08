@@ -5,6 +5,7 @@ import json
 
 from lxml import etree
 
+from odoo import Command
 from odoo.exceptions import UserError
 from odoo.tests import tagged
 from odoo.tests.common import new_test_user
@@ -14,6 +15,108 @@ from odoo.addons.account.tests.common import AccountTestInvoicingCommon
 
 @tagged("post_install", "-at_install")
 class TestUaeSelfBillingInbound(AccountTestInvoicingCommon):
+    def test_received_margin_n_matches_reviewed_nominal_metadata_not_native_rate(self):
+        # Independent PINT example: net1000, nominal N5, disclosed VAT0,
+        # payable1000. This is representation, not margin liability accounting.
+        source_tax = self.tax_sale_a.copy(
+            {
+                "name": "Synthetic source margin representation",
+                "amount": 0,
+                "ubl_cii_tax_category_code": "N",
+                "l10n_ae_edi_additional_vat_rate": 5,
+            }
+        )
+        source = self.init_invoice(
+            "out_invoice",
+            partner=self.buyer.partner_id,
+            invoice_date="2026-10-02",
+            amounts=[1000],
+            taxes=source_tax,
+        )
+        source.write(
+            {
+                "l10n_ae_margin_scheme": True,
+                "l10n_ae_fiscal_uuid": "aabbccdd-1111-4111-8111-111111111111",
+            }
+        )
+        source.action_post()
+        content = source.preview_l10n_ae_pint().encode()
+        self.assertEqual((source.amount_tax, source.amount_total), (0, 1000))
+        recipient_tax = self.buyer_data["default_tax_purchase"].copy(
+            {
+                "name": "Synthetic reviewed N nominal5 native0",
+                "amount": 0,
+                "ubl_cii_tax_category_code": "N",
+                "l10n_ae_edi_additional_vat_rate": 5,
+            }
+        )
+        decoy = recipient_tax.copy(
+            {"name": "Synthetic native5 must not match nominal5", "amount": 5}
+        )
+        self.buyer.account_purchase_tax_id = decoy
+        recipient_tax.copy(
+            {
+                "name": "Synthetic nominal7 must not match nominal5",
+                "l10n_ae_edi_additional_vat_rate": 7,
+            }
+        )
+        manager = new_test_user(
+            self.env,
+            login="uae-margin-receiving-manager",
+            groups="account.group_account_manager",
+            company_id=self.buyer.id,
+            company_ids=[Command.set(self.buyer.ids)],
+        )
+        binding = (
+            self.env["l10n_ae.edi.binding"]
+            .with_company(self.buyer)
+            .create({"name": "Synthetic margin recipient", "company_id": self.buyer.id})
+        )
+        inbox_model = (
+            self.env["l10n_ae.edi.inbox"].with_user(manager).with_company(self.buyer)
+        )
+        inbox = inbox_model.receive_controlled_document(
+            binding.id, "synthetic-margin-nominal5", content
+        )
+        self.assertFalse(inbox.env.su)
+        self.assertTrue(inbox.action_process(), inbox.diagnostic)
+        bill = inbox.move_id
+        self.assertEqual(
+            (bill.company_id, bill.partner_id),
+            (self.buyer, self.env.company.partner_id),
+        )
+        self.assertEqual((bill.move_type, bill.state), ("in_invoice", "draft"))
+        self.assertEqual(
+            (bill.amount_untaxed, bill.amount_tax, bill.amount_total), (1000, 0, 1000)
+        )
+        self.assertEqual(bill.invoice_line_ids.tax_ids, recipient_tax)
+        self.assertTrue(bill.l10n_ae_margin_scheme)
+        self.assertTrue(bill.l10n_ae_received_document)
+        self.assertFalse(bill.l10n_ae_transmission_ids)
+        self.assertEqual(inbox.original_xml.content, content)
+        self.assertEqual(inbox.xml_hash, hashlib.sha256(content).hexdigest())
+        self.assertEqual(bill.preview_l10n_ae_pint().encode(), content)
+        ledger_fields = [
+            "account_id",
+            "debit",
+            "credit",
+            "amount_currency",
+            "tax_ids",
+            "create_date",
+            "write_date",
+        ]
+        ledger = bill.line_ids.read(ledger_fields)
+        recipient_tax.l10n_ae_edi_additional_vat_rate = 7
+        replay = inbox_model.receive_controlled_document(
+            binding.id, "synthetic-margin-nominal5", content
+        )
+        self.assertEqual(replay, inbox)
+        self.assertTrue(replay.action_process(), replay.diagnostic)
+        self.assertEqual(replay.move_id, bill)
+        self.assertEqual(bill.line_ids.read(ledger_fields), ledger)
+        self.assertEqual(bill.preview_l10n_ae_pint().encode(), content)
+        self.assertEqual((recipient_tax.amount, decoy.amount), (0, 5))
+
     @classmethod
     @AccountTestInvoicingCommon.setup_country("ae")
     def setUpClass(cls):
