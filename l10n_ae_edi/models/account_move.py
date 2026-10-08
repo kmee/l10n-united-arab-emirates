@@ -1660,6 +1660,17 @@ class AccountMove(models.Model):
             "rates": rate_facts,
         }
         if cbuae_provenance:
+            reviewed_rate = Decimal(cbuae_provenance["quote_literal"]).quantize(
+                quantum, rounding=ROUND_HALF_UP
+            )
+            if Decimal(rate_text) != reviewed_rate:
+                raise UserError(
+                    self.env._(
+                        "The native AED conversion differs from the reviewed CBUAE "
+                        "quote. Review the selected currency records and AED anchor "
+                        "before preparing this e-invoice."
+                    )
+                )
             evidence["cbuae_provenance"] = cbuae_provenance
         evidence["source_sha256"] = hashlib.sha256(
             json.dumps(evidence, sort_keys=True, separators=(",", ":")).encode()
