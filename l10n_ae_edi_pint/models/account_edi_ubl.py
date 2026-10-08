@@ -16,6 +16,20 @@ class AccountEdiUblUae(models.AbstractModel):
     _inherit = "account.edi.ubl_pint"
     _description = "UAE PINT Billing"
 
+    def _ubl_add_notes_nodes(self, vals):
+        result = super()._ubl_add_notes_nodes(vals)
+        invoice = vals["invoice"]
+        if invoice.l10n_ae_billing_frequency_code == "OTH":
+            # Public PINT already combines native terms/withholding into one
+            # invoice-level Note (IBR-SR-51). Preserve that text and append
+            # the reviewed cadence explanation required for Other (IBR-160-AE).
+            note = vals["document_node"]["cbc:Note"]
+            explanation = (invoice.l10n_ae_billing_frequency_note or "").strip()
+            note["_text"] = "\n".join(
+                text for text in (note.get("_text"), explanation) if text
+            )
+        return result
+
     def _ubl_default_tax_category_grouping_key(
         self, base_line, tax_data, vals, currency
     ):
