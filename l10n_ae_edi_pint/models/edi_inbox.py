@@ -501,10 +501,13 @@ class UaeEdiInbox(models.Model):
             and not selfbilling
             and type_code == ("381" if is_credit else "380")
         )
+        margin_invoice = (
+            transaction_flags == "00100000" and not selfbilling and type_code == "380"
+        )
         if (
             not supported
             or transaction_flags not in ("00000000", "10000000", "00000100", "10000100")
-            and not (ecommerce_invoice or summary_document)
+            and not (ecommerce_invoice or summary_document or margin_invoice)
             or not is_credit
             and float(tree.findtext("./{*}LegalMonetaryTotal/{*}PrepaidAmount") or 0)
             != 0
@@ -617,6 +620,7 @@ class UaeEdiInbox(models.Model):
             "l10n_ae_origin_document_id": f"{self.binding_id.id}:{self.remote_id}",
             "l10n_ae_fiscal_uuid": tree.findtext("./{*}UUID"),
             "l10n_ae_free_zone": transaction_flags[0] == "1",
+            "l10n_ae_margin_scheme": transaction_flags[2] == "1",
             "l10n_ae_summary": transaction_flags[3] == "1",
             "l10n_ae_invoicing_period_start": tree.findtext(
                 "./{*}InvoicePeriod/{*}StartDate"

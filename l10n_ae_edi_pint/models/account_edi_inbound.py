@@ -129,17 +129,22 @@ class AccountEdiUblUaeInbound(models.AbstractModel):
                 raise UserError(
                     self.env._("The received tax percentage requires review.")
                 )
+            tax_domain = [
+                ("company_id", "=", record.company_id.id),
+                ("amount_type", "=", "percent"),
+                ("amount", "=", 0 if category == "N" else float(percentage or 0)),
+                ("type_tax_use", "=", tax_type),
+                ("price_include", "=", False),
+            ]
+            if category == "N":
+                # Received N Percent is nominal metadata, not a native rate
+                # applied to the full selling price. Never create/change taxes.
+                tax_domain.append(
+                    ("l10n_ae_edi_additional_vat_rate", "=", float(percentage))
+                )
             candidates = (
                 self.env["account.tax"]
-                .search(
-                    [
-                        ("company_id", "=", record.company_id.id),
-                        ("amount_type", "=", "percent"),
-                        ("amount", "=", float(percentage or 0)),
-                        ("type_tax_use", "=", tax_type),
-                        ("price_include", "=", False),
-                    ]
-                )
+                .search(tax_domain)
                 .filtered(
                     lambda tax, code=category: (
                         (tax.ubl_cii_tax_category_code or "S") == code
