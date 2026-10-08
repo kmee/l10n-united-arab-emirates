@@ -15,6 +15,141 @@ from .test_invoice_xml import TestUaeInvoiceXml
 
 @tagged("post_install", "-at_install")
 class TestUaeCbuaeFx(TestUaeInvoiceXml):
+    def test_branch_invoice_reader_retains_imported_root_source_without_mutation(self):
+        usd, _anchor, review = self._reviewed_cbuae_usd()
+        root = self.env.company
+        branch = self.setup_other_company(
+            name="Synthetic CBUAE accounting branch", parent_id=root.id
+        )["company"]
+        branch.write(
+            {
+                "l10n_ae_tin": root.l10n_ae_tin,
+                "l10n_ae_tin_confirmed": True,
+                "l10n_ae_edi_auto_prepare": False,
+            }
+        )
+        branch.partner_id.write(
+            {
+                name: root.partner_id[name].id
+                if root.partner_id._fields[name].type == "many2one"
+                else root.partner_id[name]
+                for name in [
+                    "vat",
+                    "street",
+                    "city",
+                    "state_id",
+                    "routing_scheme",
+                    "routing_endpoint",
+                    "l10n_ae_registration_type",
+                    "l10n_ae_registration_authority",
+                    "additional_identifiers",
+                ]
+            }
+        )
+        operator = new_test_user(
+            self.env,
+            login="synthetic-cbuae-branch-invoice-writer",
+            groups="base.group_user,account.group_account_invoice",
+            company_id=branch.id,
+            company_ids=branch.ids,
+        )
+        self.assertNotIn(root, operator.company_ids)
+        binding = (
+            self.env["l10n_ae.edi.binding"]
+            .with_company(branch)
+            .create(
+                {
+                    "name": "Synthetic branch CBUAE source",
+                    "company_id": branch.id,
+                    "fiscal_uuid_policy": "controlled_local",
+                }
+            )
+        )
+        invoice = (
+            self.init_invoice(
+                "out_invoice",
+                amounts=[100],
+                taxes=self.tax_sale_a,
+                company=branch,
+                currency=usd,
+                invoice_date="2026-08-27",
+            )
+            .with_user(operator)
+            .with_context(allowed_company_ids=branch.ids)
+        )
+        self.assertFalse(invoice.env.su)
+        self.assertEqual(invoice.env.companies, branch)
+        self.assertEqual(invoice.company_id, branch)
+        with Form(invoice) as form:
+            form.l10n_ae_binding_id = binding
+        invoice.action_post()
+        self.assertEqual(invoice.amount_total_signed, 385.61)
+        self.assertEqual(invoice.amount_tax_signed, 18.36)
+        invoice.line_ids.flush_recordset()
+        fields = [
+            "debit",
+            "credit",
+            "balance",
+            "amount_currency",
+            "account_id",
+            "tax_ids",
+            "write_uid",
+            "write_date",
+        ]
+        ledger = invoice.line_ids.sorted("id").read(fields)
+        invoice.action_l10n_ae_validate()
+        invoice.action_l10n_ae_prepare()
+        issue = invoice.l10n_ae_transmission_id
+        evidence = json.loads(issue.payload)["tax_exchange"]["evidence"]
+        self.assertEqual(evidence["cbuae_provenance"]["review_id"], review.id)
+        self.assertEqual(
+            evidence["cbuae_provenance"]["native_rate_id"], review.native_rate_id.id
+        )
+        self.assertFalse(evidence["cbuae_origin_verified"])
+        self.assertEqual(invoice.l10n_ae_effective_cbuae_review_id, review)
+        selected = invoice.l10n_ae_effective_cbuae_review_id
+        self.assertEqual(selected.read(["quote_literal"])[0]["quote_literal"], "3.6725")
+        publication = selected.publication_id
+        self.assertEqual(
+            publication.read(["source_sha256"])[0]["source_sha256"],
+            evidence["cbuae_provenance"]["source"]["sha256"],
+        )
+        self.assertTrue(invoice.validate_l10n_ae_pint()["valid"])
+        frozen = issue.read(
+            ["payload", "xml_content", "payload_hash", "xml_hash", "idempotency_key"]
+        )
+        invoice.action_l10n_ae_prepare()
+        self.assertEqual(
+            issue.read(
+                [
+                    "payload",
+                    "xml_content",
+                    "payload_hash",
+                    "xml_hash",
+                    "idempotency_key",
+                ]
+            ),
+            frozen,
+        )
+        self.assertEqual(invoice.line_ids.sorted("id").read(fields), ledger)
+        for action in [
+            selected.action_import,
+            publication.action_capture,
+            lambda: selected.write({"review_note": "Unauthorized root change"}),
+            lambda: publication.unlink(),
+        ]:
+            with self.assertRaises(AccessError):
+                action()
+        pending = (
+            self.env["l10n_ae.cbuae.publication"]
+            .with_user(self.simple_accountman)
+            .create({"requested_date": "2026-08-28"})
+        )
+        with self.assertRaises(AccessError):
+            pending.with_user(operator).with_context(
+                allowed_company_ids=branch.ids
+            ).read(["requested_date"])
+
     def _reviewed_cbuae_usd(self):
         manager = self.simple_accountman
         company = self.env.company
