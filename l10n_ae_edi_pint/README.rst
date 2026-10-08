@@ -253,6 +253,20 @@ representation coverage, with a selected account required only for
 transfer 30; this does not qualify every instrument/document/direction
 matrix or execute payments. Structured optional groups remain pending.
 
+The native payment-term form exposes reviewed **UAE Billing Frequency**,
+separate from installments and due dates. Selecting a term in the
+invoice Form supplies an editable cadence default. Explicit reviewed
+supply dates remain independent. **Other** requires an explanation in
+**Other UAE Billing Frequency**, appended to the existing invoice note.
+Check/Prepare refuse a missing explanation; Post retains native
+accounting. Prepared cadence, explanation and original XML are protected
+against later edits. Scenarios 59–60 in the PT/EN manuals document
+Monthly and Other UI journeys. API defaults, eight other code
+qualifications, deferred-line mapping and full document/FX/received
+matrices remain pending. The pinned executable rule uses DescriptionCode
+despite the upstream semantic page's Description binding; research
+records that discrepancy.
+
 Known issues / Roadmap
 ======================
 
