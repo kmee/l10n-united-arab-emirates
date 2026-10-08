@@ -159,7 +159,7 @@ class TestUaeProviderBinding(AccountTestInvoicingCommon):
         for elevated in (False, True):
             actor = binding.sudo() if elevated else binding
             with self.subTest(elevated=elevated):
-                with self.assertRaises(AccessError), self.cr.savepoint():
+                with self.cr.savepoint(), self.assertRaises(AccessError):
                     actor.write({"company_id": other.id})
                 self.assertEqual(binding.read(evidence_fields), original)
 
