@@ -11,6 +11,7 @@ from odoo.tests import tagged
 from odoo.tests.common import new_test_user
 
 from odoo.addons.account.tests.common import AccountTestInvoicingCommon
+from odoo.addons.l10n_ae_edi.tests.common import review_controlled_binding
 
 
 @tagged("post_install", "-at_install")
@@ -38,6 +39,12 @@ class TestUaeReceivedRetentionExportAccess(AccountTestInvoicingCommon):
 
     def test_received_export_refuses_hidden_retention_rows_even_under_sudo(self):
         manager = self.simple_accountman
+        review_controlled_binding(
+            self.binding,
+            manager,
+            capabilities=("receive",),
+            note="Synthetic receive-only contract for retention export access.",
+        )
         content = b"<SyntheticReceivedRetention>preserved</SyntheticReceivedRetention>"
         inbox = (
             self.env["l10n_ae.edi.inbox"]

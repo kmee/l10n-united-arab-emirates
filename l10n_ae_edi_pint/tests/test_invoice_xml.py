@@ -2812,6 +2812,12 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         binding = self.env["l10n_ae.edi.binding"].create(
             {"name": "Incoming commercial credit package retention"}
         )
+        binding = review_controlled_binding(
+            binding,
+            self.simple_accountman,
+            capabilities=("receive",),
+            note="Synthetic reviewed receive-only contract for this inbound fixture.",
+        )
         inbox_model = self.env["l10n_ae.edi.inbox"].with_user(self.simple_accountman)
         inbox = inbox_model.receive_controlled_document(
             binding.id, "commercial-credit-missing-original", content
@@ -3012,6 +3018,12 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         binding = self.env["l10n_ae.edi.binding"].create(
             {"name": "Pending incoming normative package review"}
         )
+        binding = review_controlled_binding(
+            binding,
+            self.simple_accountman,
+            capabilities=("receive",),
+            note="Synthetic reviewed receive-only contract for this inbound fixture.",
+        )
         inbox = (
             self.env["l10n_ae.edi.inbox"]
             .with_user(self.simple_accountman)
@@ -3135,6 +3147,12 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         content = etree.tostring(self._received_test_xml(source))
         binding = self.env["l10n_ae.edi.binding"].create(
             {"name": "Synthetic technical-review package pin"}
+        )
+        binding = review_controlled_binding(
+            binding,
+            self.simple_accountman,
+            capabilities=("receive",),
+            note="Synthetic reviewed receive-only contract for this inbound fixture.",
         )
         inbox = (
             self.env["l10n_ae.edi.inbox"]
@@ -3328,6 +3346,12 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         content = etree.tostring(self._received_test_xml(source))
         binding = self.env["l10n_ae.edi.binding"].create(
             {"name": "Historical received package review"}
+        )
+        binding = review_controlled_binding(
+            binding,
+            self.simple_accountman,
+            capabilities=("receive",),
+            note="Synthetic reviewed receive-only contract for this inbound fixture.",
         )
         inbox = (
             self.env["l10n_ae.edi.inbox"]
@@ -4103,6 +4127,12 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
             }
         )
         binding = self.env["l10n_ae.edi.binding"].create({"name": "Received agent"})
+        binding = review_controlled_binding(
+            binding,
+            self.simple_accountman,
+            capabilities=("receive",),
+            note="Synthetic reviewed receive-only contract for this inbound fixture.",
+        )
         receiver = self.env["l10n_ae.edi.inbox"].with_user(self.simple_accountman)
         original_content = etree.tostring(self._received_test_xml(original))
         inbox = receiver.receive_controlled_document(
@@ -4219,6 +4249,12 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         )
         binding = self.env["l10n_ae.edi.binding"].create(
             {"name": "Agent principal defects"}
+        )
+        binding = review_controlled_binding(
+            binding,
+            self.simple_accountman,
+            capabilities=("receive",),
+            note="Synthetic reviewed receive-only contract for this inbound fixture.",
         )
         receiver = self.env["l10n_ae.edi.inbox"].with_user(self.simple_accountman)
         for defect, diagnostic in (
@@ -4364,6 +4400,12 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         binding = self.env["l10n_ae.edi.binding"].create(
             {"name": "Complete identity evidence access"}
         )
+        binding = review_controlled_binding(
+            binding,
+            self.simple_accountman,
+            capabilities=("receive",),
+            note="Synthetic reviewed receive-only contract for this inbound fixture.",
+        )
         receiver = self.env["l10n_ae.edi.inbox"]
         first = receiver.receive_controlled_document(
             binding.id, "identity-archive-access", b"<first/>"
@@ -4430,6 +4472,12 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         binding = self.env["l10n_ae.edi.binding"].create(
             {"name": "Identity archive integrity"}
         )
+        binding = review_controlled_binding(
+            binding,
+            self.simple_accountman,
+            capabilities=("receive",),
+            note="Synthetic reviewed receive-only contract for this inbound fixture.",
+        )
         receiver = self.env["l10n_ae.edi.inbox"]
         first = receiver.receive_controlled_document(
             binding.id, "identity-archive-integrity", b"<first/>"
@@ -4453,6 +4501,12 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
     def test_identity_review_projection_does_not_share_a_managers_decision_cache(self):
         binding = self.env["l10n_ae.edi.binding"].create(
             {"name": "Identity review actor cache"}
+        )
+        binding = review_controlled_binding(
+            binding,
+            self.simple_accountman,
+            capabilities=("receive",),
+            note="Synthetic reviewed receive-only contract for this inbound fixture.",
         )
         receiver = self.env["l10n_ae.edi.inbox"].with_user(self.simple_accountman)
         receiver.receive_controlled_document(
@@ -4506,6 +4560,12 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         binding = self.env["l10n_ae.edi.binding"].create(
             {"name": "Hidden linked accounting"}
         )
+        binding = review_controlled_binding(
+            binding,
+            self.simple_accountman,
+            capabilities=("receive",),
+            note="Synthetic reviewed receive-only contract for this inbound fixture.",
+        )
         receiver = self.env["l10n_ae.edi.inbox"].with_user(self.simple_accountman)
         tree = self._received_test_xml()
         first = receiver.receive_controlled_document(
@@ -4548,6 +4608,12 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
     ):
         binding = self.env["l10n_ae.edi.binding"].create(
             {"name": "Identity package freshness"}
+        )
+        binding = review_controlled_binding(
+            binding,
+            self.simple_accountman,
+            capabilities=("receive",),
+            note="Synthetic reviewed receive-only contract for this inbound fixture.",
         )
         receiver = self.env["l10n_ae.edi.inbox"].with_user(self.simple_accountman)
         tree = self._received_test_xml()
@@ -4592,6 +4658,12 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
     def test_received_package_preserves_every_identity_selection_and_original(self):
         binding = self.env["l10n_ae.edi.binding"].create(
             {"name": "Portable identity review"}
+        )
+        binding = review_controlled_binding(
+            binding,
+            self.simple_accountman,
+            capabilities=("receive",),
+            note="Synthetic reviewed receive-only contract for this inbound fixture.",
         )
         receiver = self.env["l10n_ae.edi.inbox"].with_user(self.simple_accountman)
         tree = self._received_test_xml()
@@ -4682,6 +4754,12 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         binding = self.env["l10n_ae.edi.binding"].create(
             {"name": "Review form authority"}
         )
+        binding = review_controlled_binding(
+            binding,
+            self.simple_accountman,
+            capabilities=("receive",),
+            note="Synthetic reviewed receive-only contract for this inbound fixture.",
+        )
         first = receiver.receive_controlled_document(
             binding.id, "review-form-authority", b"<first/>"
         )
@@ -4742,6 +4820,12 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         binding = self.env["l10n_ae.edi.binding"].create(
             {"name": "Open review changes"}
         )
+        binding = review_controlled_binding(
+            binding,
+            self.simple_accountman,
+            capabilities=("receive",),
+            note="Synthetic reviewed receive-only contract for this inbound fixture.",
+        )
         first = receiver.receive_controlled_document(
             binding.id, "open-review-changes", b"<first/>"
         )
@@ -4788,6 +4872,12 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         binding = self.env["l10n_ae.edi.binding"].create(
             {"name": "Native selection form"}
         )
+        binding = review_controlled_binding(
+            binding,
+            self.simple_accountman,
+            capabilities=("receive",),
+            note="Synthetic reviewed receive-only contract for this inbound fixture.",
+        )
         receiver = self.env["l10n_ae.edi.inbox"].with_user(self.simple_accountman)
         first = receiver.receive_controlled_document(
             binding.id, "native-selection", etree.tostring(tree)
@@ -4827,6 +4917,12 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         binding = self.env["l10n_ae.edi.binding"].create(
             {"name": "Actual processing authority"}
         )
+        binding = review_controlled_binding(
+            binding,
+            self.simple_accountman,
+            capabilities=("receive",),
+            note="Synthetic reviewed receive-only contract for this inbound fixture.",
+        )
         inbox = (
             self.env["l10n_ae.edi.inbox"]
             .with_user(self.simple_accountman)
@@ -4860,6 +4956,12 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
     ):
         receiver = self.env["l10n_ae.edi.inbox"].with_user(self.simple_accountman)
         binding = self.env["l10n_ae.edi.binding"].create({"name": "Selection access"})
+        binding = review_controlled_binding(
+            binding,
+            self.simple_accountman,
+            capabilities=("receive",),
+            note="Synthetic reviewed receive-only contract for this inbound fixture.",
+        )
         first = receiver.receive_controlled_document(
             binding.id, "selection-access", b"<first/>"
         )
@@ -4942,6 +5044,12 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
     def test_new_original_invalidates_selection_without_rewriting_its_history(self):
         receiver = self.env["l10n_ae.edi.inbox"].with_user(self.simple_accountman)
         binding = self.env["l10n_ae.edi.binding"].create({"name": "Selection revision"})
+        binding = review_controlled_binding(
+            binding,
+            self.simple_accountman,
+            capabilities=("receive",),
+            note="Synthetic reviewed receive-only contract for this inbound fixture.",
+        )
         first = receiver.receive_controlled_document(
             binding.id, "selection-revision", b"<first/>"
         )
@@ -4982,6 +5090,12 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         content = etree.tostring(tree)
         binding = self.env["l10n_ae.edi.binding"].create(
             {"name": "Pinned identity review"}
+        )
+        binding = review_controlled_binding(
+            binding,
+            self.simple_accountman,
+            capabilities=("receive",),
+            note="Synthetic reviewed receive-only contract for this inbound fixture.",
         )
         receiver = self.env["l10n_ae.edi.inbox"].with_user(self.simple_accountman)
         first = receiver.receive_controlled_document(
@@ -5024,6 +5138,12 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         binding = self.env["l10n_ae.edi.binding"].create(
             {"name": "Human identity review"}
         )
+        binding = review_controlled_binding(
+            binding,
+            self.simple_accountman,
+            capabilities=("receive",),
+            note="Synthetic reviewed receive-only contract for this inbound fixture.",
+        )
         receiver = self.env["l10n_ae.edi.inbox"].with_user(self.simple_accountman)
         first = receiver.receive_controlled_document(
             binding.id, "human-reviewed-variants", first_content
@@ -5065,6 +5185,12 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
     def test_received_identity_conflict_includes_an_unreadable_original(self):
         binding = self.env["l10n_ae.edi.binding"].create(
             {"name": "Restricted original identity"}
+        )
+        binding = review_controlled_binding(
+            binding,
+            self.simple_accountman,
+            capabilities=("receive",),
+            note="Synthetic reviewed receive-only contract for this inbound fixture.",
         )
         receiver = self.env["l10n_ae.edi.inbox"].with_user(self.simple_accountman)
         first = receiver.receive_controlled_document(
@@ -5116,6 +5242,12 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         content = etree.tostring(self._received_test_xml())
         binding = self.env["l10n_ae.edi.binding"].create(
             {"name": "Review source access"}
+        )
+        binding = review_controlled_binding(
+            binding,
+            self.simple_accountman,
+            capabilities=("receive",),
+            note="Synthetic reviewed receive-only contract for this inbound fixture.",
         )
         inbox = (
             self.env["l10n_ae.edi.inbox"]
@@ -5198,6 +5330,12 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         binding = self.env["l10n_ae.edi.binding"].create(
             {"name": "Revoked review owner"}
         )
+        binding = review_controlled_binding(
+            binding,
+            self.simple_accountman,
+            capabilities=("receive",),
+            note="Synthetic reviewed receive-only contract for this inbound fixture.",
+        )
         inbox = (
             self.env["l10n_ae.edi.inbox"]
             .with_user(self.simple_accountman)
@@ -5226,6 +5364,12 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         binding = self.env["l10n_ae.edi.binding"].create(
             {"name": "Already processed original"}
         )
+        binding = review_controlled_binding(
+            binding,
+            self.simple_accountman,
+            capabilities=("receive",),
+            note="Synthetic reviewed receive-only contract for this inbound fixture.",
+        )
         inbox = (
             self.env["l10n_ae.edi.inbox"]
             .with_user(self.simple_accountman)
@@ -5244,6 +5388,12 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         content = etree.tostring(self._received_test_xml())
         binding = self.env["l10n_ae.edi.binding"].create(
             {"name": "Synthetic incoming review resolution"}
+        )
+        binding = review_controlled_binding(
+            binding,
+            self.simple_accountman,
+            capabilities=("receive",),
+            note="Synthetic reviewed receive-only contract for this inbound fixture.",
         )
         self.partner_a.active = False
         inbox = (
@@ -5296,6 +5446,12 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         content = etree.tostring(self._received_test_xml())
         binding = self.env["l10n_ae.edi.binding"].create(
             {"name": "Synthetic incoming review request"}
+        )
+        binding = review_controlled_binding(
+            binding,
+            self.simple_accountman,
+            capabilities=("receive",),
+            note="Synthetic reviewed receive-only contract for this inbound fixture.",
         )
         inbox_model = self.env["l10n_ae.edi.inbox"].with_user(self.simple_accountman)
         self.partner_a.active = False
@@ -5377,6 +5533,12 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         binding = self.env["l10n_ae.edi.binding"].create(
             {"name": "Incoming USD credit"}
         )
+        binding = review_controlled_binding(
+            binding,
+            self.simple_accountman,
+            capabilities=("receive",),
+            note="Synthetic reviewed receive-only contract for this inbound fixture.",
+        )
         inbox_model = self.env["l10n_ae.edi.inbox"].with_user(self.simple_accountman)
         original = inbox_model.receive_controlled_document(
             binding.id,
@@ -5428,6 +5590,12 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         for node in tree.xpath("//*[@currencyID='USD']"):
             node.set("currencyID", "CHF")
         binding = self.env["l10n_ae.edi.binding"].create({"name": "Inactive CHF"})
+        binding = review_controlled_binding(
+            binding,
+            self.simple_accountman,
+            capabilities=("receive",),
+            note="Synthetic reviewed receive-only contract for this inbound fixture.",
+        )
         inbox = (
             self.env["l10n_ae.edi.inbox"]
             .with_user(self.simple_accountman)
@@ -5450,6 +5618,12 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         content = etree.tostring(tree)
         binding = self.env["l10n_ae.edi.binding"].create(
             {"name": "Incoming USD evidence"}
+        )
+        binding = review_controlled_binding(
+            binding,
+            self.simple_accountman,
+            capabilities=("receive",),
+            note="Synthetic reviewed receive-only contract for this inbound fixture.",
         )
         inbox = (
             self.env["l10n_ae.edi.inbox"]
@@ -5556,6 +5730,12 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         content = etree.tostring(tree, encoding="UTF-8", xml_declaration=True)
         binding = self.env["l10n_ae.edi.binding"].create(
             {"name": "Received e-commerce delivery"}
+        )
+        binding = review_controlled_binding(
+            binding,
+            self.simple_accountman,
+            capabilities=("receive",),
+            note="Synthetic reviewed receive-only contract for this inbound fixture.",
         )
         receiver = self.env["l10n_ae.edi.inbox"].with_user(self.simple_accountman)
         inbox = receiver.receive_controlled_document(
@@ -5735,6 +5915,12 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         binding = self.env["l10n_ae.edi.binding"].create(
             {"name": "Received combined Free Zone e-commerce"}
         )
+        binding = review_controlled_binding(
+            binding,
+            self.simple_accountman,
+            capabilities=("receive",),
+            note="Synthetic reviewed receive-only contract for this inbound fixture.",
+        )
         receiver = self.env["l10n_ae.edi.inbox"].with_user(self.simple_accountman)
         inbox = receiver.receive_controlled_document(
             binding.id, "combined-freezone-ecommerce", content
@@ -5817,6 +6003,12 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         binding = self.env["l10n_ae.edi.binding"].create(
             {"name": "Combined Free Zone e-commerce missing declarations"}
         )
+        binding = review_controlled_binding(
+            binding,
+            self.simple_accountman,
+            capabilities=("receive",),
+            note="Synthetic reviewed receive-only contract for this inbound fixture.",
+        )
         receiver = self.env["l10n_ae.edi.inbox"].with_user(self.simple_accountman)
         for index, missing in enumerate(
             ("Beneficiary", "StreetName", "CityName", "CountrySubentity")
@@ -5885,6 +6077,12 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         content = etree.tostring(tree, encoding="UTF-8", xml_declaration=True)
         binding = self.env["l10n_ae.edi.binding"].create(
             {"name": "Received e-commerce delivery integrity"}
+        )
+        binding = review_controlled_binding(
+            binding,
+            self.simple_accountman,
+            capabilities=("receive",),
+            note="Synthetic reviewed receive-only contract for this inbound fixture.",
         )
         receiver = self.env["l10n_ae.edi.inbox"].with_user(self.simple_accountman)
         inbox = receiver.receive_controlled_document(
@@ -6010,6 +6208,12 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         binding = self.env["l10n_ae.edi.binding"].create(
             {"name": "Incomplete received e-commerce delivery"}
         )
+        binding = review_controlled_binding(
+            binding,
+            self.simple_accountman,
+            capabilities=("receive",),
+            note="Synthetic reviewed receive-only contract for this inbound fixture.",
+        )
         receiver = self.env["l10n_ae.edi.inbox"].with_user(self.simple_accountman)
         for index, missing in enumerate(("StreetName", "CityName", "CountrySubentity")):
             with self.subTest(missing=missing):
@@ -6076,6 +6280,12 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         binding = self.env["l10n_ae.edi.binding"].create(
             {"name": "Ambiguous received e-commerce delivery"}
         )
+        binding = review_controlled_binding(
+            binding,
+            self.simple_accountman,
+            capabilities=("receive",),
+            note="Synthetic reviewed receive-only contract for this inbound fixture.",
+        )
         receiver = self.env["l10n_ae.edi.inbox"].with_user(self.simple_accountman)
         inbox = receiver.receive_controlled_document(
             binding.id, "ecommerce-ambiguous-delivery", content
@@ -6124,6 +6334,12 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         binding = self.env["l10n_ae.edi.binding"].create(
             {"name": "Received native e-commerce review"}
         )
+        binding = review_controlled_binding(
+            binding,
+            self.simple_accountman,
+            capabilities=("receive",),
+            note="Synthetic reviewed receive-only contract for this inbound fixture.",
+        )
         inbox = (
             self.env["l10n_ae.edi.inbox"]
             .with_user(self.simple_accountman)
@@ -6145,6 +6361,12 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         original = self._received_test_xml()
         binding = self.env["l10n_ae.edi.binding"].create(
             {"name": "Synthetic received delivery emirate"}
+        )
+        binding = review_controlled_binding(
+            binding,
+            self.simple_accountman,
+            capabilities=("receive",),
+            note="Synthetic reviewed receive-only contract for this inbound fixture.",
         )
         receiver = self.env["l10n_ae.edi.inbox"].with_user(self.simple_accountman)
         cases = (
@@ -6233,6 +6455,12 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         binding = self.env["l10n_ae.edi.binding"].create(
             {"name": "Credit delivery events"}
         )
+        binding = review_controlled_binding(
+            binding,
+            self.simple_accountman,
+            capabilities=("receive",),
+            note="Synthetic reviewed receive-only contract for this inbound fixture.",
+        )
         receiver = self.env["l10n_ae.edi.inbox"].with_user(self.simple_accountman)
         original = receiver.receive_controlled_document(
             binding.id,
@@ -6296,6 +6524,12 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         binding = self.env["l10n_ae.edi.binding"].create(
             {"name": "Protected event evidence"}
         )
+        binding = review_controlled_binding(
+            binding,
+            self.simple_accountman,
+            capabilities=("receive",),
+            note="Synthetic reviewed receive-only contract for this inbound fixture.",
+        )
         model = self.env["l10n_ae.edi.inbox"].with_user(self.simple_accountman)
         original = model.with_context(
             default_event_id="forged-event",
@@ -6354,6 +6588,12 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         binding = self.env["l10n_ae.edi.binding"].create(
             {"name": "Event versus document identity"}
         )
+        binding = review_controlled_binding(
+            binding,
+            self.simple_accountman,
+            capabilities=("receive",),
+            note="Synthetic reviewed receive-only contract for this inbound fixture.",
+        )
         model = self.env["l10n_ae.edi.inbox"].with_user(self.simple_accountman)
         tree = self._received_test_xml()
         first = model.receive_controlled_document(
@@ -6378,6 +6618,12 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
 
     def test_received_event_package_retains_every_conflicting_association(self):
         binding = self.env["l10n_ae.edi.binding"].create({"name": "Portable events"})
+        binding = review_controlled_binding(
+            binding,
+            self.simple_accountman,
+            capabilities=("receive",),
+            note="Synthetic reviewed receive-only contract for this inbound fixture.",
+        )
         receiver = self.env["l10n_ae.edi.inbox"].with_user(self.simple_accountman)
         content = b"<synthetic-original/>"
         original = receiver.receive_controlled_document(
@@ -6449,6 +6695,12 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
 
     def test_reused_delivery_event_preserves_associations_and_blocks_processing(self):
         binding = self.env["l10n_ae.edi.binding"].create({"name": "Conflicting event"})
+        binding = review_controlled_binding(
+            binding,
+            self.simple_accountman,
+            capabilities=("receive",),
+            note="Synthetic reviewed receive-only contract for this inbound fixture.",
+        )
         receiver = self.env["l10n_ae.edi.inbox"].with_user(self.simple_accountman)
         content = etree.tostring(self._received_test_xml())
         first = receiver.receive_controlled_document(
@@ -6510,6 +6762,12 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
 
     def test_received_events_replay_without_duplicate_original_or_bill(self):
         binding = self.env["l10n_ae.edi.binding"].create({"name": "Event identity"})
+        binding = review_controlled_binding(
+            binding,
+            self.simple_accountman,
+            capabilities=("receive",),
+            note="Synthetic reviewed receive-only contract for this inbound fixture.",
+        )
         receiver = self.env["l10n_ae.edi.inbox"].with_user(self.simple_accountman)
         content = etree.tostring(self._received_test_xml())
         original = receiver.receive_controlled_document(
@@ -6560,6 +6818,12 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         original_hash = hashlib.sha256(content).hexdigest()
         binding = self.env["l10n_ae.edi.binding"].create(
             {"name": "Synthetic received Summary period"}
+        )
+        binding = review_controlled_binding(
+            binding,
+            self.simple_accountman,
+            capabilities=("receive",),
+            note="Synthetic reviewed receive-only contract for this inbound fixture.",
         )
         receiver = (
             self.env["l10n_ae.edi.inbox"]
@@ -6689,6 +6953,12 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         original_hash = hashlib.sha256(content).hexdigest()
         binding = self.env["l10n_ae.edi.binding"].create(
             {"name": "Synthetic received Free Zone Summary period"}
+        )
+        binding = review_controlled_binding(
+            binding,
+            self.simple_accountman,
+            capabilities=("receive",),
+            note="Synthetic reviewed receive-only contract for this inbound fixture.",
         )
         receiver = (
             self.env["l10n_ae.edi.inbox"]
@@ -6828,6 +7098,12 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         binding = self.env["l10n_ae.edi.binding"].create(
             {"name": "Synthetic invalid received Summary periods"}
         )
+        binding = review_controlled_binding(
+            binding,
+            self.simple_accountman,
+            capabilities=("receive",),
+            note="Synthetic reviewed receive-only contract for this inbound fixture.",
+        )
         move_model_names = (
             "account.move",
             "account.move.line",
@@ -6947,6 +7223,12 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         )
         content = etree.tostring(self._received_test_xml(source))
         binding = self.env["l10n_ae.edi.binding"].create({"name": "Received Free Zone"})
+        binding = review_controlled_binding(
+            binding,
+            self.simple_accountman,
+            capabilities=("receive",),
+            note="Synthetic reviewed receive-only contract for this inbound fixture.",
+        )
         inbox_model = self.env["l10n_ae.edi.inbox"].with_user(self.simple_accountman)
         inbox = inbox_model.receive_controlled_document(
             binding.id, "received-free-zone", content
@@ -6995,6 +7277,12 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         original = etree.tostring(self._received_test_xml(source))
         binding = self.env["l10n_ae.edi.binding"].create(
             {"name": "Ambiguous received beneficiary"}
+        )
+        binding = review_controlled_binding(
+            binding,
+            self.simple_accountman,
+            capabilities=("receive",),
+            note="Synthetic reviewed receive-only contract for this inbound fixture.",
         )
         before = self.env["account.move"].search_count(
             [("move_type", "=", "in_invoice")]
@@ -7045,6 +7333,12 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         binding = self.env["l10n_ae.edi.binding"].create(
             {"name": "Incoming FX arithmetic"}
         )
+        binding = review_controlled_binding(
+            binding,
+            self.simple_accountman,
+            capabilities=("receive",),
+            note="Synthetic reviewed receive-only contract for this inbound fixture.",
+        )
         cases = (
             ("cac:TaxTotal/cbc:TaxAmount[@currencyID='AED']", "19.00"),
             (
@@ -7089,6 +7383,12 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         original, _rate, _source = self._foreign_received_fixture()
         binding = self.env["l10n_ae.edi.binding"].create(
             {"name": "Incoming FX line arithmetic"}
+        )
+        binding = review_controlled_binding(
+            binding,
+            self.simple_accountman,
+            capabilities=("receive",),
+            note="Synthetic reviewed receive-only contract for this inbound fixture.",
         )
         cases = (
             (
@@ -7198,6 +7498,12 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         binding = self.env["l10n_ae.edi.binding"].create(
             {"name": "Incoming fractional quantity"}
         )
+        binding = review_controlled_binding(
+            binding,
+            self.simple_accountman,
+            capabilities=("receive",),
+            note="Synthetic reviewed receive-only contract for this inbound fixture.",
+        )
         inbox = (
             self.env["l10n_ae.edi.inbox"]
             .with_user(self.simple_accountman)
@@ -7271,6 +7577,12 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         binding = self.env["l10n_ae.edi.binding"].create(
             {"name": "Synthetic received fractional discount"}
         )
+        binding = review_controlled_binding(
+            binding,
+            self.simple_accountman,
+            capabilities=("receive",),
+            note="Synthetic reviewed receive-only contract for this inbound fixture.",
+        )
         receiver = self.env["l10n_ae.edi.inbox"].with_user(self.simple_accountman)
         self.assertFalse(receiver.env.su)
         inbox = receiver.receive_controlled_document(
@@ -7310,6 +7622,12 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         original.l10n_ae_fiscal_uuid = "aaaaaaab-1111-4111-8111-111111111111"
         binding = self.env["l10n_ae.edi.binding"].create(
             {"name": "Incoming supplier adjustment"}
+        )
+        binding = review_controlled_binding(
+            binding,
+            self.simple_accountman,
+            capabilities=("receive",),
+            note="Synthetic reviewed receive-only contract for this inbound fixture.",
         )
         inbox_model = self.env["l10n_ae.edi.inbox"].with_user(self.simple_accountman)
         received = inbox_model.receive_controlled_document(
@@ -7397,6 +7715,12 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         original.write({"l10n_ae_fiscal_uuid": "aaaaaaab-3333-4333-8333-333333333333"})
         binding = self.env["l10n_ae.edi.binding"].create(
             {"name": "Incoming Summary supplier credit"}
+        )
+        binding = review_controlled_binding(
+            binding,
+            self.simple_accountman,
+            capabilities=("receive",),
+            note="Synthetic reviewed receive-only contract for this inbound fixture.",
         )
         receiver = (
             self.env["l10n_ae.edi.inbox"]
@@ -7824,6 +8148,12 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         binding = self.env["l10n_ae.edi.binding"].create(
             {"name": "Incoming endpoint check"}
         )
+        binding = review_controlled_binding(
+            binding,
+            self.simple_accountman,
+            capabilities=("receive",),
+            note="Synthetic reviewed receive-only contract for this inbound fixture.",
+        )
         inbox = (
             self.env["l10n_ae.edi.inbox"]
             .with_user(self.simple_accountman)
@@ -7841,6 +8171,12 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
     ):
         binding = self.env["l10n_ae.edi.binding"].create(
             {"name": "Received currency evidence"}
+        )
+        binding = review_controlled_binding(
+            binding,
+            self.simple_accountman,
+            capabilities=("receive",),
+            note="Synthetic reviewed receive-only contract for this inbound fixture.",
         )
         content = etree.tostring(self._received_test_xml())
         inbox = (
@@ -7898,6 +8234,12 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         binding = self.env["l10n_ae.edi.binding"].create(
             {"name": "Incoming commercial document"}
         )
+        binding = review_controlled_binding(
+            binding,
+            self.simple_accountman,
+            capabilities=("receive",),
+            note="Synthetic reviewed receive-only contract for this inbound fixture.",
+        )
         inbox = (
             self.env["l10n_ae.edi.inbox"]
             .with_user(self.simple_accountman)
@@ -7929,6 +8271,12 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         binding = self.env["l10n_ae.edi.binding"].create(
             {"name": "Incoming unknown license"}
         )
+        binding = review_controlled_binding(
+            binding,
+            self.simple_accountman,
+            capabilities=("receive",),
+            note="Synthetic reviewed receive-only contract for this inbound fixture.",
+        )
         inbox = (
             self.env["l10n_ae.edi.inbox"]
             .with_user(self.simple_accountman)
@@ -7955,6 +8303,12 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         source, purchase_tax, tree = self._commercial_received_fixture()
         binding = self.env["l10n_ae.edi.binding"].create(
             {"name": "Incoming commercial adjustment"}
+        )
+        binding = review_controlled_binding(
+            binding,
+            self.simple_accountman,
+            capabilities=("receive",),
+            note="Synthetic reviewed receive-only contract for this inbound fixture.",
         )
         model = self.env["l10n_ae.edi.inbox"].with_user(self.simple_accountman)
         original = model.receive_controlled_document(
@@ -8006,6 +8360,12 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         binding = self.env["l10n_ae.edi.binding"].create(
             {"name": "Incoming credit reference review"}
         )
+        binding = review_controlled_binding(
+            binding,
+            self.simple_accountman,
+            capabilities=("receive",),
+            note="Synthetic reviewed receive-only contract for this inbound fixture.",
+        )
         inbox_model = self.env["l10n_ae.edi.inbox"].with_user(self.simple_accountman)
         received = inbox_model.receive_controlled_document(
             binding.id,
@@ -8042,6 +8402,12 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         binding = self.env["l10n_ae.edi.binding"].create(
             {"name": "Incoming duplicate check"}
         )
+        binding = review_controlled_binding(
+            binding,
+            self.simple_accountman,
+            capabilities=("receive",),
+            note="Synthetic reviewed receive-only contract for this inbound fixture.",
+        )
         inbox_model = self.env["l10n_ae.edi.inbox"].with_user(self.simple_accountman)
         first = inbox_model.receive_controlled_document(
             binding.id, "remote-first", content
@@ -8058,6 +8424,12 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
     def test_unsafe_received_xml_is_preserved_without_creating_a_bill(self):
         content = b'<!DOCTYPE Invoice [<!ENTITY ex SYSTEM "file:///etc/passwd">]><Invoice>&ex;</Invoice>'
         binding = self.env["l10n_ae.edi.binding"].create({"name": "Incoming XML check"})
+        binding = review_controlled_binding(
+            binding,
+            self.simple_accountman,
+            capabilities=("receive",),
+            note="Synthetic reviewed receive-only contract for this inbound fixture.",
+        )
         inbox = (
             self.env["l10n_ae.edi.inbox"]
             .with_user(self.simple_accountman)
@@ -8075,6 +8447,12 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
     def test_readonly_accountant_cannot_receive_or_process_documents(self):
         binding = self.env["l10n_ae.edi.binding"].create(
             {"name": "Incoming access check"}
+        )
+        binding = review_controlled_binding(
+            binding,
+            self.simple_accountman,
+            capabilities=("receive",),
+            note="Synthetic reviewed receive-only contract for this inbound fixture.",
         )
         reader = new_test_user(
             self.env,
@@ -8111,6 +8489,12 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
             company_id=other.id,
             company_ids=[(6, 0, other.ids)],
         )
+        foreign_binding = review_controlled_binding(
+            foreign_binding.with_company(other),
+            foreign_manager.with_company(other),
+            capabilities=("receive",),
+            note="Synthetic reviewed receive-only contract for this inbound fixture.",
+        )
         foreign = (
             self.env["l10n_ae.edi.inbox"]
             .with_user(foreign_manager)
@@ -8133,6 +8517,12 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
 
     def test_received_identity_with_changed_bytes_preserves_both_for_review(self):
         binding = self.env["l10n_ae.edi.binding"].create({"name": "Inbound replay ASP"})
+        binding = review_controlled_binding(
+            binding,
+            self.simple_accountman,
+            capabilities=("receive",),
+            note="Synthetic reviewed receive-only contract for this inbound fixture.",
+        )
         inbox_model = self.env["l10n_ae.edi.inbox"].with_user(self.simple_accountman)
         first = inbox_model.receive_controlled_document(
             binding.id, "same-id", b"<original/>"
@@ -8167,6 +8557,12 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         customer.append(supplier_party)
         content = etree.tostring(tree)
         binding = self.env["l10n_ae.edi.binding"].create({"name": "Inbound test ASP"})
+        binding = review_controlled_binding(
+            binding,
+            self.simple_accountman,
+            capabilities=("receive",),
+            note="Synthetic reviewed receive-only contract for this inbound fixture.",
+        )
         inbox = (
             self.env["l10n_ae.edi.inbox"]
             .with_user(self.simple_accountman)

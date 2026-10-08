@@ -45,6 +45,15 @@ class TestUaeReceivedRetention(AccountTestInvoicingCommon):
             }
         )
 
+    def setUp(self):
+        super().setUp()
+        review_controlled_binding(
+            self.binding,
+            self.simple_accountman,
+            capabilities=("receive",),
+            note="Synthetic receive-only contract for received-retention fixtures.",
+        )
+
     def test_family_package_refreshes_received_retention_and_hold_changes(self):
         receiver = self.env["l10n_ae.edi.inbox"]
         first = receiver.receive_controlled_document(
@@ -476,6 +485,19 @@ class TestUaeReceivedRetention(AccountTestInvoicingCommon):
             self.env["l10n_ae.edi.binding"]
             .with_company(company_b)
             .create({"name": "Synthetic foreign retention source"})
+        )
+        company_b_manager = new_test_user(
+            self.env,
+            login="synthetic-foreign-retention-receiver",
+            groups="account.group_account_manager",
+            company_id=company_b.id,
+            company_ids=[(6, 0, company_b.ids)],
+        )
+        review_controlled_binding(
+            binding_b,
+            company_b_manager,
+            capabilities=("receive",),
+            note="Synthetic receive-only contract for foreign retention fixture.",
         )
         inbox = (
             self.env["l10n_ae.edi.inbox"]

@@ -551,6 +551,12 @@ class TestUaeSelfBillingInbound(AccountTestInvoicingCommon):
         receiver_binding = self.env["l10n_ae.edi.binding"].create(
             {"name": "Synthetic Margin supplier receiver"}
         )
+        review_controlled_binding(
+            receiver_binding,
+            self.simple_accountman,
+            capabilities=("receive",),
+            note="Synthetic receive-only contract for Margin supplier receiver.",
+        )
         original = (
             self.env["account.move"]
             .with_user(buyer_manager)
@@ -823,6 +829,12 @@ class TestUaeSelfBillingInbound(AccountTestInvoicingCommon):
                 }
             )
         )
+        review_controlled_binding(
+            receiver_binding,
+            manager,
+            capabilities=("receive",),
+            note="Synthetic receive-only contract for buyer-company receiver.",
+        )
         inboxes = (
             self.env["l10n_ae.edi.inbox"].with_user(manager).with_company(self.buyer)
         )
@@ -1008,6 +1020,12 @@ class TestUaeSelfBillingInbound(AccountTestInvoicingCommon):
                 }
             )
         )
+        review_controlled_binding(
+            receiver_binding,
+            manager,
+            capabilities=("receive",),
+            note="Synthetic receive-only contract for buyer-company receiver.",
+        )
         inboxes = (
             self.env["l10n_ae.edi.inbox"].with_user(manager).with_company(self.buyer)
         )
@@ -1176,6 +1194,12 @@ class TestUaeSelfBillingInbound(AccountTestInvoicingCommon):
             .with_company(self.buyer)
             .create({"name": "Synthetic margin recipient", "company_id": self.buyer.id})
         )
+        review_controlled_binding(
+            binding,
+            manager,
+            capabilities=("receive",),
+            note="Synthetic receive-only contract for margin recipient.",
+        )
         inbox_model = (
             self.env["l10n_ae.edi.inbox"].with_user(manager).with_company(self.buyer)
         )
@@ -1328,6 +1352,12 @@ class TestUaeSelfBillingInbound(AccountTestInvoicingCommon):
                 "name": "Supplier receiving binding",
                 "company_id": supplier.id,
             }
+        )
+        review_controlled_binding(
+            binding,
+            self.simple_accountman,
+            capabilities=("receive",),
+            note="Synthetic receive-only contract for self-billing inbound fixture.",
         )
         return source, recipient_agreement, binding
 
