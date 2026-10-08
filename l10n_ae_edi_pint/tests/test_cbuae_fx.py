@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 from requests import Response
 
+from odoo.exceptions import UserError
 from odoo.tests import Form, tagged
 
 from .test_invoice_xml import TestUaeInvoiceXml
@@ -132,3 +133,52 @@ class TestUaeCbuaeFx(TestUaeInvoiceXml):
         self.assertEqual(invoice.preview_l10n_ae_pint(), frozen[0]["xml_content"])
         self.assertEqual(issue.read(immutable), frozen)
         self.assertEqual(invoice.line_ids.sorted("id").read(ledger_fields), ledger)
+
+    def test_changed_aed_anchor_requires_review_without_aborting_post(self):
+        usd, anchor, review = self._reviewed_cbuae_usd()
+        retained = review.read(["quote_literal", "import_facts", "reviewed_at"])
+        anchor.rate = 2.0
+        self.env.company.l10n_ae_edi_auto_prepare = True
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {
+                "name": "Synthetic changed AED anchor",
+                "fiscal_uuid_policy": "controlled_local",
+            }
+        )
+        invoice = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a, currency=usd
+        ).with_user(self.simple_accountman)
+        with Form(invoice) as form:
+            form.invoice_date = "2026-08-27"
+            form.l10n_ae_binding_id = binding
+        invoice.action_post()
+        self.assertEqual(invoice.state, "posted")
+        # The changed native anchor doubles the ledger conversion to7.345 AED/USD.
+        # This is not the retained publication's3.6725 AED/USD fiscal quote.
+        self.assertEqual(invoice.amount_tax_signed, 36.73)
+        self.assertEqual(invoice.amount_total_signed, 771.23)
+        self.assertEqual(invoice.l10n_ae_preparation_state, "review")
+        self.assertFalse(invoice.l10n_ae_transmission_id)
+        self.assertFalse(invoice.l10n_ae_fiscal_uuid)
+        self.assertEqual(invoice.l10n_ae_effective_tax_exchange_origin, "review")
+        invoice.line_ids.flush_recordset()
+        ledger_fields = [
+            "account_id",
+            "debit",
+            "credit",
+            "balance",
+            "amount_currency",
+            "tax_ids",
+            "write_uid",
+            "write_date",
+        ]
+        ledger = invoice.line_ids.sorted("id").read(ledger_fields)
+        for action in (invoice.action_l10n_ae_validate, invoice.action_l10n_ae_prepare):
+            with self.assertRaisesRegex(UserError, "reviewed CBUAE quote"):
+                action()
+            self.assertFalse(invoice.l10n_ae_transmission_id)
+            self.assertFalse(invoice.l10n_ae_fiscal_uuid)
+            self.assertEqual(invoice.line_ids.sorted("id").read(ledger_fields), ledger)
+        self.assertEqual(
+            review.read(["quote_literal", "import_facts", "reviewed_at"]), retained
+        )
