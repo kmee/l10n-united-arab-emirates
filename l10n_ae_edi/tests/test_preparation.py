@@ -7,6 +7,10 @@ from odoo.exceptions import UserError, ValidationError
 from odoo.tests import Form, tagged
 
 from odoo.addons.account.tests.common import AccountTestInvoicingCommon
+from odoo.addons.l10n_ae_edi.tests.common import (
+    CONTROLLED_CAPABILITIES,
+    review_controlled_binding,
+)
 
 
 @tagged("post_install", "-at_install")
@@ -35,9 +39,19 @@ class TestUaeInvoicePreparation(AccountTestInvoicingCommon):
         cls.binding = cls.env["l10n_ae.edi.binding"].create(
             {"name": "Synthetic sandbox ASP"}
         )
+        review_controlled_binding(
+            cls.binding,
+            cls.simple_accountman,
+            capabilities=CONTROLLED_CAPABILITIES,
+            note="Synthetic controlled contract for invoice preparation tests.",
+        )
 
     def test_unsupported_contract_document_keeps_native_post_until_reviewed(self):
-        binding = self.binding.with_user(self.simple_accountman)
+        binding = (
+            self.env["l10n_ae.edi.binding"]
+            .create({"name": "Synthetic unreviewed unsupported contract"})
+            .with_user(self.simple_accountman)
+        )
         capabilities = binding.env["l10n_ae.edi.capability"].search(
             [("code", "in", ["submit", "lookup", "report", "billing_credit"])]
         )
@@ -514,6 +528,12 @@ class TestUaeInvoicePreparation(AccountTestInvoicingCommon):
     def test_explicit_invoice_provider_takes_precedence_over_company_default(self):
         override = self.env["l10n_ae.edi.binding"].create(
             {"name": "Synthetic override"}
+        )
+        review_controlled_binding(
+            override,
+            self.simple_accountman,
+            capabilities=("submit", "lookup", "report", "billing_invoice"),
+            note="Synthetic controlled invoice-provider override fixture.",
         )
         self.env.company.write(
             {
