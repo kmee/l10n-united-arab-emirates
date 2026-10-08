@@ -264,6 +264,63 @@ class TestCbuaePublication(AccountTestInvoicingCommon):
         with self.assertRaises(UserError):
             review.write({"import_facts": {"currency_code": "USX"}})
 
+    def test_unrepresentable_native_quote_requires_review_without_import(self):
+        manager = self.simple_accountman
+        usd = self.env.ref("base.USD")
+        usd.active = True
+        original = (
+            Path(__file__).parent / "cassettes/cbuae/cbuae-2026-08-26.html"
+        ).read_bytes()
+        rates = self.env["res.currency.rate"].search([])
+        before = rates.read(["name", "rate", "company_id", "currency_id", "write_date"])
+        for literal in ("1E400", "1E-400", "1E-999999"):
+            with self.subTest(literal=literal):
+                publication = (
+                    self.env["l10n_ae.cbuae.publication"]
+                    .with_user(manager)
+                    .create({"requested_date": "2026-08-26"})
+                )
+                response = Response()
+                response.status_code = 200
+                response.url = (
+                    "https://centralbank.ae/umbraco/Surface/Exchange/"
+                    "GetExchangeRateAllCurrencyDate?dateTime=2026-08-26"
+                )
+                response.headers["Content-Type"] = "text/html"
+                response._content = original.replace(b"3.6725", literal.encode("ascii"))
+                response._content_consumed = True
+                with patch("requests.get", return_value=response):
+                    publication.action_capture()
+                self.assertEqual(publication.state, "captured")
+                self.assertEqual(publication.quotes["US Dollar"], literal)
+                review = (
+                    self.env["l10n_ae.cbuae.rate.review"]
+                    .with_user(manager)
+                    .create(
+                        {
+                            "publication_id": publication.id,
+                            "source_label": "US Dollar",
+                            "currency_id": usd.id,
+                            "review_note": "Synthetic representability review.",
+                        }
+                    )
+                )
+                with (
+                    self.cr.savepoint(),
+                    self.assertRaisesRegex(UserError, "represent"),
+                ):
+                    review.action_import()
+                self.assertFalse(review.native_rate_id)
+                self.assertFalse(review.reviewed_by)
+                self.assertFalse(review.import_facts)
+                self.assertEqual(self.env["res.currency.rate"].search([]), rates)
+                self.assertEqual(
+                    rates.read(
+                        ["name", "rate", "company_id", "currency_id", "write_date"]
+                    ),
+                    before,
+                )
+
     def test_manager_captures_dated_original_without_importing_currency_rates(self):
         publication_model = self.env["l10n_ae.cbuae.publication"].with_user(
             self.simple_accountman
