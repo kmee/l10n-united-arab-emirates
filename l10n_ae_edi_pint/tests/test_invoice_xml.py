@@ -32,6 +32,116 @@ NS = {
 
 @tagged("post_install", "-at_install")
 class TestUaeInvoiceXml(AccountTestInvoicingCommon):
+    def test_native_transfer_requires_recipient_account_and_freezes_review(self):
+        journal = self.company_data["default_journal_bank"]
+        journal.bank_account_id = False
+        method = journal.inbound_payment_method_line_ids.filtered(
+            lambda line: line.code == "manual"
+        )[:1]
+        self.assertTrue(method)
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {
+                "name": "Synthetic native transfer instruction",
+                "fiscal_uuid_policy": "controlled_local",
+            }
+        )
+        self.env.company.write(
+            {"l10n_ae_edi_auto_prepare": True, "l10n_ae_edi_binding_id": binding.id}
+        )
+        invoice = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a
+        ).with_user(self.simple_accountman)
+        self.assertFalse(invoice.env.su)
+        with Form(invoice) as form:
+            form.preferred_payment_method_line_id = method
+            form.payment_reference = "SYNTH-TRANSFER-2026"
+            form.partner_bank_id = self.env["res.partner.bank"]
+        self.assertFalse(invoice.partner_bank_id)
+        with self.assertRaisesRegex(UserError, "IBR-192-AE"):
+            invoice.action_l10n_ae_validate()
+        invoice.action_post()
+        self.assertEqual(invoice.state, "posted")
+        self.assertEqual(invoice.l10n_ae_preparation_state, "review")
+        self.assertIn("IBR-192-AE", invoice.l10n_ae_preparation_error)
+        self.assertFalse(invoice.l10n_ae_transmission_id)
+        self.assertFalse(invoice.l10n_ae_fiscal_uuid)
+        self.assertEqual(
+            (invoice.amount_untaxed, invoice.amount_tax, invoice.amount_total),
+            (100, 5, 105),
+        )
+        ledger_fields = [
+            "account_id",
+            "partner_id",
+            "currency_id",
+            "debit",
+            "credit",
+            "balance",
+            "amount_currency",
+            "tax_ids",
+            "create_date",
+            "write_date",
+        ]
+        ledger = invoice.line_ids.sorted("id").read(ledger_fields)
+        with self.assertRaisesRegex(UserError, "IBR-192-AE"):
+            invoice.action_l10n_ae_prepare()
+        self.assertEqual(invoice.line_ids.sorted("id").read(ledger_fields), ledger)
+        account = self.env["res.partner.bank"].create(
+            {
+                "partner_id": self.env.company.partner_id.id,
+                "company_id": self.env.company.id,
+                "acc_number": "SYNTH BANK 01",
+            }
+        )
+        journal.bank_account_id = account
+        with Form(invoice) as form:
+            form.partner_bank_id = account
+        # Native form saving can update line timestamps. Freeze after this review.
+        ledger = invoice.line_ids.sorted("id").read(ledger_fields)
+        invoice.action_l10n_ae_validate()
+        invoice.action_l10n_ae_prepare()
+        issue = invoice.l10n_ae_transmission_id
+        tree = etree.fromstring(issue.xml_content.encode())
+        means = tree.find("cac:PaymentMeans", namespaces=NS)
+        self.assertEqual(means.findtext("cbc:PaymentMeansCode", namespaces=NS), "30")
+        self.assertEqual(
+            means.findtext("cbc:PaymentID", namespaces=NS), "SYNTH-TRANSFER-2026"
+        )
+        self.assertEqual(
+            means.findtext("cac:PayeeFinancialAccount/cbc:ID", namespaces=NS),
+            "SYNTHBANK01",
+        )
+        self.assertEqual(
+            json.loads(issue.payload)["payment_means"],
+            {
+                "code": "30",
+                "name": "Credit transfer",
+                "payment_reference": "SYNTH-TRANSFER-2026",
+                "method_line_id": method.id,
+                "method_code": "manual",
+                "journal_id": journal.id,
+                "journal_type": "bank",
+                "account_id": account.id,
+                "account_identifier": "SYNTHBANK01",
+            },
+        )
+        immutable = [
+            "payload",
+            "payload_hash",
+            "xml_content",
+            "xml_hash",
+            "idempotency_key",
+        ]
+        frozen = issue.read(immutable)
+        self.assertTrue(invoice.validate_l10n_ae_pint()["valid"])
+        account.acc_number = "SYNTH BANK 02"
+        invoice.action_l10n_ae_prepare()
+        self.assertEqual(invoice.preview_l10n_ae_pint(), frozen[0]["xml_content"])
+        self.assertTrue(invoice.validate_l10n_ae_pint()["valid"])
+        self.assertEqual(issue.read(immutable), frozen)
+        self.assertEqual(invoice.line_ids.sorted("id").read(ledger_fields), ledger)
+        self.assertFalse(issue.attempt_ids)
+        self.assertFalse(issue.event_ids)
+
     def test_native_cash_method_freezes_instruction_and_preserves_ledger(
         self,
     ):
