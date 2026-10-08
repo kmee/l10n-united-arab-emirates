@@ -413,6 +413,15 @@ class UaeEdiBinding(models.Model):
     def write(self, vals):
         if CAPABILITY_REVIEW_FIELDS.intersection(vals):
             raise UserError(self.env._("Use the contract capability review action."))
+        if vals.get("controlled_dispatch_enabled"):
+            self.with_user(self.env.uid).check_access("write")
+            if any(
+                vals.get("environment", binding.environment) != "sandbox"
+                for binding in self
+            ):
+                raise ValidationError(
+                    self.env._("Automatic controlled dispatch requires the sandbox.")
+                )
         if CAPABILITY_DECLARATION_FIELDS.intersection(vals) and vals.get(
             "controlled_dispatch_enabled"
         ):
