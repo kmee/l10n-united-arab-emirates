@@ -1462,6 +1462,7 @@ class TestUaeFiscalCategoryMatrix(AccountTestInvoicingCommon):
                 "name": "Synthetic fixed charge is not a line VAT category",
                 "amount_type": "fixed",
                 "amount": 5,
+                "include_base_amount": True,
                 "ubl_cii_tax_category_code": "S",
             }
         )
@@ -1471,12 +1472,12 @@ class TestUaeFiscalCategoryMatrix(AccountTestInvoicingCommon):
         # A line's fixed charge or an unclassified/no-tax line must not invent
         # the non-E/O item category required by the published 380/381 predicate.
         for kind in ("out_invoice", "out_refund"):
-            for label, line_taxes, total in (
-                ("E", [exempt], 25),
-                ("O", [outside], 25),
-                ("E plus O", [exempt, outside], 50),
-                ("no tax", [self.env["account.tax"]], 25),
-                ("E with fixed S charge", [exempt | fixed_charge], 30),
+            for label, line_taxes, net, vat in (
+                ("E", [exempt], 25, 0),
+                ("O", [outside], 25, 0),
+                ("E plus O", [exempt, outside], 50, 0),
+                ("no tax", [self.env["account.tax"]], 25, 0),
+                ("E with fixed S charge", [exempt | fixed_charge], 25, 5),
             ):
                 with self.subTest(kind=kind, categories=label):
                     values = {
@@ -1510,8 +1511,8 @@ class TestUaeFiscalCategoryMatrix(AccountTestInvoicingCommon):
                                         "number": "SYNTH-REVIEWED-ORIGINAL",
                                         "issue_date": "2018-12-01",
                                         "review_evidence": "Synthetic original review",
-                                        "allocated_net": total,
-                                        "allocated_tax": 0,
+                                        "allocated_net": net,
+                                        "allocated_tax": vat,
                                     }
                                 )
                             ],
