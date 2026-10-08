@@ -189,3 +189,58 @@ class TestUaeReceiveCapabilities(AccountTestInvoicingCommon):
                     receiver.search_count([("binding_id", "=", binding.id)])
                 )
                 self.assertFalse(events.search_count([("binding_id", "=", binding.id)]))
+
+    def test_invalidated_receive_contract_keeps_retained_original_review_available(
+        self,
+    ):
+        actor = self.env["l10n_ae.edi.binding"].with_user(self.manager)
+        binding = actor.create({"name": "Synthetic retained original recovery"})
+        review_controlled_binding(
+            binding,
+            self.manager,
+            capabilities=("receive",),
+            note="Synthetic receive-only contract before retaining an original.",
+        )
+        receiver = actor.env["l10n_ae.edi.inbox"]
+        original = receiver.receive_controlled_document(
+            binding.id,
+            "synthetic-retained-original",
+            b"<Invoice/>",
+            event_id="synthetic-retained-delivery",
+        )
+        immutable_fields = [
+            "remote_id",
+            "xml_hash",
+            "received_at",
+            "company_id",
+            "binding_id",
+        ]
+        retained = original.read(immutable_fields)
+        binding.write({"capability_review_note": "Changed synthetic receive contract."})
+        self.assertEqual(binding.capability_review_state, "review")
+        with (
+            self.cr.savepoint(),
+            self.assertRaisesRegex(
+                ValidationError, "Review.*contract capabilities.*receiving"
+            ),
+        ):
+            receiver.receive_controlled_document(
+                binding.id,
+                "synthetic-new-after-review-change",
+                b"<Invoice/>",
+                event_id="synthetic-new-delivery",
+            )
+        self.assertEqual(receiver.search_count([("binding_id", "=", binding.id)]), 1)
+        # The intentionally non-fiscal XML is retained and diagnosed locally;
+        # it must not fabricate a bill or require the new transport contract.
+        self.assertFalse(original.action_process())
+        self.assertEqual(original.state, "review")
+        self.assertTrue(original.diagnostic)
+        self.assertFalse(original.move_id)
+        self.assertEqual(len(original.processing_history_ids), 1)
+        self.assertEqual(original.read(immutable_fields), retained)
+        self.assertEqual(original.original_xml.content, b"<Invoice/>")
+        self.assertEqual(
+            original.ingestion_event_ids.mapped("event_id"),
+            ["synthetic-retained-delivery"],
+        )
