@@ -97,6 +97,13 @@ class UaeEdiTransmission(models.Model):
         [("local_review", "Local Document Validation")], readonly=True, copy=False
     )
     dispatch_review_at = fields.Datetime(readonly=True, copy=False)
+    dispatch_validation_receipt = fields.Text(
+        string="Local Validation Rejection",
+        readonly=True,
+        copy=False,
+        help="The first rejected formal report for this frozen XML. "
+        "This is local evidence, not an ASP or FTA confirmation.",
+    )
     attempt_ids = fields.One2many(
         "l10n_ae.edi.attempt", "transmission_id", readonly=True
     )
@@ -312,7 +319,7 @@ class UaeEdiTransmission(models.Model):
             "reporting_c3_state": c3_state,
         }
 
-    def _mark_controlled_dispatch_review(self, now):
+    def _mark_controlled_dispatch_review(self, now, report=None):
         """Record a local validation stop without inventing a remote rejection."""
         self.ensure_one()
         self.env.cr.execute(
@@ -322,13 +329,25 @@ class UaeEdiTransmission(models.Model):
         self.invalidate_recordset()
         if self.submission_state in {"accepted", "sending"}:
             return self.submission_state
-        super().write(
-            {
-                "dispatch_review_required": True,
-                "dispatch_error_kind": "local_review",
-                "dispatch_review_at": now,
-            }
-        )
+        values = {
+            "dispatch_review_required": True,
+            "dispatch_error_kind": "local_review",
+            "dispatch_review_at": now,
+        }
+        if (
+            report is not None
+            and report["valid"] is False
+            and not self.dispatch_validation_receipt
+        ):
+            values["dispatch_validation_receipt"] = json.dumps(
+                {
+                    "xml_sha256": self.xml_hash,
+                    "report": report,
+                    "checked_at": fields.Datetime.to_string(now),
+                },
+                sort_keys=True,
+            )
+        super().write(values)
         return "blocked"
 
     def _claim_controlled(self, endpoint, now, validation):
@@ -485,6 +504,7 @@ class UaeEdiTransmission(models.Model):
             "dispatch_review_required",
             "dispatch_error_kind",
             "dispatch_review_at",
+            "dispatch_validation_receipt",
             "attempt_ids",
             "event_ids",
             "event_review_required",

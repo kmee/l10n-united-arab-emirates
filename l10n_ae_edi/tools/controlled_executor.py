@@ -200,11 +200,11 @@ class ControlledExecutor:
             outcome = {"transmission_id": record_id}
             try:
                 outcome["result"] = self.run_once(record_id)
-            except UaeDocumentValidationError:
+            except UaeDocumentValidationError as error:
                 with self.registry.cursor() as cursor:
                     record = self._record(cursor, record_id).sudo()
                     outcome["result"] = record._mark_controlled_dispatch_review(
-                        self.clock()
+                        self.clock(), report=error.report
                     )
                     cursor.commit()
                 if outcome["result"] == "blocked":

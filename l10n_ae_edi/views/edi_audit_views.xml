@@ -43,6 +43,10 @@
                         <field name="reporting_c2_state" />
                         <field name="reporting_c3_state" />
                         <field name="confirmation_state" />
+                        <field name="dispatch_review_required" />
+                        <field name="dispatch_error_kind" />
+                        <field name="dispatch_review_at" />
+                        <field name="dispatch_validation_receipt" />
                         <field name="payload_hash" />
                         <field name="xml_hash" />
                         <field name="xml_download_filename" invisible="1" />

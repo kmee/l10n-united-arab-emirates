@@ -7,3 +7,7 @@ from odoo.exceptions import UserError
 
 class UaeDocumentValidationError(UserError):
     """The preserved document needs review before transport can proceed."""
+
+    def __init__(self, message, report=None):
+        super().__init__(message)
+        self.report = report
