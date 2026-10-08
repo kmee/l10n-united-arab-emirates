@@ -15,6 +15,259 @@ from odoo.addons.account.tests.common import AccountTestInvoicingCommon
 
 @tagged("post_install", "-at_install")
 class TestUaeSelfBillingInbound(AccountTestInvoicingCommon):
+    def test_margin_selfbilling_partial_credit_preserves_roles_and_originals(self):
+        # Independently worked representation:1000/N5/VAT0 original,
+        # quarter adjustment250. Agreements define buyer and supplier roles.
+        supplier = self.env.company
+        journal = self.buyer_data["default_journal_purchase"]
+        journal.is_self_billing = True
+        purchase_tax = self.buyer_data["default_tax_purchase"].copy(
+            {
+                "name": "Synthetic self-billed Margin purchase",
+                "amount": 0,
+                "ubl_cii_tax_category_code": "N",
+                "l10n_ae_edi_additional_vat_rate": 5,
+            }
+        )
+        sale_tax = self.tax_sale_a.copy(
+            {
+                "name": "Synthetic self-billed Margin sale",
+                "amount": 0,
+                "ubl_cii_tax_category_code": "N",
+                "l10n_ae_edi_additional_vat_rate": 5,
+            }
+        )
+        buyer_agreement = self.env["l10n_ae.selfbilling.agreement"].create(
+            {
+                "name": "SYNTH-MARGIN-AGREEMENT",
+                "company_id": self.buyer.id,
+                "partner_id": supplier.partner_id.id,
+                "start_date": "2026-01-01",
+                "scope": "Synthetic reviewed representation and adjustments",
+                "onboarding_reference": "SYNTH-MARGIN-SUPPLIER",
+            }
+        )
+        supplier_agreement = self.env["l10n_ae.selfbilling.agreement"].create(
+            {
+                "name": "SYNTH-MARGIN-AGREEMENT",
+                "company_id": supplier.id,
+                "partner_id": self.buyer.partner_id.id,
+                "local_role": "supplier",
+                "start_date": "2026-01-01",
+                "scope": "Synthetic reviewed representation and adjustments",
+                "onboarding_reference": "SYNTH-MARGIN-BUYER",
+            }
+        )
+        self.assertTrue(buyer_agreement.active and supplier_agreement.active)
+        self.assertEqual(buyer_agreement.local_role, "buyer")
+        self.assertEqual(supplier_agreement.local_role, "supplier")
+        buyer_manager = new_test_user(
+            self.env,
+            login="uae-margin-selfbilling-buyer-manager",
+            groups="account.group_account_manager",
+            company_id=self.buyer.id,
+            company_ids=[Command.set(self.buyer.ids)],
+        )
+        source_binding = self.env["l10n_ae.edi.binding"].create(
+            {
+                "name": "Synthetic Margin self-billing issuer",
+                "company_id": self.buyer.id,
+                "fiscal_uuid_policy": "controlled_local",
+            }
+        )
+        receiver_binding = self.env["l10n_ae.edi.binding"].create(
+            {"name": "Synthetic Margin supplier receiver"}
+        )
+        original = (
+            self.env["account.move"]
+            .with_user(buyer_manager)
+            .with_company(self.buyer)
+            .create(
+                {
+                    "move_type": "in_invoice",
+                    "journal_id": journal.id,
+                    "partner_id": supplier.partner_id.id,
+                    "invoice_date": "2026-10-02",
+                    "l10n_ae_binding_id": source_binding.id,
+                    "l10n_ae_selfbilling_agreement_id": buyer_agreement.id,
+                    "l10n_ae_margin_scheme": True,
+                    "invoice_line_ids": [
+                        Command.create(
+                            {
+                                "name": "Synthetic reviewed Margin representation",
+                                "price_unit": 1000,
+                                "account_id": self.buyer_data[
+                                    "default_account_expense"
+                                ].id,
+                                "tax_ids": [Command.set(purchase_tax.ids)],
+                            }
+                        )
+                    ],
+                }
+            )
+        )
+        self.assertFalse(original.env.su)
+        original.action_post()
+        original.action_l10n_ae_prepare()
+        report = original.validate_l10n_ae_pint()
+        self.assertTrue(report["valid"], report)
+        original_xml = original.preview_l10n_ae_pint().encode()
+        original_tree = etree.fromstring(original_xml)
+        self.assertEqual(original_tree.findtext("./{*}InvoiceTypeCode"), "389")
+        self.assertEqual(original_tree.findtext("./{*}ProfileExecutionID"), "00100000")
+        self.assertEqual(
+            original_tree.findtext("./{*}CustomizationID"),
+            "urn:peppol:pint:selfbilling-1@ae-1",
+        )
+        self.assertEqual(
+            original_tree.findtext(
+                "./{*}AccountingSupplierParty/{*}Party/{*}EndpointID"
+            ),
+            "1000000001",
+        )
+        self.assertEqual(
+            original_tree.findtext(
+                "./{*}AccountingCustomerParty/{*}Party/{*}EndpointID"
+            ),
+            "1000000006",
+        )
+        inboxes = self.env["l10n_ae.edi.inbox"].with_user(self.simple_accountman)
+        received_original = inboxes.receive_controlled_document(
+            receiver_binding.id, "margin-selfbilling-original", original_xml
+        )
+        self.assertTrue(
+            received_original.action_process(), received_original.diagnostic
+        )
+        sale = received_original.move_id
+        self.assertEqual((sale.move_type, sale.state), ("out_invoice", "draft"))
+        self.assertEqual(sale.company_id, supplier)
+        self.assertEqual(sale.partner_id, self.buyer.partner_id)
+        self.assertEqual(sale.l10n_ae_selfbilling_agreement_id, supplier_agreement)
+        self.assertEqual(sale.l10n_ae_received_process, "selfbilling")
+        self.assertTrue(sale.l10n_ae_margin_scheme)
+        self.assertEqual(sale.invoice_line_ids.tax_ids, sale_tax)
+        self.assertEqual(
+            (sale.amount_untaxed, sale.amount_tax, sale.amount_total), (1000, 0, 1000)
+        )
+        self.assertFalse(sale.l10n_ae_transmission_ids)
+        reversal = (
+            self.env["account.move.reversal"]
+            .with_user(buyer_manager)
+            .with_company(self.buyer)
+            .with_context(active_model="account.move", active_ids=original.ids)
+            .create(
+                {
+                    "move_ids": [Command.set(original.ids)],
+                    "journal_id": journal.id,
+                    "date": "2026-10-03",
+                    "reason": "Synthetic quarter adjustment",
+                    "l10n_ae_credit_reason": "DL8.61.1.C",
+                }
+            )
+        )
+        reversal.refund_moves()
+        credit = reversal.new_move_ids
+        self.assertFalse(credit.env.su)
+        self.assertEqual(credit.move_type, "in_refund")
+        self.assertTrue(credit.l10n_ae_margin_scheme)
+        self.assertEqual(credit.l10n_ae_selfbilling_agreement_id, buyer_agreement)
+        self.assertEqual(credit.reversed_entry_id, original)
+        credit.invoice_line_ids.write({"quantity": 0.25})
+        credit.l10n_ae_binding_id = source_binding
+        credit.action_post()
+        ledger_fields = [
+            "account_id",
+            "debit",
+            "credit",
+            "amount_currency",
+            "tax_ids",
+            "create_date",
+            "write_date",
+        ]
+        original_ledger = original.line_ids.read(ledger_fields)
+        credit_ledger = credit.line_ids.read(ledger_fields)
+        sale_ledger = sale.line_ids.read(ledger_fields)
+        credit.action_l10n_ae_prepare()
+        report = credit.validate_l10n_ae_pint()
+        self.assertTrue(report["valid"], report)
+        content = credit.preview_l10n_ae_pint().encode()
+        tree = etree.fromstring(content)
+        self.assertEqual(tree.findtext("./{*}CreditNoteTypeCode"), "261")
+        self.assertEqual(
+            tree.findtext("./{*}CustomizationID"),
+            "urn:peppol:pint:selfbilling-1@ae-1",
+        )
+        self.assertEqual(
+            tree.findtext("./{*}AccountingSupplierParty/{*}Party/{*}EndpointID"),
+            "1000000001",
+        )
+        self.assertEqual(
+            tree.findtext("./{*}AccountingCustomerParty/{*}Party/{*}EndpointID"),
+            "1000000006",
+        )
+        self.assertEqual(tree.findtext("./{*}ProfileExecutionID"), "00100000")
+        self.assertEqual(
+            tree.findtext("./{*}BillingReference/{*}InvoiceDocumentReference/{*}ID"),
+            original.name,
+        )
+        self.assertEqual(
+            tree.findtext("./{*}DiscrepancyResponse/{*}ResponseCode"), "DL8.61.1.C"
+        )
+        self.assertEqual(
+            tree.findtext("./{*}TaxTotal/{*}TaxSubtotal/{*}TaxCategory/{*}ID"), "N"
+        )
+        self.assertEqual(
+            float(
+                tree.findtext("./{*}TaxTotal/{*}TaxSubtotal/{*}TaxCategory/{*}Percent")
+            ),
+            5,
+        )
+        self.assertEqual(float(tree.findtext("./{*}TaxTotal/{*}TaxAmount")), 0)
+        self.assertEqual(
+            float(tree.findtext("./{*}LegalMonetaryTotal/{*}TaxInclusiveAmount")), 250
+        )
+        received_credit = inboxes.receive_controlled_document(
+            receiver_binding.id, "margin-selfbilling-quarter", content
+        )
+        self.assertTrue(received_credit.action_process(), received_credit.diagnostic)
+        refund = received_credit.move_id
+        self.assertEqual((refund.move_type, refund.state), ("out_refund", "draft"))
+        self.assertEqual(refund.company_id, supplier)
+        self.assertEqual(refund.partner_id, self.buyer.partner_id)
+        self.assertEqual(refund.reversed_entry_id, sale)
+        self.assertEqual(refund.l10n_ae_selfbilling_agreement_id, supplier_agreement)
+        self.assertEqual(refund.l10n_ae_received_process, "selfbilling")
+        self.assertEqual(refund.l10n_ae_credit_reason, "DL8.61.1.C")
+        self.assertTrue(refund.l10n_ae_margin_scheme)
+        self.assertEqual(refund.invoice_line_ids.tax_ids, sale_tax)
+        self.assertEqual(
+            (refund.amount_untaxed, refund.amount_tax, refund.amount_total),
+            (250, 0, 250),
+        )
+        self.assertFalse(refund.l10n_ae_transmission_ids)
+        refund_ledger = refund.line_ids.read(ledger_fields)
+        purchase_tax.l10n_ae_edi_additional_vat_rate = 7
+        sale_tax.l10n_ae_edi_additional_vat_rate = 7
+        replay = inboxes.receive_controlled_document(
+            receiver_binding.id, "margin-selfbilling-quarter", content
+        )
+        self.assertEqual(replay, received_credit)
+        self.assertTrue(replay.action_process(), replay.diagnostic)
+        self.assertEqual(replay.move_id, refund)
+        self.assertEqual(received_original.original_xml.content, original_xml)
+        self.assertEqual(received_credit.original_xml.content, content)
+        self.assertEqual(received_credit.xml_hash, hashlib.sha256(content).hexdigest())
+        self.assertEqual(original.preview_l10n_ae_pint().encode(), original_xml)
+        self.assertEqual(credit.preview_l10n_ae_pint().encode(), content)
+        for move, ledger in [
+            (original, original_ledger),
+            (credit, credit_ledger),
+            (sale, sale_ledger),
+            (refund, refund_ledger),
+        ]:
+            self.assertEqual(move.line_ids.read(ledger_fields), ledger)
+        self.assertEqual((purchase_tax.amount, sale_tax.amount), (0, 0))
+
     def test_free_zone_margin_credit_roundtrip_preserves_beneficiary_and_originals(
         self,
     ):
