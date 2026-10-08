@@ -17,6 +17,7 @@ from ..tools.validation import (
     describe_ruleset,
 )
 from .account_tax import UAE_EXEMPTION_REASONS
+from .account_payment_method import UAE_PAYMENT_MEANS
 
 
 class AccountMove(models.Model):
@@ -64,7 +65,10 @@ class AccountMove(models.Model):
         self.ensure_one()
         method = self.preferred_payment_method_line_id
         journal = method.journal_id
-        if not method:
+        configured_code = method.l10n_ae_edi_payment_means_code
+        if configured_code:
+            code, name = configured_code, dict(UAE_PAYMENT_MEANS)[configured_code]
+        elif not method:
             code, name = "1", "Instrument not defined"
         elif journal.type == "cash":
             code, name = "10", "In cash"
@@ -83,7 +87,7 @@ class AccountMove(models.Model):
                     "Review the native invoice recipient bank before preparation."
                 )
             )
-        return {
+        instruction = {
             "code": code,
             "name": name,
             "payment_reference": self.payment_reference or self.name,
@@ -94,6 +98,9 @@ class AccountMove(models.Model):
             "account_id": account.id or None,
             "account_identifier": identifier,
         }
+        if configured_code:
+            instruction["configured_code"] = configured_code
+        return instruction
 
     def _l10n_ae_snapshot(self):
         snapshot = super()._l10n_ae_snapshot()
