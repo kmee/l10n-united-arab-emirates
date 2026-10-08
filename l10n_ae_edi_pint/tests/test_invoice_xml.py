@@ -88,7 +88,7 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         )
         grouped = {
             key: alert
-            for key, alert in wizard.alerts.items()
+            for key, alert in (wizard.alerts or {}).items()
             if key.startswith("l10n_ae_edi_")
         }
         self.assertEqual(len(grouped), 1)
