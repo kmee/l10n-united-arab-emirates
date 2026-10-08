@@ -15,6 +15,55 @@ from odoo.addons.account.tests.common import AccountTestInvoicingCommon
 
 @tagged("post_install", "-at_install")
 class TestUaeSelfBillingInbound(AccountTestInvoicingCommon):
+    def test_received_frequency_absence_is_not_inferred_from_local_term(self):
+        source, _agreement, binding = self._selfbilling_fixture()
+        source.l10n_ae_billing_frequency_code = False
+        content = source.preview_l10n_ae_pint().encode()
+        self.assertIsNone(etree.fromstring(content).find("./{*}InvoicePeriod"))
+        term = self.env["account.payment.term"].create(
+            {
+                "name": "Synthetic local term with monthly cadence",
+                "company_id": self.env.company.id,
+                "l10n_ae_billing_frequency_code": "MTH",
+                "line_ids": [Command.create({"value": "percent", "value_amount": 100})],
+            }
+        )
+        self.buyer.partner_id.with_company(
+            self.env.company
+        ).property_payment_term_id = term
+        manager = new_test_user(
+            self.env,
+            login="uae-received-frequency-absence",
+            groups="account.group_account_manager",
+            company_id=self.env.company.id,
+            company_ids=[Command.set(self.env.company.ids)],
+        )
+        inboxes = (
+            self.env["l10n_ae.edi.inbox"]
+            .with_user(manager)
+            .with_company(self.env.company)
+        )
+        inbox = inboxes.receive_controlled_document(
+            binding.id, "selfbilling-no-frequency", content
+        )
+        self.assertTrue(inbox.action_process(), inbox.diagnostic)
+        received = inbox.move_id
+        self.assertEqual(received.invoice_payment_term_id, term)
+        self.assertFalse(received.l10n_ae_billing_frequency_code)
+        self.assertFalse(received.l10n_ae_billing_frequency_note)
+        self.assertTrue(received.l10n_ae_received_document)
+        self.assertFalse(received.env.su)
+        self.assertEqual(inbox.original_xml.content, content)
+        term.l10n_ae_billing_frequency_code = "WKY"
+        replay = inboxes.receive_controlled_document(
+            binding.id, "selfbilling-no-frequency", content
+        )
+        self.assertEqual(replay, inbox)
+        self.assertTrue(replay.action_process(), replay.diagnostic)
+        self.assertEqual(replay.move_id, received)
+        self.assertFalse(received.l10n_ae_billing_frequency_code)
+        self.assertEqual(replay.original_xml.content, content)
+
     def test_received_other_frequency_keeps_original_note_as_declared(self):
         source, _agreement, binding = self._selfbilling_fixture()
         source.write(
