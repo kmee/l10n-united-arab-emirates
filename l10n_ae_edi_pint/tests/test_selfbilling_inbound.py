@@ -55,7 +55,11 @@ class TestUaeSelfBillingInbound(AccountTestInvoicingCommon):
         self.buyer.partner_id.with_company(
             self.env.company
         ).property_payment_term_id = local_term
-        original = source.with_user(buyer_manager).with_company(self.buyer)
+        original = (
+            source.with_context(allowed_company_ids=self.buyer.ids)
+            .with_user(buyer_manager)
+            .with_company(self.buyer)
+        )
         buyer_agreement = original.l10n_ae_selfbilling_agreement_id
         original.write(
             {
@@ -87,6 +91,7 @@ class TestUaeSelfBillingInbound(AccountTestInvoicingCommon):
         original_frozen = original_issue.read(immutable)
         reversal = (
             self.env["account.move.reversal"]
+            .with_context(allowed_company_ids=self.buyer.ids)
             .with_user(buyer_manager)
             .with_company(self.buyer)
             .with_context(active_model="account.move", active_ids=original.ids)
