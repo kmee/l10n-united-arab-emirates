@@ -13,6 +13,7 @@ from . import account_move
 from . import ir_actions_report
 from . import account_move_line
 from . import credit_reference
+from . import edi_capability
 from . import edi_binding
 from . import edi_transmission
 from . import edi_attempt

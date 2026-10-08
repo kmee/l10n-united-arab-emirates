@@ -5,6 +5,15 @@
         <field name="model">l10n_ae.edi.binding</field>
         <field name="arch" type="xml">
             <form string="UAE Provider Binding">
+                <header>
+                    <button
+                        name="action_review_capabilities"
+                        type="object"
+                        string="Review Contract Capabilities"
+                        groups="account.group_account_manager"
+                        invisible="environment != 'sandbox'"
+                    />
+                </header>
                 <sheet>
                     <group>
                         <field name="name" />
@@ -13,6 +22,17 @@
                         <field name="provider" />
                         <field name="environment" />
                         <field name="fiscal_uuid_policy" />
+                        <field name="capability_profile" />
+                        <field
+                            name="capability_ids"
+                            widget="many2many_tags"
+                            options="{'no_create': True, 'no_create_edit': True}"
+                        />
+                        <field name="capability_review_note" />
+                        <field name="capability_review_state" />
+                        <field name="capability_reviewed_by" />
+                        <field name="capability_reviewed_at" />
+                        <field name="capability_review_hash" invisible="1" />
                         <field
                             name="controlled_dispatch_enabled"
                             invisible="environment != 'sandbox'"

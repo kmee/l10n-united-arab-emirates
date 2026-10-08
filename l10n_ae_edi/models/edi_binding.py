@@ -1,5 +1,7 @@
 # Copyright 2026 KMEE
 # License AGPL-3.0 or later (https://www.gnu.org/licenses/agpl).
+import hashlib
+import json
 import os
 
 from odoo import api, fields, models
@@ -11,6 +13,27 @@ from ..tools.controlled_executor import ControlledExecutor
 SCHEDULED_DIAGNOSTIC_FIELDS = {
     "controlled_dispatch_error",
     "controlled_dispatch_error_at",
+}
+CAPABILITY_REVIEW_FIELDS = {
+    "capability_reviewed_by",
+    "capability_reviewed_at",
+    "capability_review_hash",
+    "capability_review_state",
+}
+CAPABILITY_DECLARATION_FIELDS = {
+    "company_id",
+    "provider",
+    "environment",
+    "fiscal_uuid_policy",
+    "capability_profile",
+    "capability_ids",
+    "capability_review_note",
+}
+OUTBOUND_CAPABILITIES = {
+    "billing_invoice",
+    "billing_credit",
+    "selfbilling_invoice",
+    "selfbilling_credit",
 }
 
 
@@ -65,6 +88,157 @@ class UaeEdiBinding(models.Model):
         help="Local UUID assignment is available only in the controlled sandbox. "
         "Production UUID allocation requires a verified ASP contract.",
     )
+    capability_profile = fields.Selection(
+        [("kmee-controlled-1", "KMEE Controlled Contract v1")],
+        string="Capability Contract Profile",
+        copy=False,
+        help="A local simulation contract, not verified ClearTax or Suntech support.",
+    )
+    capability_ids = fields.Many2many(
+        "l10n_ae.edi.capability", string="Declared Contract Capabilities", copy=False
+    )
+    capability_review_note = fields.Text(
+        string="Contract Capability Review Note", copy=False
+    )
+    capability_reviewed_by = fields.Many2one("res.users", readonly=True, copy=False)
+    capability_reviewed_at = fields.Datetime(readonly=True, copy=False)
+    capability_review_hash = fields.Char(readonly=True, copy=False)
+    capability_review_state = fields.Selection(
+        [
+            ("review", "Requires Contract Review"),
+            ("ready", "Reviewed Simulation Contract"),
+        ],
+        compute="_compute_capability_review_state",
+    )
+
+    def _capability_facts(self):
+        self.ensure_one()
+        return {
+            "company_id": self.company_id.id,
+            "provider": self.provider,
+            "environment": self.environment,
+            "uuid_policy": self.fiscal_uuid_policy,
+            "profile": self.capability_profile or None,
+            "capabilities": sorted(self.capability_ids.mapped("code")),
+            "review_note": self.capability_review_note or None,
+        }
+
+    def _capability_fingerprint(self):
+        return hashlib.sha256(
+            json.dumps(
+                self._capability_facts(), sort_keys=True, separators=(",", ":")
+            ).encode()
+        ).hexdigest()
+
+    @api.depends(
+        "company_id",
+        "provider",
+        "environment",
+        "fiscal_uuid_policy",
+        "capability_profile",
+        "capability_ids.code",
+        "capability_review_note",
+        "capability_review_hash",
+    )
+    def _compute_capability_review_state(self):
+        for binding in self:
+            binding.capability_review_state = (
+                "ready"
+                if binding.capability_review_hash
+                and binding.capability_review_hash == binding._capability_fingerprint()
+                else "review"
+            )
+
+    def _check_capability_reviewer(self):
+        principal = self.env.user.with_user(self.env.uid)
+        if (
+            not principal.active
+            or principal.share
+            or not principal.has_group("account.group_account_manager")
+        ):
+            raise AccessError(
+                self.env._("An active accounting capability reviewer is required.")
+            )
+        self.with_user(self.env.uid).check_access("write")
+        if any(
+            binding.company_id not in principal.company_ids
+            or binding.company_id not in self.env.companies
+            for binding in self
+        ):
+            raise AccessError(
+                self.env._("Review capabilities only for an authorized active company.")
+            )
+
+    def _lock_capability_contract(self):
+        if self:
+            self.env.cr.execute(
+                "SELECT id FROM l10n_ae_edi_binding "
+                "WHERE id IN %s ORDER BY id FOR UPDATE",
+                (tuple(self.ids),),
+            )
+            self.invalidate_recordset()
+
+    def action_review_capabilities(self):
+        self.ensure_one()
+        self._check_capability_reviewer()
+        self._lock_capability_contract()
+        self._check_capability_reviewer()
+        if (
+            self.environment != "sandbox"
+            or self.capability_profile != "kmee-controlled-1"
+        ):
+            raise ValidationError(
+                self.env._("Select the controlled sandbox capability contract.")
+            )
+        if not self.capability_ids or not (self.capability_review_note or "").strip():
+            raise ValidationError(
+                self.env._("Declare capabilities and record the contract review note.")
+            )
+        return super().write(
+            {
+                "capability_reviewed_by": self.env.uid,
+                "capability_reviewed_at": fields.Datetime.now(),
+                "capability_review_hash": self._capability_fingerprint(),
+            }
+        )
+
+    def _require_sending_capabilities(self):
+        self.ensure_one()
+        self.with_user(self.env.uid).check_access("read")
+        if self.capability_review_state != "ready":
+            raise ValidationError(
+                self.env._(
+                    "Review the binding's contract capabilities "
+                    "before enabling sending."
+                )
+            )
+        codes = set(self.capability_ids.mapped("code"))
+        missing = {"submit", "lookup", "report"} - codes
+        if missing:
+            raise ValidationError(
+                self.env._(
+                    "Missing required sending capabilities: %s.",
+                    ", ".join(sorted(missing)),
+                )
+            )
+        if not codes.intersection(OUTBOUND_CAPABILITIES):
+            raise ValidationError(
+                self.env._(
+                    "Declare at least one outbound document capability "
+                    "before enabling sending."
+                )
+            )
+
+    @api.constrains(
+        "controlled_dispatch_enabled",
+        "capability_review_hash",
+        "capability_ids",
+        "capability_profile",
+    )
+    def _check_sending_capabilities(self):
+        for binding in self.filtered("controlled_dispatch_enabled"):
+            binding._check_capability_reviewer()
+            binding._require_sending_capabilities()
 
     @api.constrains("fiscal_uuid_policy", "environment")
     def _check_fiscal_uuid_policy(self):
@@ -169,6 +343,11 @@ class UaeEdiBinding(models.Model):
 
     @api.model_create_multi
     def create(self, vals_list):
+        review_defaults = self.default_get(sorted(CAPABILITY_REVIEW_FIELDS))
+        if any(
+            CAPABILITY_REVIEW_FIELDS.intersection(vals) for vals in vals_list
+        ) or any(review_defaults.values()):
+            raise UserError(self.env._("Use the contract capability review action."))
         checkpoint_defaults = self.default_get(sorted(SCHEDULED_DIAGNOSTIC_FIELDS))
         if any(
             any(
@@ -205,6 +384,22 @@ class UaeEdiBinding(models.Model):
         return super().create(vals_list)
 
     def write(self, vals):
+        if CAPABILITY_REVIEW_FIELDS.intersection(vals):
+            raise UserError(self.env._("Use the contract capability review action."))
+        if CAPABILITY_DECLARATION_FIELDS.intersection(vals) or vals.get(
+            "controlled_dispatch_enabled"
+        ):
+            self.with_user(self.env.uid).check_access("write")
+            self._lock_capability_contract()
+            self.with_user(self.env.uid).check_access("write")
+        if CAPABILITY_DECLARATION_FIELDS.intersection(vals):
+            vals = {
+                **vals,
+                "capability_reviewed_by": False,
+                "capability_reviewed_at": False,
+                "capability_review_hash": False,
+                "controlled_dispatch_enabled": False,
+            }
         if SCHEDULED_DIAGNOSTIC_FIELDS.intersection(vals):
             raise UserError(
                 self.env._(

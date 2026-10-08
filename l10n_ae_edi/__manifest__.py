@@ -3,7 +3,7 @@
 {
     "name": "UAE Electronic Invoicing",
     "summary": "Validate UAE identity and freeze electronic invoice evidence",
-    "version": "20.0.1.63.0",
+    "version": "20.0.1.64.0",
     "development_status": "Alpha",
     "category": "Accounting/Localizations",
     "author": "KMEE",
@@ -14,6 +14,7 @@
         "security/edi_groups.xml",
         "security/ir.access.csv",
         "security/edi_security.xml",
+        "data/edi_capabilities.xml",
         "data/ir_cron.xml",
         "views/edi_binding_views.xml",
         "views/edi_audit_views.xml",

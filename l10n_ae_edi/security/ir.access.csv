@@ -1,4 +1,5 @@
 id,name,model_id,group_id/id,operation,domain
+access_uae_capability_reader,Controlled UAE contract vocabulary reader,l10n_ae.edi.capability,base.group_user,r,
 access_cbuae_rate_review_manager,CBUAE native rate reviewer,l10n_ae.cbuae.rate.review,account.group_account_manager,crud,
 access_cbuae_rate_review_reader,CBUAE native rate review reader,l10n_ae.cbuae.rate.review,account.group_account_readonly,r,
 access_cbuae_rate_review_invoice,CBUAE native rate invoice reader,l10n_ae.cbuae.rate.review,account.group_account_invoice,r,

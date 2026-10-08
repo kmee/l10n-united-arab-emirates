@@ -15,9 +15,11 @@ class TestUaeProviderBinding(AccountTestInvoicingCommon):
         super().setUpClass()
 
     def test_manager_reviews_contract_capabilities_before_enabling_sending(self):
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {"name": "Synthetic explicitly reviewed sending contract"}
-        ).with_user(self.simple_accountman)
+        binding = (
+            self.env["l10n_ae.edi.binding"]
+            .create({"name": "Synthetic explicitly reviewed sending contract"})
+            .with_user(self.simple_accountman)
+        )
         self.assertFalse(binding.env.su)
         with (
             self.assertRaisesRegex(ValidationError, "Review.*capabilities"),
