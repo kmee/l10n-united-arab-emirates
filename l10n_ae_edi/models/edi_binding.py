@@ -229,6 +229,18 @@ class UaeEdiBinding(models.Model):
                 )
             )
 
+    def _require_receiving_capabilities(self):
+        self.ensure_one()
+        self.with_user(self.env.uid).check_access("read")
+        self._lock_capability_contract()
+        self.with_user(self.env.uid).check_access("read")
+        if self.capability_review_state != "ready":
+            raise ValidationError(
+                self.env._(
+                    "Review the binding's contract capabilities before receiving."
+                )
+            )
+
     def _require_document_capability(self, process, credit):
         self._require_sending_capabilities()
         self._lock_capability_contract()
