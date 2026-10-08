@@ -229,6 +229,17 @@ class UaeEdiBinding(models.Model):
                 )
             )
 
+    def _require_document_capability(self, process, credit):
+        self._require_sending_capabilities()
+        self._lock_capability_contract()
+        self._require_sending_capabilities()
+        document = "credit" if credit else "invoice"
+        code = f"{process}_{document}"
+        if code not in self.capability_ids.mapped("code"):
+            raise ValidationError(
+                self.env._("The reviewed binding contract does not support %s.", code)
+            )
+
     @api.constrains(
         "controlled_dispatch_enabled",
         "capability_review_hash",

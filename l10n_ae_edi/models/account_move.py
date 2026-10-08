@@ -1202,6 +1202,10 @@ class AccountMove(models.Model):
                         "Only the controlled sandbox contract is currently available."
                     )
                 )
+            binding._require_document_capability(
+                "selfbilling" if self.is_self_billing else "billing",
+                self.move_type in ("out_refund", "in_refund"),
+            )
             with self.env.cr.savepoint():
                 if not self.l10n_ae_binding_id:
                     # Internal provider selection is metadata. Preserve the
