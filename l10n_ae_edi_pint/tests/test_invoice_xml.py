@@ -10528,6 +10528,15 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         bill, agreement = self._selfbilling_bill_with_agreement()
         binding = bill.l10n_ae_binding_id
         binding.fiscal_uuid_policy = "controlled_local"
+        review_controlled_binding(
+            binding,
+            self.simple_accountman,
+            capabilities=CONTROLLED_CAPABILITIES,
+            note=(
+                "Synthetic controlled self-billing invoice and credit contract; "
+                "reviewed again after selecting controlled_local UUID policy."
+            ),
+        )
         bill.l10n_ae_fiscal_uuid = False
         self.env.company.write(
             {"l10n_ae_edi_auto_prepare": True, "l10n_ae_edi_binding_id": binding.id}
@@ -11511,11 +11520,19 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
                 "rate": 1 / 3.6725,
             }
         )
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {
-                "name": "Synthetic automatic USD billing",
-                "fiscal_uuid_policy": "controlled_local",
-            }
+        binding = review_controlled_binding(
+            self.env["l10n_ae.edi.binding"].create(
+                {
+                    "name": "Synthetic automatic USD billing",
+                    "fiscal_uuid_policy": "controlled_local",
+                }
+            ),
+            self.simple_accountman,
+            capabilities=CONTROLLED_CAPABILITIES,
+            note=(
+                "Synthetic controlled contract for test_usd_billing_batch_preserves_"
+                "native_fx_and_refuses_unreviewed_tax_date."
+            ),
         )
         billing = (
             self.env["l10n_ae.edi.billing"]
@@ -11653,11 +11670,19 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         journal = self.env["account.journal"].search(
             [("company_id", "=", company.id), ("type", "=", "sale")], limit=1
         )
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {
-                "name": "Synthetic Summary billing sandbox",
-                "fiscal_uuid_policy": "controlled_local",
-            }
+        binding = review_controlled_binding(
+            self.env["l10n_ae.edi.binding"].create(
+                {
+                    "name": "Synthetic Summary billing sandbox",
+                    "fiscal_uuid_policy": "controlled_local",
+                }
+            ),
+            self.simple_accountman,
+            capabilities=CONTROLLED_CAPABILITIES,
+            note=(
+                "Synthetic controlled contract for "
+                "test_billing_summary_period_survives_submission_replay_and_conflict."
+            ),
         )
         billing = (
             self.env["l10n_ae.edi.billing"]

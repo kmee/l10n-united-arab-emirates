@@ -11,6 +11,10 @@ from odoo.tests import Form, tagged
 from odoo.tests.common import new_test_user
 
 from odoo.addons.account.tests.common import AccountTestInvoicingCommon
+from odoo.addons.l10n_ae_edi.tests.common import (
+    CONTROLLED_CAPABILITIES,
+    review_controlled_binding,
+)
 
 
 @tagged("post_install", "-at_install")
@@ -236,6 +240,15 @@ class TestUaeReceivedRetention(AccountTestInvoicingCommon):
         )
 
     def test_issued_package_keeps_original_bytes_when_retention_is_reviewed(self):
+        review_controlled_binding(
+            self.binding,
+            self.simple_accountman,
+            capabilities=CONTROLLED_CAPABILITIES,
+            note=(
+                "Synthetic controlled invoice contract for test_issued_package_keeps_"
+                "original_bytes_when_retention_is_reviewed."
+            ),
+        )
         invoice = self.init_invoice(
             "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
         )
@@ -345,6 +358,15 @@ class TestUaeReceivedRetention(AccountTestInvoicingCommon):
         invoice = self.init_invoice(
             "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
         )
+        review_controlled_binding(
+            self.binding,
+            self.simple_accountman,
+            capabilities=CONTROLLED_CAPABILITIES,
+            note=(
+                "Synthetic controlled invoice contract for "
+                "test_source_defaults_cannot_attach_a_second_original."
+            ),
+        )
         invoice.l10n_ae_binding_id = self.binding
         invoice.action_l10n_ae_prepare()
         issue = invoice.l10n_ae_transmission_id
@@ -421,6 +443,15 @@ class TestUaeReceivedRetention(AccountTestInvoicingCommon):
         )
         invoice = self.init_invoice(
             "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
+        )
+        review_controlled_binding(
+            self.binding,
+            self.simple_accountman,
+            capabilities=CONTROLLED_CAPABILITIES,
+            note=(
+                "Synthetic controlled invoice contract for "
+                "test_saved_default_cannot_link_received_original_to_an_issued_policy."
+            ),
         )
         invoice.l10n_ae_binding_id = self.binding
         invoice.action_l10n_ae_prepare()
