@@ -9,7 +9,7 @@ import requests
 from lxml import html
 
 from odoo import api, fields, models
-from odoo.exceptions import UserError
+from odoo.exceptions import AccessError, UserError
 from odoo.tools.binary import BinaryBytes
 
 
@@ -62,20 +62,50 @@ class CbuaePublication(models.Model):
         "quotes",
     }
 
+    def _check_actor(self, operation):
+        principal = self.env.user.with_user(self.env.uid)
+        if (
+            not principal.active
+            or principal.share
+            or not principal.has_group("account.group_account_manager")
+        ):
+            raise AccessError(
+                self.env._("An active CBUAE company reviewer is required.")
+            )
+        self.with_user(self.env.uid).check_access(operation)
+        for record in self:
+            self._check_capture_company(record.company_id)
+
+    def _check_capture_company(self, company):
+        principal = self.env.user.with_user(self.env.uid)
+        if (
+            len(company) != 1
+            or company.id not in principal.company_ids.ids
+            or company.id not in self.with_user(self.env.uid).env.companies.ids
+        ):
+            raise AccessError(self.env._("This CBUAE company is not accessible."))
+
     @api.model_create_multi
     def create(self, vals_list):
+        self._check_actor("create")
         prepared = []
         for values in vals_list:
             if self._captured_fields.intersection(values):
                 raise UserError(self.env._("Use the CBUAE capture action."))
             vals = dict(values)
+            company_id = vals.get(
+                "company_id", self.default_get(["company_id"]).get("company_id")
+            )
+            company = self.env["res.company"].browse(company_id).exists()
+            self._check_capture_company(company)
+            vals["company_id"] = company.id
             vals.update(dict.fromkeys(self._captured_fields, False))
             vals["state"] = "draft"
             prepared.append(vals)
         return super().create(prepared)
 
     def write(self, vals):
-        self.check_access("write")
+        self._check_actor("write")
         self._lock_capture()
         if self._captured_fields.union({"company_id"}).intersection(vals):
             raise UserError(
@@ -87,7 +117,7 @@ class CbuaePublication(models.Model):
 
     @api.ondelete(at_uninstall=False)
     def _unlink_except_completed_capture(self):
-        self.check_access("unlink")
+        self._check_actor("unlink")
         self._lock_capture()
         if self.filtered(lambda record: record.state != "draft"):
             raise UserError(
@@ -105,7 +135,7 @@ class CbuaePublication(models.Model):
 
     def action_capture(self):
         self.ensure_one()
-        self.check_access("write")
+        self._check_actor("write")
         self._lock_capture()
         if self.state != "draft":
             return True
