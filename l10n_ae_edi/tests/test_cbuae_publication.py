@@ -3,7 +3,8 @@
 from pathlib import Path
 from unittest.mock import patch
 
-from requests import Response
+from requests import ConnectionError as RequestConnectionError
+from requests import ReadTimeout, Response
 
 from odoo.exceptions import AccessError, UserError
 from odoo.tests import Form, tagged
@@ -348,6 +349,55 @@ class TestCbuaePublication(AccountTestInvoicingCommon):
                 self.assertEqual(publication.http_status, status)
                 self.assertEqual(publication.content_type, mime)
                 self.assertEqual(publication.source_url, actual_url)
+        self.assertEqual(self.env["res.currency.rate"].search([]), rates)
+        self.assertEqual(
+            rates.read(["name", "rate", "company_id", "currency_id", "write_date"]),
+            before,
+        )
+
+    def test_transport_failure_retains_partial_source_and_safe_diagnostic(self):
+        class InterruptedResponse(Response):
+            def iter_content(self, chunk_size=1, decode_unicode=False):
+                yield b"partial publication"
+                raise ReadTimeout("credential-like-secret")
+
+        model = self.env["l10n_ae.cbuae.publication"].with_user(self.simple_accountman)
+        response = InterruptedResponse()
+        response.status_code = 200
+        response.url = (
+            "https://centralbank.ae/umbraco/Surface/Exchange/"
+            "GetExchangeRateAllCurrencyDate?dateTime=2026-08-26"
+        )
+        response.headers["Content-Type"] = "text/html; charset=utf-8"
+        response._content_consumed = True
+        rates = self.env["res.currency.rate"].search([])
+        before = rates.read(["name", "rate", "company_id", "currency_id", "write_date"])
+        for label, options, expected_body in (
+            ("ReadTimeout", {"return_value": response}, b"partial publication"),
+            (
+                "ConnectionError",
+                {"side_effect": RequestConnectionError("credential-like-secret")},
+                b"",
+            ),
+        ):
+            with self.subTest(label=label):
+                publication = model.create({"requested_date": "2026-08-26"})
+                with patch("requests.get", **options):
+                    publication.action_capture()
+                self.assertEqual(publication.state, "error")
+                self.assertIn(label, publication.diagnostic)
+                self.assertNotIn("credential-like-secret", publication.diagnostic)
+                self.assertFalse(publication.source_complete)
+                self.assertEqual(
+                    publication.source_body.content if publication.source_body else b"",
+                    expected_body,
+                )
+                self.assertFalse(publication.quotes)
+                self.assertTrue(publication.retrieved_at)
+                self.assertEqual(publication.source_url, response.url)
+                with patch("requests.get") as http:
+                    publication.action_capture()
+                    http.assert_not_called()
         self.assertEqual(self.env["res.currency.rate"].search([]), rates)
         self.assertEqual(
             rates.read(["name", "rate", "company_id", "currency_id", "write_date"]),
