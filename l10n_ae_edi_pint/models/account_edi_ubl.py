@@ -16,6 +16,17 @@ class AccountEdiUblUae(models.AbstractModel):
     _inherit = "account.edi.ubl_pint"
     _description = "UAE PINT Billing"
 
+    def _ubl_add_issue_date_node(self, vals):
+        result = super()._ubl_add_issue_date_node(vals)
+        invoice = vals["invoice"]
+        if invoice.taxable_supply_date and (
+            invoice.taxable_supply_date != invoice.invoice_date
+        ):
+            vals["document_node"]["cbc:TaxPointDate"] = {
+                "_text": invoice.taxable_supply_date
+            }
+        return result
+
     def _ubl_add_notes_nodes(self, vals):
         result = super()._ubl_add_notes_nodes(vals)
         invoice = vals["invoice"]

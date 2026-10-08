@@ -8302,6 +8302,33 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
             ledger,
         )
 
+    def test_uae_vat_point_date_is_reviewed_in_native_invoice_form(self):
+        self.env.company.l10n_ae_edi_auto_prepare = False
+        binding = self.env["l10n_ae.edi.binding"].create(
+            {
+                "name": "Synthetic native VAT point date review",
+                "fiscal_uuid_policy": "controlled_local",
+            }
+        )
+        invoice = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a
+        ).with_user(self.simple_accountman)
+        self.assertFalse(invoice.env.su)
+        with Form(invoice) as form:
+            form.taxable_supply_date = "2018-12-31"
+            form.l10n_ae_binding_id = binding
+        self.assertEqual(str(invoice.taxable_supply_date), "2018-12-31")
+        invoice.action_post()
+        with self.assertRaisesRegex(AssertionError, "readonly field"):
+            Form(invoice).taxable_supply_date = "2019-01-02"
+        invoice.action_l10n_ae_prepare()
+        issue = invoice.l10n_ae_transmission_id
+        self.assertEqual(json.loads(issue.payload)["tax_point_date"], "2018-12-31")
+        tree = etree.fromstring(issue.xml_content.encode())
+        self.assertEqual(tree.findtext("cbc:TaxPointDate", namespaces=NS), "2018-12-31")
+        self.assertEqual(invoice.amount_total, 105)
+        self.assertTrue(invoice.validate_l10n_ae_pint()["valid"])
+
     def test_future_manual_quote_posts_in_review_until_date_repaired(
         self,
     ):
@@ -8362,6 +8389,7 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         self.assertEqual(exchange["rate"], "3.672500")
         self.assertEqual(exchange["date"], "2019-01-01")
         self.assertEqual(exchange["source"], "SYNTHETIC-UNVERIFIED-QUOTE")
+        self.assertEqual(json.loads(issue.payload).get("tax_point_date"), "2019-01-01")
         prepared = Form(invoice)
         self.assertEqual(
             prepared.l10n_ae_effective_tax_exchange_origin, "manual_unverified"
@@ -8376,6 +8404,14 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         self.assertEqual(invoice.amount_tax_signed, 18.36)
         self.assertEqual(invoice.amount_total_signed, 385.61)
         self.assertTrue(invoice.validate_l10n_ae_pint()["valid"])
+        frozen = issue.read(["payload", "payload_hash", "xml_content", "xml_hash"])
+        for value in ("2019-01-02", False):
+            with self.assertRaisesRegex(UserError, "frozen UAE"):
+                invoice.write({"taxable_supply_date": value})
+        invoice.action_l10n_ae_prepare()
+        self.assertEqual(
+            issue.read(["payload", "payload_hash", "xml_content", "xml_hash"]), frozen
+        )
         self.assertEqual(
             invoice.line_ids.read(
                 ["account_id", "debit", "credit", "amount_currency", "tax_ids"]
