@@ -1,6 +1,6 @@
 # Copyright 2026 KMEE
 # License AGPL-3.0 or later (https://www.gnu.org/licenses/agpl).
-from odoo.exceptions import ValidationError
+from odoo.exceptions import AccessError, ValidationError
 from odoo.tests import tagged
 from odoo.tests.common import new_test_user
 
@@ -102,6 +102,57 @@ class TestUaeReceiveCapabilities(AccountTestInvoicingCommon):
                     receiver.search_count([("binding_id", "=", binding.id)])
                 )
                 self.assertFalse(events.search_count([("binding_id", "=", binding.id)]))
+
+    def test_technical_receiver_uses_reviewed_contract_without_reviewing_it(self):
+        company = self.env.company
+        operator = new_test_user(
+            self.env,
+            login="uae-receive-capability-service",
+            groups="l10n_ae_edi_pint.group_document_receiver",
+            company_id=company.id,
+            company_ids=[(6, 0, company.ids)],
+        )
+        binding = (
+            self.env["l10n_ae.edi.binding"]
+            .with_user(self.manager)
+            .create({"name": "Synthetic technical receiver contract"})
+        )
+        caller_binding = binding.with_user(operator)
+        receiver = caller_binding.env["l10n_ae.edi.inbox"]
+        self.assertFalse(receiver.env.su)
+        self.assertFalse(operator.has_group("account.group_account_manager"))
+        with self.cr.savepoint(), self.assertRaises(AccessError):
+            caller_binding.action_review_capabilities()
+        with (
+            self.cr.savepoint(),
+            self.assertRaisesRegex(
+                ValidationError, "Review.*contract capabilities.*receiving"
+            ),
+        ):
+            receiver.receive_controlled_document(
+                binding.id, "synthetic-service-original", b"<Invoice/>"
+            )
+        self.assertFalse(receiver.search_count([("binding_id", "=", binding.id)]))
+        review_controlled_binding(
+            binding,
+            self.manager,
+            capabilities=("receive",),
+            note="Synthetic service receives after an ordinary manager's review.",
+        )
+        original = receiver.receive_controlled_document(
+            binding.id,
+            "synthetic-service-original",
+            b"<Invoice/>",
+            event_id="synthetic-service-delivery",
+        )
+        self.assertEqual(original.original_xml.content, b"<Invoice/>")
+        self.assertEqual(original.state, "received")
+        self.assertFalse(original.move_id)
+        self.assertEqual(original.binding_id.capability_reviewed_by, self.manager)
+        with self.cr.savepoint(), self.assertRaises(AccessError):
+            original.action_process()
+        self.assertEqual(original.state, "received")
+        self.assertFalse(original.move_id)
 
     def test_reviewed_contract_without_receive_refuses_new_original_and_event(self):
         company = self.env.company
