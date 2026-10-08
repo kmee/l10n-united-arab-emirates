@@ -149,6 +149,20 @@ class AccountEdiUblUae(models.AbstractModel):
         }
         return result
 
+    def _ubl_add_payment_means_nodes(self, vals):
+        result = super()._ubl_add_payment_means_nodes(vals)
+        if instruction := vals["invoice"]._l10n_ae_payment_means():
+            vals["document_node"]["cac:PaymentMeans"] = [
+                {
+                    "cbc:PaymentMeansCode": {
+                        "_text": instruction["code"],
+                        "name": instruction["name"],
+                    },
+                    "cbc:PaymentID": {"_text": instruction["payment_reference"]},
+                }
+            ]
+        return result
+
     def _ubl_add_invoice_period_nodes(self, vals):
         result = super()._ubl_add_invoice_period_nodes(vals)
         invoice = vals["invoice"]

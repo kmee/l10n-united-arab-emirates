@@ -57,8 +57,29 @@ class AccountMove(models.Model):
                 identity.get("manifest_sha256") or False
             )
 
+    def _l10n_ae_payment_means(self):
+        """Describe the observed native instruction, independently of settlement."""
+        self.ensure_one()
+        method = self.preferred_payment_method_line_id
+        journal = method.journal_id
+        if journal.type != "cash":
+            return None
+        return {
+            "code": "10",
+            "name": "In cash",
+            "payment_reference": self.payment_reference or self.name,
+            "method_line_id": method.id,
+            "method_code": method.code,
+            "journal_id": journal.id,
+            "journal_type": journal.type,
+            "account_id": None,
+            "account_identifier": None,
+        }
+
     def _l10n_ae_snapshot(self):
         snapshot = super()._l10n_ae_snapshot()
+        if instruction := self._l10n_ae_payment_means():
+            snapshot["payment_means"] = instruction
         product_lines = self.invoice_line_ids.filtered(
             lambda line: not line.display_type or line.display_type == "product"
         )
