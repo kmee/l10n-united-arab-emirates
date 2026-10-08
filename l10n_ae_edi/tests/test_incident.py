@@ -13,6 +13,10 @@ from odoo.tests.common import new_test_user
 from odoo.tools.binary import BinaryBytes
 
 from odoo.addons.account.tests.common import AccountTestInvoicingCommon
+from odoo.addons.l10n_ae_edi.tests.common import (
+    CONTROLLED_CAPABILITIES,
+    review_controlled_binding,
+)
 
 
 def select_reviewed_calendar_fixture(incident):
@@ -858,10 +862,13 @@ class TestUaeIncident(AccountTestInvoicingCommon):
             self.partner_a.write(
                 {"routing_scheme": "0235", "routing_endpoint": "1000000002"}
             )
-        binding = (
+        binding = review_controlled_binding(
             self.env["l10n_ae.edi.binding"]
             .with_user(manager)
-            .create({"name": "Synthetic outage binding"})
+            .create({"name": "Synthetic outage binding"}),
+            self.simple_accountman,
+            capabilities=CONTROLLED_CAPABILITIES,
+            note="Synthetic reviewed controlled contract fixture.",
         )
         invoices = self.env["account.move"]
         for amount in (100, 200):
@@ -998,8 +1005,13 @@ class TestUaeIncident(AccountTestInvoicingCommon):
             self.partner_a.write(
                 {"routing_scheme": "0235", "routing_endpoint": "1000000002"}
             )
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {"name": "Synthetic restoration binding"}
+        binding = review_controlled_binding(
+            self.env["l10n_ae.edi.binding"].create(
+                {"name": "Synthetic restoration binding"}
+            ),
+            self.simple_accountman,
+            capabilities=CONTROLLED_CAPABILITIES,
+            note="Synthetic reviewed controlled contract fixture.",
         )
         invoice = self.init_invoice(
             "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
@@ -1191,11 +1203,14 @@ class TestUaeIncident(AccountTestInvoicingCommon):
                 {"routing_scheme": "0235", "routing_endpoint": "1000000002"}
             )
 
-        binding = (
+        binding = review_controlled_binding(
             self.env["l10n_ae.edi.binding"]
             .with_user(manager)
             .with_context(allowed_company_ids=company_a.ids)
-            .create({"name": "Synthetic recovery access binding"})
+            .create({"name": "Synthetic recovery access binding"}),
+            self.simple_accountman,
+            capabilities=CONTROLLED_CAPABILITIES,
+            note="Synthetic reviewed controlled contract fixture.",
         )
         invoice = self.init_invoice(
             "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
@@ -1573,8 +1588,13 @@ class TestUaeIncident(AccountTestInvoicingCommon):
             self.partner_a.write(
                 {"routing_scheme": "0235", "routing_endpoint": "1000000002"}
             )
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {"name": "Synthetic native recovery binding"}
+        binding = review_controlled_binding(
+            self.env["l10n_ae.edi.binding"].create(
+                {"name": "Synthetic native recovery binding"}
+            ),
+            self.simple_accountman,
+            capabilities=CONTROLLED_CAPABILITIES,
+            note="Synthetic reviewed controlled contract fixture.",
         )
         invoice = self.init_invoice(
             "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True

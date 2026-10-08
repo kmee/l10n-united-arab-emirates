@@ -7,6 +7,10 @@ from odoo.tests import Form, tagged
 from odoo.tests.common import new_test_user
 
 from odoo.addons.account.tests.common import AccountTestInvoicingCommon
+from odoo.addons.l10n_ae_edi.tests.common import (
+    CONTROLLED_CAPABILITIES,
+    review_controlled_binding,
+)
 
 
 @tagged("post_install", "-at_install")
@@ -32,8 +36,11 @@ class TestUaeRetention(AccountTestInvoicingCommon):
             cls.partner_a.write(
                 {"routing_scheme": "0235", "routing_endpoint": "1000000002"}
             )
-        cls.binding = cls.env["l10n_ae.edi.binding"].create(
-            {"name": "Synthetic retention only"}
+        cls.binding = review_controlled_binding(
+            cls.env["l10n_ae.edi.binding"].create({"name": "Synthetic retention only"}),
+            cls.simple_accountman,
+            capabilities=CONTROLLED_CAPABILITIES,
+            note="Synthetic reviewed controlled contract fixture.",
         )
         cls.auditor = new_test_user(
             cls.env,
@@ -494,6 +501,19 @@ class TestUaeRetention(AccountTestInvoicingCommon):
             self.env["l10n_ae.edi.binding"]
             .with_company(company_b)
             .create({"name": "Synthetic foreign retention ASP"})
+        )
+        contract_reviewer_b = new_test_user(
+            self.env,
+            login="synthetic-retention-company-b-contract-reviewer",
+            groups="account.group_account_manager",
+            company_id=company_b.id,
+            company_ids=company_b.ids,
+        )
+        review_controlled_binding(
+            binding_b,
+            contract_reviewer_b,
+            capabilities=CONTROLLED_CAPABILITIES,
+            note="Synthetic foreign issuer contract; company A remains isolated.",
         )
         invoice_b = self.init_invoice(
             "out_invoice",
