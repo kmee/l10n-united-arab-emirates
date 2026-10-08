@@ -79,6 +79,7 @@ class ControlledInboxWorker:
         if receipt is None:
             with self.registry.cursor() as cursor:
                 binding = self._binding(cursor, binding_id, process=process)
+                binding._require_receiving_capabilities()
                 self._check_received_identity(binding, tin, provider)
             return {"state": "not_found", "inbox_id": None}
         for attempt in range(3):
