@@ -431,3 +431,53 @@ class TestCbuaePublication(AccountTestInvoicingCommon):
         self.assertNotIn("US Dollar", publication.quotes)
         self.assertNotIn("USD", publication.quotes)
         self.assertEqual(publication.source_body.content, original)
+
+    def test_capture_bounds_source_bytes_and_elapsed_time_without_usable_quotes(self):
+        model = self.env["l10n_ae.cbuae.publication"].with_user(self.simple_accountman)
+        original = (
+            Path(__file__).parent / "cassettes/cbuae/cbuae-2026-08-26.html"
+        ).read_bytes()
+        response = Response()
+        response.status_code = 200
+        response.url = (
+            "https://centralbank.ae/umbraco/Surface/Exchange/"
+            "GetExchangeRateAllCurrencyDate?dateTime=2026-08-26"
+        )
+        response.headers["Content-Type"] = "text/html; charset=utf-8"
+        response._content = original + b"X" * (2 * 1024 * 1024)
+        response._content_consumed = True
+        publication = model.create({"requested_date": "2026-08-26"})
+        with patch("requests.get", return_value=response):
+            publication.action_capture()
+        self.assertEqual(publication.state, "error")
+        self.assertIn("limit", publication.diagnostic.lower())
+        self.assertFalse(publication.source_complete)
+        self.assertFalse(publication.quotes)
+        self.assertEqual(len(publication.source_body.content), 2 * 1024 * 1024)
+        self.assertEqual(
+            publication.source_body.content, response.content[: 2 * 1024 * 1024]
+        )
+        clock = [100.0]
+
+        class SlowResponse(Response):
+            def iter_content(self, chunk_size=1, decode_unicode=False):
+                yield original[:256]
+                clock[0] = 131.0
+                yield original[256:]
+
+        slow = SlowResponse()
+        slow.status_code = 200
+        slow.url = response.url
+        slow.headers["Content-Type"] = response.headers["Content-Type"]
+        slow._content_consumed = True
+        publication = model.create({"requested_date": "2026-08-26"})
+        with (
+            patch("requests.get", return_value=slow),
+            patch("time.monotonic", side_effect=lambda: clock[0]),
+        ):
+            publication.action_capture()
+        self.assertEqual(publication.state, "error")
+        self.assertIn("Timeout", publication.diagnostic)
+        self.assertFalse(publication.source_complete)
+        self.assertFalse(publication.quotes)
+        self.assertEqual(publication.source_body.content, original[:256])
