@@ -1,5 +1,6 @@
 # Copyright 2026 KMEE
 # License AGPL-3.0 or later (https://www.gnu.org/licenses/agpl).
+import math
 from datetime import timedelta
 from decimal import Decimal
 from typing import ClassVar
@@ -180,7 +181,16 @@ class CbuaeRateReview(models.Model):
                 raise UserError(self.env._("The dated AED anchor requires review."))
         anchor_literal = str(anchor.rate if anchor else 1.0)
         quote_literal = publication.quotes[self.source_label]
-        technical_rate = float(Decimal(anchor_literal) / Decimal(quote_literal))
+        try:
+            technical_rate = float(Decimal(anchor_literal) / Decimal(quote_literal))
+        except (ArithmeticError, ValueError) as exc:
+            raise UserError(
+                self.env._("The quote cannot be represented as a positive native rate.")
+            ) from exc
+        if not math.isfinite(technical_rate) or technical_rate <= 0:
+            raise UserError(
+                self.env._("The quote cannot be represented as a positive native rate.")
+            )
         imported = rates._create_cbuae_rate(
             self,
             {
