@@ -223,7 +223,7 @@ class CbuaePublication(models.Model):
             if len(cells) != 3 or cells[0].text_content().strip():
                 raise ValueError(self.env._("CBUAE quote row structure changed."))
             label = cells[1].text_content()
-            literal = cells[2].text_content().strip()
+            literal = cells[2].text_content()
             if not label.strip() or len(label) > 128 or label in quotes:
                 raise ValueError(
                     self.env._("CBUAE quote labels are missing or duplicated.")
