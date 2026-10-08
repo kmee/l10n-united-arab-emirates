@@ -240,6 +240,19 @@ account. Scenario 57 in the PT/EN manuals records selected evidence and
 limitations; the nine offered choices are not qualification of every
 instrument/document matrix.
 
+A selected native method that does not identify a supported instrument
+requires review of **UAE Payment Instrument** on its journal method
+line. Native Post keeps the invoice posted and records UAE review
+without an issue/UUID; explicit Check/Prepare refuse the missing
+classification. Review the same line, then prepare the existing invoice.
+The online-service 68 tracer retains its reference without inventing
+card/mandate data; subsequent master changes preserve its original and
+ledger. Scenario 58 in the PT/EN manuals records the rendered journey
+and its limits. All nine reviewed codes have basic ordinary 380/AED XML
+representation coverage, with a selected account required only for
+transfer 30; this does not qualify every instrument/document/direction
+matrix or execute payments. Structured optional groups remain pending.
+
 Known issues / Roadmap
 ======================
 
