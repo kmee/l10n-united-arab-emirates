@@ -89,8 +89,9 @@ correction allows a draft bill. Use **Process Received Document** again after th
 correction; do not replace XML. A successful replay does not create another draft or
 history entry. Fiscal auditors see read-only history without accounting access.
 
-With native **Export: Allowed**, download **Received Evidence Package** in the
-received original's form or UAE Audit inbox. It preserves exact XML, protected receipt
+With native **Export: Allowed**, select **Download Evidence Package** in the
+received original's form or UAE Audit inbox. Opening these forms does not build the ZIP.
+An integrity failure refuses the explicit download while keeping the form available. It preserves exact XML, protected receipt
 details, every processing attempt and retained report, credit references and a
 SHA256/size manifest. Hash mismatch or a missing recorded report blocks export. Attempts
 without reports retain that absence. Repeated downloads are deterministic until new

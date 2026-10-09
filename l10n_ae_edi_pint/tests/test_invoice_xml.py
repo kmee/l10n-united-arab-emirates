@@ -6183,6 +6183,23 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
                 self.assertEqual(values[0]["state"], "received")
                 self.assertFalse(inbox.move_id)
                 self.assertEqual(inbox.original_xml.content, content)
+                # URL generation is safe even when the subsequent download must
+                # refuse damaged evidence; it does not compute the Binary.
+                self.assertEqual(
+                    original.action_download_evidence(),
+                    {
+                        "type": "ir.actions.act_url",
+                        "url": (
+                            f"/web/content/l10n_ae.edi.inbox/{inbox.id}/evidence_archive"
+                            "?download=true&filename_field=evidence_archive_filename"
+                        ),
+                        "target": "download",
+                    },
+                )
+                self.assertEqual(
+                    len(tree.xpath("//button[@name='action_download_evidence']")), 1
+                )
+                self.assertNotIn("evidence_archive", names)
                 with self.assertRaisesRegex(UserError, "integrity check failed"):
                     original.with_context(bin_size=False).read(["evidence_archive"])
                 if view_xmlid.endswith(".edi_inbox_form"):
@@ -6190,6 +6207,23 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
                         self.assertEqual(
                             len(tree.xpath(f"//button[@name='{action}']")), 1
                         )
+
+        no_export = new_test_user(
+            self.env,
+            login="synthetic-no-export-form-manager",
+            groups="account.group_account_manager",
+            company_id=self.env.company.id,
+            company_ids=self.env.company.ids,
+        )
+        self.assertFalse(no_export.has_group("base.group_allow_export"))
+        for elevated in (False, True):
+            with self.subTest(elevated=elevated), self.assertRaises(AccessError):
+                inbox.with_user(no_export).sudo(elevated).action_download_evidence()
+        for actor, _view_xmlid in actors:
+            actor.active = False
+            with self.assertRaises(AccessError):
+                inbox.with_user(actor).sudo().action_download_evidence()
+            actor.active = True
 
     def test_received_ecommerce_archive_refuses_a_tampered_delivery_snapshot(self):
         tree = self._received_test_xml()
