@@ -99,6 +99,7 @@ class UaeEdiTransmission(models.Model):
         [
             ("local_review", "Local Document Validation"),
             ("xml_integrity", "Frozen XML Integrity Review Required"),
+            ("package_mismatch", "Pinned PINT Package Review Required"),
             ("endpoint_mismatch", "Original Controlled Endpoint Required"),
         ],
         readonly=True,
