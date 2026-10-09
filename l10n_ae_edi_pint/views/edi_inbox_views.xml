@@ -1,5 +1,60 @@
 <?xml version="1.0" encoding="UTF-8" ?>
 <odoo>
+    <record id="edi_inbox_rejection_list" model="ir.ui.view">
+        <field name="name">l10n_ae.edi.inbox.rejection.list</field>
+        <field name="model">l10n_ae.edi.inbox.rejection</field>
+        <field name="arch" type="xml">
+            <list create="false" edit="false" delete="false">
+                <field name="remote_id" />
+                <field name="event_id" />
+                <field name="binding_id" />
+                <field name="company_id" groups="base.group_multi_company" />
+                <field name="reason" />
+                <field name="received_at" />
+            </list>
+        </field>
+    </record>
+    <record id="edi_inbox_rejection_form" model="ir.ui.view">
+        <field name="name">l10n_ae.edi.inbox.rejection.form</field>
+        <field name="model">l10n_ae.edi.inbox.rejection</field>
+        <field name="arch" type="xml">
+            <form create="false" edit="false" delete="false">
+                <sheet>
+                    <div class="alert alert-warning" role="alert">
+                        This retrieved artifact contains no XML. It is retained as
+                        local retrieval evidence, not an invoice or an ASP rejection.
+                        Contact integration support; do not create a replacement bill
+                        from this artifact.
+                    </div>
+                    <group>
+                        <field name="remote_id" />
+                        <field name="event_id" />
+                        <field name="binding_id" />
+                        <field name="company_id" groups="base.group_multi_company" />
+                        <field name="reason" />
+                        <field name="xml_size" />
+                        <field name="xml_hash" class="text-wrap text-break" />
+                        <field name="artifact" />
+                        <field name="operator_id" />
+                        <field name="received_at" />
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+    <record id="edi_inbox_rejection_action" model="ir.actions.act_window">
+        <field name="name">Rejected Retrieved UAE Artifacts</field>
+        <field name="res_model">l10n_ae.edi.inbox.rejection</field>
+        <field name="view_mode">list,form</field>
+    </record>
+    <menuitem
+        id="edi_inbox_rejection_menu"
+        name="Rejected Retrieved UAE Artifacts"
+        parent="account.menu_finance"
+        action="edi_inbox_rejection_action"
+        sequence="31"
+        groups="account.group_account_invoice,account.group_account_readonly"
+    />
     <record id="edi_inbox_form" model="ir.ui.view">
         <field name="name">l10n_ae.edi.inbox.form</field>
         <field name="model">l10n_ae.edi.inbox</field>

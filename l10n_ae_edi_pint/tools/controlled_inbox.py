@@ -188,12 +188,20 @@ class ControlledInboxWorker:
                         return {
                             "state": "stale_page",
                             "inbox_ids": [],
+                            "rejection_ids": [],
                             "next_cursor": current,
                             "has_more": False,
                         }
                     inbox_ids = []
+                    rejection_ids = []
                     for remote_id, content, event_id in originals:
                         try:
+                            if not content:
+                                rejected = binding.env[
+                                    "l10n_ae.edi.inbox.rejection"
+                                ]._record_empty(binding, remote_id, event_id=event_id)
+                                rejection_ids.append(rejected.id)
+                                continue
                             inbox = binding.env[
                                 "l10n_ae.edi.inbox"
                             ].receive_controlled_document(
@@ -212,6 +220,7 @@ class ControlledInboxWorker:
                     return {
                         "state": "received" if originals else "empty",
                         "inbox_ids": inbox_ids,
+                        "rejection_ids": rejection_ids,
                         "next_cursor": page["next_cursor"],
                         "has_more": page["has_more"],
                     }
