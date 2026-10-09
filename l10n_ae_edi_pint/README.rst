@@ -71,6 +71,17 @@ formal validation and actual provider/FTA confirmations are separate
 operations. Native Send may still export again after Check; no
 cross-request cache is introduced.
 
+Native UAE fallback XML downloads refuse a returned builder error before
+releasing the preview. A missing buyer country displays IBR-011 through
+Check and HTTP 422 through that download. A valid unprepared draft
+preview does not post or create an issue; prepared downloads retain the
+frozen original access/integrity checks. Known category, reverse-charge
+nature, payment and AED consistency errors return per-document native
+constraints. Direct integrations must honor ``(content, errors)``; bytes
+with errors are not usable invoices. This is focused local
+qualification, separate from formal PINT validation and fiscal
+acceptance. See scenario2 and its execution limits.
+
 Accounting managers can open **Received UAE Documents**, inspect the
 preserved XML and select **Process Received Document**. A supported
 ordinary AED tax invoice creates a supplier bill in draft; **Open
