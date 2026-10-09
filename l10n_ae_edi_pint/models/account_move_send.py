@@ -12,6 +12,26 @@ class AccountMoveSend(models.AbstractModel):
     _inherit = "account.move.send"
 
     @api.model
+    def _check_l10n_ae_native_format_owners(self, invoice_edi_format):
+        if invoice_edi_format != "kmee_ae_pint":
+            return
+        partner = self.env["res.partner"]
+        # Pinned Odoo20 uses this field helper for selection reflection. The
+        # final selection/map has already collapsed duplicate labeled keys.
+        owners = (
+            partner._fields["invoice_edi_format"]
+            ._selection_modules(partner)
+            .get(invoice_edi_format, set())
+        )
+        if len(owners) > 1:
+            raise UserError(
+                self.env._(
+                    "Multiple modules register UAE PINT-AE format: %s",
+                    ", ".join(sorted(owners)),
+                )
+            )
+
+    @api.model
     def _get_alerts(self, moves, moves_data):
         alerts = super()._get_alerts(moves, moves_data)
         moves.check_access("read")
@@ -64,6 +84,9 @@ class AccountMoveSend(models.AbstractModel):
         settings = super()._get_default_sending_settings(
             move, from_cron=from_cron, **custom_settings
         )
+        # Use the effective native explicit/default/cron selection. Placeholder
+        # generation inside super is guarded separately before builder dispatch.
+        self._check_l10n_ae_native_format_owners(settings.get("invoice_edi_format"))
         # Check effective explicit/default/cron settings before generation starts.
         # An already frozen fiscal issue cannot silently change Send's format.
         if move.l10n_ae_transmission_id and settings.get("invoice_edi_format") not in (
@@ -113,6 +136,7 @@ class AccountMoveSend(models.AbstractModel):
     def _get_placeholder_mail_attachments_data(
         self, move, invoice_edi_format=None, extra_edis=None, pdf_report=None
     ):
+        self._check_l10n_ae_native_format_owners(invoice_edi_format)
         result = super()._get_placeholder_mail_attachments_data(
             move,
             invoice_edi_format=invoice_edi_format,
