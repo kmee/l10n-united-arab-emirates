@@ -1490,6 +1490,7 @@ class TestUaeFiscalCategoryMatrix(AccountTestInvoicingCommon):
                                 "name": "Synthetic small service",
                                 "quantity": 3,
                                 "price_unit": 0.10,
+                                "discount": 10,
                                 "account_id": self.company_data[
                                     "default_account_revenue"
                                 ].id,
