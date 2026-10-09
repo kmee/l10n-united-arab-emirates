@@ -2533,6 +2533,69 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         self.assertFalse(invoice.l10n_ae_transmission_ids)
         self.assertEqual(invoice.line_ids.read(ledger_fields), ledger)
 
+    def test_native_send_format_choice_survives_reopen_and_method_change(self):
+        self.env.company.l10n_ae_edi_auto_prepare = False
+        self.partner_a.write(
+            {"invoice_sending_method": "email", "invoice_edi_format": False}
+        )
+        invoice = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a
+        ).with_user(self.simple_accountman)
+        invoice.l10n_ae_free_zone = True
+        invoice.action_post()
+        ledger_fields = [
+            "account_id",
+            "debit",
+            "credit",
+            "amount_currency",
+            "currency_id",
+            "create_date",
+            "write_date",
+        ]
+        ledger = invoice.line_ids.read(ledger_fields)
+        contact = invoice.partner_id.read(["write_date", "invoice_edi_format"])
+        action = invoice.action_send_and_print()
+        wizard = (
+            self.env[action["res_model"]]
+            .with_user(self.simple_accountman)
+            .with_context(**action["context"])
+            .create({"move_id": invoice.id})
+        )
+        self.assertFalse(wizard.env.su)
+        with Form(wizard) as form:
+            form.l10n_ae_send_format = "pint"
+        wizard_id = wizard.id
+        self.env.flush_all()
+        self.env.invalidate_all()
+        wizard = wizard.browse(wizard_id)
+        self.assertEqual(wizard.invoice_edi_format, "kmee_ae_pint")
+        self.assertIn("l10n_ae_edi_ibr_007_ae", wizard.alerts)
+        with self.cr.savepoint(), self.assertRaisesRegex(UserError, "IBR-007-AE"):
+            wizard.action_send_and_print()
+        with Form(wizard) as form:
+            form.l10n_ae_send_format = "pdf_only"
+        wizard.sending_methods = []
+        self.env.flush_all()
+        self.env.invalidate_all()
+        wizard = wizard.browse(wizard_id)
+        self.assertEqual(wizard.l10n_ae_send_format, "pdf_only")
+        self.assertFalse(wizard.invoice_edi_format)
+        self.assertFalse(
+            {
+                k: v
+                for k, v in (wizard.alerts or {}).items()
+                if k.startswith("l10n_ae_edi_")
+            }
+        )
+        wizard.action_send_and_print()
+        self.assertTrue(invoice.invoice_pdf_report_id.raw.content)
+        self.assertFalse(invoice.ubl_cii_xml_id or invoice.l10n_ae_transmission_ids)
+        self.assertFalse(invoice.l10n_ae_fiscal_uuid)
+        self.assertEqual(invoice.line_ids.read(ledger_fields), ledger)
+        self.assertEqual(
+            invoice.partner_id.read(["write_date", "invoice_edi_format"]), contact
+        )
+
     def test_emitted_commercial_invoice_preserves_package_across_official_cycle(self):
         # Independent worksheet: one AED100 supply, category O/0%, VAT0,
         # exclusive/inclusive/payable100. No allowance, advance or refund.
