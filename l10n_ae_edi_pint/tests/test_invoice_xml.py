@@ -1964,6 +1964,56 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         self.assertFalse(invoice.l10n_ae_transmission_ids)
         self.assertFalse(invoice.ubl_cii_xml_id or invoice.invoice_pdf_report_id)
 
+    def test_native_ubl_contract_returns_payment_review_error(self):
+        self.env.company.l10n_ae_edi_auto_prepare = False
+        journal = self.company_data["default_journal_bank"]
+        journal.bank_account_id = False
+        method = journal.inbound_payment_method_line_ids.filtered(
+            lambda line: line.code == "manual"
+        )[:1]
+        self.assertTrue(method)
+        invoice = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a
+        ).with_user(self.simple_accountman)
+        invoice.write(
+            {"preferred_payment_method_line_id": method.id, "partner_bank_id": False}
+        )
+        self.assertFalse(invoice.env.su)
+        builder = invoice.partner_id._get_edi_builder("kmee_ae_pint")
+        content, errors = builder._export_invoice(invoice)
+        self.assertIsInstance(content, bytes)
+        self.assertIsInstance(errors, set)
+        self.assertTrue(any("IBR-192-AE" in error for error in errors), errors)
+        with self.assertRaisesRegex(UserError, "IBR-192-AE"):
+            invoice.action_l10n_ae_validate()
+        with self.assertRaisesRegex(UserError, "IBR-192-AE"):
+            invoice.preview_l10n_ae_pint()
+        self.assertEqual(invoice.state, "draft")
+        self.assertEqual(invoice.amount_total, 105)
+        self.assertFalse(invoice.l10n_ae_transmission_ids)
+        account = (
+            self.env["res.partner.bank"]
+            .with_user(self.simple_accountman)
+            .create(
+                {
+                    "partner_id": self.env.company.partner_id.id,
+                    "company_id": self.env.company.id,
+                    "account_number": "SYNTH EXPORT BANK 01",
+                }
+            )
+        )
+        invoice.partner_bank_id = account
+        content, errors = builder._export_invoice(invoice)
+        self.assertFalse(errors)
+        means = etree.fromstring(content).find("cac:PaymentMeans", namespaces=NS)
+        self.assertEqual(means.findtext("cbc:PaymentMeansCode", namespaces=NS), "30")
+        self.assertEqual(
+            means.findtext("cac:PayeeFinancialAccount/cbc:ID", namespaces=NS),
+            "SYNTHEXPORTBANK01",
+        )
+        invoice.action_l10n_ae_validate()
+        self.assertFalse(invoice.l10n_ae_transmission_ids)
+
     def test_native_send_cron_isolates_invalid_invoice_across_companies(self):
         self.env.company.l10n_ae_edi_auto_prepare = False
         other = self.setup_other_company(name="Synthetic independent Send company")
