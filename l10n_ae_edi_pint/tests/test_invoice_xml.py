@@ -10348,7 +10348,7 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         report = credit.validate_l10n_ae_pint()
         self.assertTrue(report["valid"], report)
 
-    def test_fractional_usd_vat_divergence_requires_review_without_a_rounding_patch(
+    def test_fractional_usd_uses_native_aed_totals_without_a_rounding_patch(
         self,
     ):
         usd = self.env.ref("base.USD")
@@ -10366,8 +10366,9 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
             amounts=[1.23, 1.23, 1.23],
             taxes=self.tax_sale_a,
             currency=usd,
-            post=True,
-        )
+        ).with_user(self.simple_accountman)
+        self.assertFalse(invoice.env.su)
+        invoice.action_post()
         invoice.write(
             {
                 "l10n_ae_tax_exchange_rate": "3.672500",
@@ -10387,14 +10388,62 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
                 ).id,
             }
         )
-        original_totals = (invoice.amount_total, invoice.amount_tax_signed)
-        with self.assertRaisesRegex(UserError, "AED.*accounting"):
-            invoice.action_l10n_ae_prepare()
-        self.assertFalse(invoice.l10n_ae_transmission_id)
+        # Three separate lines: source gross3.87 *3.6725 =14.212575,
+        # but native cent-allocated AED balances are VAT0.66 / gross14.22.
+        self.assertEqual((invoice.amount_total, invoice.amount_tax), (3.87, 0.18))
         self.assertEqual(
-            (invoice.amount_total, invoice.amount_tax_signed), original_totals
+            (invoice.amount_tax_signed, invoice.amount_total_signed), (0.66, 14.22)
         )
-        self.assertEqual(invoice.amount_tax, 0.18)
+        ledger_fields = [
+            "account_id",
+            "debit",
+            "credit",
+            "amount_currency",
+            "currency_id",
+            "create_date",
+            "write_date",
+        ]
+        ledger = invoice.line_ids.read(ledger_fields)
+        invoice.action_l10n_ae_validate()
+        self.assertFalse(invoice.l10n_ae_transmission_ids)
+        invoice.action_l10n_ae_prepare()
+        issue = invoice.l10n_ae_transmission_id
+        xml = etree.fromstring(issue.xml_content.encode())
+        self.assertEqual(
+            xml.xpath(
+                "./cac:TaxTotal/cbc:TaxAmount[@currencyID='AED']/text()", namespaces=NS
+            ),
+            ["0.66"],
+        )
+        self.assertEqual(
+            xml.xpath(
+                "./cac:AdditionalDocumentReference[cbc:ID='AED']/"
+                "cbc:DocumentDescription/text()",
+                namespaces=NS,
+            ),
+            ["14.22"],
+        )
+        report = invoice.validate_l10n_ae_pint()
+        self.assertTrue(report["valid"], report)
+        evidence_fields = [
+            "payload",
+            "xml_content",
+            "idempotency_key",
+            "create_date",
+            "write_date",
+        ]
+        original = issue.read(evidence_fields)
+        self.env["res.currency.rate"].search(
+            [
+                ("currency_id", "=", usd.id),
+                ("company_id", "=", self.env.company.id),
+            ]
+        ).write({"rate": 1 / 3.70})
+        invoice.action_l10n_ae_prepare()
+        self.assertEqual(invoice.preview_l10n_ae_pint(), issue.xml_content)
+        self.assertEqual(issue.read(evidence_fields), original)
+        self.assertEqual(invoice.line_ids.read(ledger_fields), ledger)
+        self.assertFalse(issue.attempt_ids or issue.event_ids or issue.remote_id)
 
     def test_standard_tax_invoice_uses_ae_profile_and_core_accounting_totals(self):
         invoice = self.init_invoice(
