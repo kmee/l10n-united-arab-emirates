@@ -80,7 +80,7 @@ class AccountEdiUblUae(models.AbstractModel):
             if (category.findtext("{*}ID") or "").strip() == "N":
                 nominal_rate = Decimal(category.findtext("{*}Percent") or "0")
                 if not nominal_rate.is_finite() or nominal_rate <= 0:
-                    raise UserError(
+                    errors.add(
                         self.env._(
                             "IBR-111-AE: category N requires a reviewed positive "
                             "nominal VAT rate. Review the additional VAT metadata; "
@@ -96,7 +96,7 @@ class AccountEdiUblUae(models.AbstractModel):
             ):
                 vat_amount = Decimal(subtotal.findtext("{*}TaxAmount") or "0")
                 if not vat_amount.is_finite() or vat_amount != 0:
-                    raise UserError(
+                    errors.add(
                         self.env._(
                             "IBR-108-AE: category N requires zero disclosed VAT. "
                             "Review the fiscal representation and accounting "
@@ -116,7 +116,7 @@ class AccountEdiUblUae(models.AbstractModel):
                 )
             )
         ):
-            raise UserError(
+            errors.add(
                 self.env._(
                     "IBR-116-AE: a profit margin document requires reviewed VAT "
                     "category N on every item and tax breakdown. Selecting the "
@@ -127,7 +127,7 @@ class AccountEdiUblUae(models.AbstractModel):
             (category.findtext("{*}ID") or "").strip() not in {"E", "O"}
             for category in categories
         ):
-            raise UserError(
+            errors.add(
                 self.env._(
                     "IBR-151-AE: a tax invoice (380) or tax credit note (381) "
                     "requires at least one line VAT category other than E or O. "
