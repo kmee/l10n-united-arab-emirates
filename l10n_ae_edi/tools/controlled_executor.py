@@ -67,6 +67,13 @@ class ControlledExecutor:
                 return "local_correction"
             if record.submission_state == "accepted":
                 return "accepted"
+            if record.provider != record.binding_id.provider:
+                raise UaeDocumentValidationError(
+                    record.env._(
+                        "The UAE provider binding differs from the frozen transmission."
+                    ),
+                    kind="provider_mismatch",
+                )
             if (
                 record.submission_state == "unknown"
                 and record.next_attempt_at
