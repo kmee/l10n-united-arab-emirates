@@ -1768,11 +1768,9 @@ class TestUaeFiscalCategoryMatrix(AccountTestInvoicingCommon):
         ]:
             amount = line.find(path, NS)
             self.assertEqual(amount.get("currencyID"), "AED")
-            # The native price/quantity are floats: tolerate serialization noise,
-            # never a currency-cent rounding or substitution of the header base.
-            self.assertLess(
-                abs(Decimal(amount.text) - Decimal(expected)), Decimal("0.000001")
-            )
+            # Exact independently worked decimal values: no binary tail,
+            # currency-cent rounding or substitution of the header base.
+            self.assertEqual(Decimal(amount.text), Decimal(expected))
         self.assertEqual(
             xml.findtext(
                 "cac:TaxTotal/cbc:TaxAmount[@currencyID='AED']", namespaces=NS
@@ -1941,11 +1939,9 @@ class TestUaeFiscalCategoryMatrix(AccountTestInvoicingCommon):
         ]:
             amount = line.find(path, NS)
             self.assertEqual(amount.get("currencyID"), "AED")
-            # The native price/quantity are floats: tolerate serialization noise,
-            # never a currency-cent rounding or substitution of the header base.
-            self.assertLess(
-                abs(Decimal(amount.text) - Decimal(expected)), Decimal("0.000001")
-            )
+            # Exact independently worked decimal values: no binary tail,
+            # currency-cent rounding or substitution of the header base.
+            self.assertEqual(Decimal(amount.text), Decimal(expected))
         self.assertEqual(
             xml.findtext(
                 "cac:TaxTotal/cbc:TaxAmount[@currencyID='AED']", namespaces=NS

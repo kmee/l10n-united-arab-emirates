@@ -653,6 +653,16 @@ it. Its response puts the accounting ID at <tt class="docutils literal">accounti
 self-billing keeps the original cadence and full OTH Note on its
 protected draft; an absent cadence is not inferred from local payment
 terms. See scenarios 61–62.</p>
+<p>Computed AED line amounts and allowance bases preserve decimal precision
+without the reproduced binary arithmetic tails. For quantity3 ×USD0.10,
+raw AED VAT/gross at 3.672500 are0.0550875/1.1568375; the separate
+header/accounting mismatch still requires review and prevents
+preparation. At100% discount, the allowance base/amount remain USD0.3
+and native totals zero. Native high-precision fractional cases require
+exact line/allowance values and frozen replay; the addon does not change
+source quantities, prices, rate text or the posted ledger. Scenario14
+describes usage and limits; full fiscal/accounting rounding policy and
+dedicated browser qualification remain open.</p>
 </div>
 <div class="section" id="known-issues-roadmap">
 <h1><a class="toc-backref" href="#toc-entry-2">Known issues / Roadmap</a></h1>
