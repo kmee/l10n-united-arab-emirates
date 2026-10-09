@@ -84,29 +84,39 @@ class AccountMoveSend(models.AbstractModel):
         settings = super()._get_default_sending_settings(
             move, from_cron=from_cron, **custom_settings
         )
-        # Use the effective native explicit/default/cron selection. Placeholder
-        # generation inside super is guarded separately before builder dispatch.
-        self._check_l10n_ae_native_format_owners(settings.get("invoice_edi_format"))
-        # Check effective explicit/default/cron settings before generation starts.
-        # An already frozen fiscal issue cannot silently change Send's format.
-        if move.l10n_ae_transmission_id and settings.get("invoice_edi_format") not in (
-            None,
-            False,
-            "kmee_ae_pint",
-        ):
-            raise UserError(
-                self.env._(
-                    "The selected eInvoice format conflicts with "
-                    "the frozen UAE PINT-AE issue."
+        try:
+            # Use the effective native explicit/default/cron selection. Placeholder
+            # generation inside super is guarded separately before builder dispatch.
+            self._check_l10n_ae_native_format_owners(settings.get("invoice_edi_format"))
+            # Check effective explicit/default/cron settings before generation starts.
+            # An already frozen fiscal issue cannot silently change Send's format.
+            if move.l10n_ae_transmission_id and settings.get(
+                "invoice_edi_format"
+            ) not in (
+                None,
+                False,
+                "kmee_ae_pint",
+            ):
+                raise UserError(
+                    self.env._(
+                        "The selected eInvoice format conflicts with "
+                        "the frozen UAE PINT-AE issue."
+                    )
                 )
-            )
-        if (
-            not move.l10n_ae_transmission_id
-            and settings.get("invoice_edi_format") == "kmee_ae_pint"
-        ):
-            # The warning does not certify eligibility. Native generation must
-            # retain the same local refusals as the explicit Check/Prepare path.
-            move.action_l10n_ae_validate()
+            if (
+                not move.l10n_ae_transmission_id
+                and settings.get("invoice_edi_format") == "kmee_ae_pint"
+            ):
+                # The warning does not certify eligibility. Native generation must
+                # retain the same local refusals as the explicit Check/Prepare path.
+                move.action_l10n_ae_validate()
+        except (AccessError, MissingError):
+            raise
+        except UserError as error:
+            settings["error"] = {
+                "error_title": self.env._("UAE electronic invoice requires review"),
+                "errors": [str(error)],
+            }
         return settings
 
     @api.model
@@ -172,6 +182,10 @@ class AccountMoveSend(models.AbstractModel):
         return result
 
     def _hook_invoice_document_before_pdf_report_render(self, invoice, invoice_data):
+        # Native batch generation calls this hook even for failed settings.
+        # Keep a refused document out of XML/PDF generation while its peers run.
+        if invoice_data.get("error"):
+            return
         transmission = invoice.l10n_ae_transmission_id.with_context(bin_size=False)
         frozen_xml = (
             invoice.preview_l10n_ae_pint().encode("utf-8") if transmission else None
