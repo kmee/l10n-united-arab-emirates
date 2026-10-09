@@ -666,8 +666,10 @@ class UaeEdiInbox(models.Model):
             "l10n_ae_document_category": "commercial"
             if type_code in ("480", "81")
             else "tax",
-            "l10n_ae_credit_reason": tree.findtext(
-                "./{*}DiscrepancyResponse/{*}ResponseCode"
+            "l10n_ae_credit_reason": self._received_selection_value(
+                tree,
+                "./{*}DiscrepancyResponse/{*}ResponseCode",
+                "l10n_ae_credit_reason",
             )
             if is_credit
             else False,
@@ -687,12 +689,14 @@ class UaeEdiInbox(models.Model):
             or False,
             # Explicit absence also belongs to the original; never default a
             # received cadence from local payment-term configuration.
-            "l10n_ae_billing_frequency_code": tree.findtext(
-                "./{*}InvoicePeriod/{*}DescriptionCode"
-            )
-            or False,
+            "l10n_ae_billing_frequency_code": self._received_selection_value(
+                tree,
+                "./{*}InvoicePeriod/{*}DescriptionCode",
+                "l10n_ae_billing_frequency_code",
+            ),
             "l10n_ae_billing_frequency_note": tree.findtext("./{*}Note")
-            if tree.findtext("./{*}InvoicePeriod/{*}DescriptionCode") == "OTH"
+            if (tree.findtext("./{*}InvoicePeriod/{*}DescriptionCode") or "").strip()
+            == "OTH"
             else False,
             "l10n_ae_disclosed_agent": transaction_flags[5] == "1",
             "l10n_ae_ecommerce": transaction_flags[6] == "1",
@@ -763,6 +767,22 @@ class UaeEdiInbox(models.Model):
             }
         )
         return move
+
+    def _received_selection_value(self, tree, xpath, field_name):
+        # PINT codelists apply normalize-space. Preserve original bytes, but
+        # map their normalized code to the installed ORM selection contract.
+        value = " ".join((tree.findtext(xpath) or "").split())
+        if not value:
+            return False
+        field = self.env["account.move"]._fields[field_name]
+        if value not in dict(field._description_selection(self.env)):
+            raise UserError(
+                self.env._(
+                    "The received %(field)s code requires review before import.",
+                    field=field.string,
+                )
+            )
+        return value
 
     def _received_delivery_snapshot(self, tree):
         flags = tree.findtext("./{*}ProfileExecutionID") or ""
