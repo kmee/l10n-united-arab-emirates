@@ -1975,6 +1975,41 @@ class TestUaeSelfBillingInbound(AccountTestInvoicingCommon):
         self.assertEqual(existing.amount_total, 105)
         self.assertEqual(inbox.original_xml.content, content)
 
+    def test_received_padded_uuid_links_existing_sale_without_matching_number(self):
+        source, agreement, binding = self._selfbilling_fixture()
+        existing = self.init_invoice(
+            "out_invoice",
+            partner=self.buyer.partner_id,
+            invoice_date=source.invoice_date,
+            amounts=[100],
+            taxes=self.tax_sale_a,
+        )
+        fiscal_uuid = source.l10n_ae_fiscal_uuid
+        existing.write(
+            {"ref": "SYNTH-OTHER-NUMBER", "l10n_ae_fiscal_uuid": fiscal_uuid}
+        )
+        self.assertNotEqual(existing.ref, source.name)
+        self.assertNotEqual(existing.name, source.name)
+        tree = etree.fromstring(source.preview_l10n_ae_pint().encode())
+        tree.find("./{*}UUID").text = "  " + fiscal_uuid + "  "
+        content = etree.tostring(tree)
+        inbox = (
+            self.env["l10n_ae.edi.inbox"]
+            .with_user(self.simple_accountman)
+            .receive_controlled_document(
+                binding.id, "padded-uuid-billing-sale", content
+            )
+        )
+        self.assertTrue(inbox.action_process(), inbox.diagnostic)
+        self.assertEqual(inbox.move_id, existing)
+        self.assertEqual(existing.l10n_ae_fiscal_uuid, fiscal_uuid)
+        self.assertEqual(existing.ref, "SYNTH-OTHER-NUMBER")
+        self.assertEqual(existing.l10n_ae_selfbilling_agreement_id, agreement)
+        self.assertTrue(existing.l10n_ae_received_document)
+        self.assertEqual(existing.amount_total, 105)
+        self.assertEqual(inbox.original_xml.content, content)
+        self.assertEqual(inbox.xml_hash, hashlib.sha256(content).hexdigest())
+
     def test_xml_comments_do_not_prevent_linking_the_existing_billing_sale(self):
         source, _agreement, binding = self._selfbilling_fixture()
         existing = self.init_invoice(
