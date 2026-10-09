@@ -1852,6 +1852,111 @@ class TestUaeSelfBillingInbound(AccountTestInvoicingCommon):
         self.assertEqual((existing.amount_tax, existing.amount_total), (5, 105))
         self.assertEqual(inbox.original_xml.content, content)
 
+    def test_received_branch_reuses_parent_masters_but_requires_its_own_agreement(self):
+        root = self.env.company
+        source, parent_agreement, _binding = self._selfbilling_fixture()
+        content = source.preview_l10n_ae_pint().encode()
+        buyer_partner = self.buyer.partner_id
+        buyer_partner.company_id = root
+        self.assertEqual(parent_agreement.partner_id, buyer_partner)
+        branch = self.env["res.company"].create(
+            {
+                "name": "Synthetic self-billing receiving branch",
+                "parent_id": root.id,
+                "country_id": root.country_id.id,
+                "currency_id": root.currency_id.id,
+                "vat": root.vat,
+                "l10n_ae_tin": root.l10n_ae_tin,
+                "l10n_ae_tin_confirmed": True,
+                "l10n_ae_edi_auto_prepare": False,
+            }
+        )
+        self.env["account.chart.template"].with_company(branch).try_loading(
+            "ae", branch, install_demo=False
+        )
+        manager = new_test_user(
+            self.env,
+            login="synthetic-selfbilling-branch-manager",
+            groups="account.group_account_manager",
+            company_id=branch.id,
+            company_ids=branch.ids,
+        )
+        actor = (
+            self.env["l10n_ae.edi.inbox"]
+            .with_user(manager)
+            .with_context(allowed_company_ids=branch.ids)
+            .with_company(branch)
+        )
+        self.assertFalse(actor.env.su)
+        self.assertEqual(manager.company_ids, branch)
+        sale_journal = self.company_data["default_journal_sale"]
+        sale_tax = self.company_data["default_tax_sale"]
+        self.assertEqual(sale_journal.company_id, root)
+        self.assertEqual(sale_tax.company_id, root)
+        self.assertEqual(
+            self.env["account.journal"].search_count(
+                [("company_id", "=", branch.id), ("type", "=", "sale")]
+            ),
+            0,
+        )
+        binding = review_controlled_binding(
+            actor.env["l10n_ae.edi.binding"].create(
+                {
+                    "name": "Synthetic selfbilling branch receipt",
+                    "company_id": branch.id,
+                }
+            ),
+            manager,
+            capabilities=("receive",),
+            note="Synthetic branch self-billing receive-only contract.",
+        )
+        inbox = actor.receive_controlled_document(
+            binding.id, "selfbilling-branch-parent-masters", content
+        )
+        # The matching parent's agreement must not authorize its child company.
+        self.assertFalse(inbox.action_process())
+        self.assertIn("self-billing agreement requires review", inbox.diagnostic)
+        self.assertFalse(inbox.move_id)
+        self.assertEqual(len(inbox.processing_history_ids), 1)
+
+        # Parent compatibility must not admit an unrelated company's master data.
+        buyer_partner.company_id = self.buyer
+        self.assertFalse(inbox.action_process())
+        self.assertIn("supplier requires master data review", inbox.diagnostic)
+        self.assertFalse(inbox.move_id)
+        self.assertEqual(len(inbox.processing_history_ids), 2)
+        buyer_partner.company_id = root
+        agreement = actor.env["l10n_ae.selfbilling.agreement"].create(
+            {
+                "name": parent_agreement.name,
+                "company_id": branch.id,
+                "partner_id": buyer_partner.id,
+                "local_role": "supplier",
+                "start_date": "2026-01-01",
+                "scope": parent_agreement.scope,
+                "onboarding_reference": "SYNTH-BRANCH-BUYER-ONBOARD",
+            }
+        )
+        self.assertTrue(inbox.action_process(), inbox.diagnostic)
+        sale = inbox.move_id
+        self.assertEqual((sale.move_type, sale.state), ("out_invoice", "draft"))
+        self.assertEqual(sale.company_id, branch)
+        self.assertEqual(sale.partner_id, buyer_partner)
+        self.assertEqual(sale.journal_id, sale_journal)
+        self.assertEqual(sale.invoice_line_ids.tax_ids, sale_tax)
+        self.assertEqual(sale.l10n_ae_selfbilling_agreement_id, agreement)
+        self.assertEqual(
+            (sale.amount_untaxed, sale.amount_tax, sale.amount_total), (100, 5, 105)
+        )
+        self.assertEqual(inbox.original_xml.content, content)
+        self.assertEqual(inbox.xml_hash, hashlib.sha256(content).hexdigest())
+        self.assertEqual(len(inbox.processing_history_ids), 3)
+        for history in inbox.processing_history_ids:
+            report = json.loads(history.validation_report)
+            self.assertTrue(report["xsd_valid"], report)
+            self.assertTrue(report["valid"], report)
+        self.assertFalse(sale.l10n_ae_transmission_id)
+
     def test_buyer_issued_invoice_is_received_as_a_supplier_sale_without_emission(self):
         supplier = self.env.company
         source, recipient_agreement, binding = self._selfbilling_fixture()
