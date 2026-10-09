@@ -181,6 +181,19 @@ class UaeEdiBinding(models.Model):
             )
             self.invalidate_recordset()
 
+    def _check_provider_uninstall(self, provider):
+        """Never replace an installed provider identity during selection cleanup."""
+        if self or self.env["l10n_ae.edi.transmission"].sudo().search_count(
+            [("provider", "=", provider)], limit=1
+        ):
+            raise UserError(
+                self.env._(
+                    "Cannot uninstall an addon with provider bindings or frozen "
+                    "transmissions. Remove only unused bindings; keep the addon "
+                    "installed when invoice history depends on its provider."
+                )
+            )
+
     def action_review_capabilities(self):
         self.ensure_one()
         self._check_capability_reviewer()
