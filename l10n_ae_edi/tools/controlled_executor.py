@@ -204,11 +204,11 @@ class ControlledExecutor:
                 with self.registry.cursor() as cursor:
                     record = self._record(cursor, record_id).sudo()
                     outcome["result"] = record._mark_controlled_dispatch_review(
-                        self.clock(), report=error.report
+                        self.clock(), report=error.report, error_kind=error.kind
                     )
                     cursor.commit()
                 if outcome["result"] == "blocked":
-                    outcome["error_kind"] = "local_review"
+                    outcome["error_kind"] = error.kind
             except UaeControlledEndpointMismatch:
                 with self.registry.cursor() as cursor:
                     record = self._record(cursor, record_id).sudo()

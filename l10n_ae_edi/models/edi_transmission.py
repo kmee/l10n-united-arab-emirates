@@ -98,6 +98,7 @@ class UaeEdiTransmission(models.Model):
     dispatch_error_kind = fields.Selection(
         [
             ("local_review", "Local Document Validation"),
+            ("xml_integrity", "Frozen XML Integrity Review Required"),
             ("endpoint_mismatch", "Original Controlled Endpoint Required"),
         ],
         readonly=True,
@@ -326,7 +327,9 @@ class UaeEdiTransmission(models.Model):
             "reporting_c3_state": c3_state,
         }
 
-    def _mark_controlled_dispatch_review(self, now, report=None):
+    def _mark_controlled_dispatch_review(
+        self, now, report=None, *, error_kind="local_review"
+    ):
         """Record a local validation stop without inventing a remote rejection."""
         self.ensure_one()
         self.env.cr.execute(
@@ -338,7 +341,7 @@ class UaeEdiTransmission(models.Model):
             return self.submission_state
         values = {
             "dispatch_review_required": True,
-            "dispatch_error_kind": "local_review",
+            "dispatch_error_kind": error_kind,
             "dispatch_review_at": now,
         }
         if (

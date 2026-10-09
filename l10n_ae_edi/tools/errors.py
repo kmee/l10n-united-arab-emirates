@@ -8,9 +8,10 @@ from odoo.exceptions import UserError
 class UaeDocumentValidationError(UserError):
     """The preserved document needs review before transport can proceed."""
 
-    def __init__(self, message, report=None):
+    def __init__(self, message, report=None, *, kind="local_review"):
         super().__init__(message)
         self.report = report
+        self.kind = kind
 
 
 class UaeControlledEndpointMismatch(UserError):
