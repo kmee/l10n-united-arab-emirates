@@ -20,6 +20,14 @@
         <field name="priority" eval="30" />
         <field name="arch" type="xml">
             <form create="false" edit="false" delete="false" duplicate="false">
+                <header>
+                    <button
+                        name="action_download_evidence"
+                        type="object"
+                        string="Download Evidence Package"
+                        groups="base.group_allow_export"
+                    />
+                </header>
                 <sheet>
                     <group>
                         <field name="remote_id" />
@@ -28,13 +36,6 @@
                         <field name="state" />
                         <field name="xml_hash" />
                         <field name="original_xml" />
-                        <field name="evidence_archive_filename" invisible="1" />
-                        <field
-                            name="evidence_archive"
-                            filename="evidence_archive_filename"
-                            readonly="1"
-                            groups="base.group_allow_export"
-                        />
                         <field name="identity_conflict" />
                         <field name="ingestion_conflict" />
                         <field name="diagnostic" />

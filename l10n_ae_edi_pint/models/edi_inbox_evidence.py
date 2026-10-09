@@ -83,6 +83,21 @@ class UaeEdiInboxEvidence(models.Model):
                 inbox._build_received_evidence_archive()
             )
 
+    def action_download_evidence(self):
+        """Authorize the URL; the native content request builds the package."""
+        self.ensure_one()
+        original = self.with_user(self.env.uid).sudo(False)
+        principal = original.env.user
+        if not principal.active or not principal.has_group("base.group_allow_export"):
+            raise AccessError(self.env._("Native Data Export permission is required."))
+        original.check_access("read")
+        return {
+            "type": "ir.actions.act_url",
+            "url": f"/web/content/l10n_ae.edi.inbox/{original.id}/evidence_archive"
+            "?download=true&filename_field=evidence_archive_filename",
+            "target": "download",
+        }
+
     def _received_delivery_archive_value(self):
         self.ensure_one()
         if self.move_id:
