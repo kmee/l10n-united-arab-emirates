@@ -130,7 +130,7 @@ class AccountEdiUblUaeInbound(models.AbstractModel):
                     self.env._("The received tax percentage requires review.")
                 )
             tax_domain = [
-                ("company_id", "=", record.company_id.id),
+                *self.env["account.tax"]._check_company_domain(record.company_id),
                 ("amount_type", "=", "percent"),
                 ("amount", "=", 0 if category == "N" else float(percentage or 0)),
                 ("type_tax_use", "=", tax_type),
