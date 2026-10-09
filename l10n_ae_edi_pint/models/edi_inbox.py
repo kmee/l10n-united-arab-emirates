@@ -497,6 +497,11 @@ class UaeEdiInbox(models.Model):
         if hashlib.sha256(content).hexdigest() != self.xml_hash:
             raise UserError(self.env._("Received XML failed its integrity check."))
         tree = parse_invoice_xml(content)
+        fiscal_uuid = (tree.findtext("./{*}UUID") or "").strip()
+        if not fiscal_uuid:
+            raise UserError(
+                self.env._("The received document requires a non-empty fiscal UUID.")
+            )
         beneficiary_id = self._received_beneficiary_id(tree)
         principal_id = self._received_principal_id(tree)
         is_credit = tree.tag == (
@@ -577,7 +582,7 @@ class UaeEdiInbox(models.Model):
             [
                 ("company_id", "=", self.company_id.id),
                 ("l10n_ae_received_document", "=", True),
-                ("l10n_ae_fiscal_uuid", "=", tree.findtext("./{*}UUID")),
+                ("l10n_ae_fiscal_uuid", "=", fiscal_uuid),
             ],
             limit=2,
         )
@@ -650,7 +655,7 @@ class UaeEdiInbox(models.Model):
             else False,
             "l10n_ae_origin_system": "controlled-inbound",
             "l10n_ae_origin_document_id": f"{self.binding_id.id}:{self.remote_id}",
-            "l10n_ae_fiscal_uuid": tree.findtext("./{*}UUID"),
+            "l10n_ae_fiscal_uuid": fiscal_uuid,
             "l10n_ae_free_zone": transaction_flags[0] == "1",
             "l10n_ae_margin_scheme": transaction_flags[2] == "1",
             "l10n_ae_summary": transaction_flags[3] == "1",
@@ -687,7 +692,7 @@ class UaeEdiInbox(models.Model):
         existing = self.env["account.move"]
         if selfbilling:
             existing = self._find_existing_selfbilling_move(
-                tree, partner, values["move_type"]
+                tree, partner, values["move_type"], fiscal_uuid
             )
         if existing:
             metadata = {
@@ -1077,13 +1082,13 @@ class UaeEdiInbox(models.Model):
             )
         return originals, snapshot
 
-    def _find_existing_selfbilling_move(self, tree, partner, move_type):
+    def _find_existing_selfbilling_move(self, tree, partner, move_type, fiscal_uuid):
         number = tree.findtext("./{*}ID")
         candidate = self.env["account.move"].search(
             [
                 ("company_id", "=", self.company_id.id),
                 "|",
-                ("l10n_ae_fiscal_uuid", "=", tree.findtext("./{*}UUID")),
+                ("l10n_ae_fiscal_uuid", "=", fiscal_uuid),
                 "&",
                 ("move_type", "=", move_type),
                 "&",
