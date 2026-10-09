@@ -278,6 +278,40 @@ class UaeEdiInbox(models.Model):
         current._check_operator()
         current.check_access("read")
         current._check_receiving_company(current.company_id)
+        # Bytes and their hash are immutable. Do expensive pure validation
+        # before acquiring shared-route/import locks, then recheck mutable gates.
+        if current.event_review_pending or current.identity_review_pending:
+            return False
+        report = False
+        selected_package = False
+        validation_error = False
+        if not current.move_id:
+            try:
+                content = current.original_xml.content
+                if hashlib.sha256(content).hexdigest() != current.xml_hash:
+                    raise UserError(
+                        current.env._("Received XML failed its integrity check.")
+                    )
+                ruleset = os.environ.get("KMEE_UAE_NORMATIVE_RULESET", DEFAULT_RULESET)
+                selected_package = describe_ruleset(ruleset)
+                tree = parse_invoice_xml(content)
+                current._check_processing_package_identity(selected_package)
+                directory = os.environ.get("KMEE_UAE_NORMATIVE_DIR")
+                if not directory:
+                    raise UserError(
+                        current.env._(
+                            "Configure the offline UAE normative resource directory."
+                        )
+                    )
+                report = OfflinePintValidator(directory, ruleset=ruleset).validate(
+                    content
+                )
+                current._received_beneficiary_id(tree)
+                current._received_principal_id(tree)
+                current.env["account.move"]._l10n_ae_check_pint_report(report)
+            except (UserError, UnsafeInvoiceXml, ValidationUnavailable) as error:
+                # Recording is deferred until current state is locked/refreshed.
+                validation_error = error
         current.env.cr.execute(
             "SELECT id FROM l10n_ae_edi_binding WHERE id = %s FOR UPDATE",
             [current.binding_id.id],
@@ -286,6 +320,9 @@ class UaeEdiInbox(models.Model):
             "SELECT id FROM l10n_ae_edi_inbox WHERE id = %s FOR UPDATE", [current.id]
         )
         current.invalidate_recordset()
+        current._check_operator()
+        current.check_access("read")
+        current._check_receiving_company(current.company_id)
         if current.event_review_pending or current.identity_review_pending:
             return False
         if current.move_id:
@@ -303,90 +340,16 @@ class UaeEdiInbox(models.Model):
                 )
                 current._identity_family().invalidate_recordset(["evidence_archive"])
             return True
-        report = False
-        selected_package = False
         try:
             with current.env.cr.savepoint():
-                content = current.original_xml.content
-                if hashlib.sha256(content).hexdigest() != current.xml_hash:
+                if selected_package:
+                    current._check_processing_package_identity(selected_package)
+                if validation_error:
+                    raise validation_error
+                if not report:
                     raise UserError(
-                        current.env._("Received XML failed its integrity check.")
+                        current.env._("Received evidence changed; retry processing.")
                     )
-                ruleset = os.environ.get("KMEE_UAE_NORMATIVE_RULESET", DEFAULT_RULESET)
-                selected_package = describe_ruleset(ruleset)
-                tree = parse_invoice_xml(content)
-                prior_identity = False
-                for history in current.processing_history_ids.sorted("id"):
-                    if (
-                        history.normative_ruleset
-                        or history.normative_manifest_hash
-                        or history.validation_report
-                    ):
-                        if history.normative_ruleset or history.normative_manifest_hash:
-                            if not (
-                                history.normative_ruleset
-                                and history.normative_manifest_hash
-                            ):
-                                raise UserError(
-                                    current.env._(
-                                        "This received document's selected PINT "
-                                        "evidence is incomplete; contact support."
-                                    )
-                                )
-                            prior_identity = {
-                                "ruleset": history.normative_ruleset,
-                                "manifest_sha256": history.normative_manifest_hash,
-                            }
-                        else:
-                            try:
-                                report_text = history.validation_report
-                                expected_report_hash = hashlib.sha256(
-                                    report_text.encode("utf-8")
-                                ).hexdigest()
-                                if (
-                                    history.validation_report_hash
-                                    != expected_report_hash
-                                ):
-                                    raise ValueError(
-                                        "Retained PINT report hash mismatch"
-                                    )
-                                retained_report = json.loads(report_text)
-                                prior_identity = {
-                                    "ruleset": retained_report["ruleset"],
-                                    "manifest_sha256": retained_report["resources"][
-                                        "manifest_sha256"
-                                    ],
-                                }
-                            except (KeyError, TypeError, ValueError) as error:
-                                raise UserError(
-                                    current.env._(
-                                        "This received document's retained PINT "
-                                        "identity is unavailable; contact support."
-                                    )
-                                ) from error
-                        break
-                if prior_identity and prior_identity != selected_package:
-                    raise UserError(
-                        current.env._(
-                            "This received document's pinned PINT package differs "
-                            "from the configured package. Ask support to restore "
-                            "the original configuration before retrying."
-                        )
-                    )
-                directory = os.environ.get("KMEE_UAE_NORMATIVE_DIR")
-                if not directory:
-                    raise UserError(
-                        current.env._(
-                            "Configure the offline UAE normative resource directory."
-                        )
-                    )
-                report = OfflinePintValidator(directory, ruleset=ruleset).validate(
-                    content
-                )
-                # Preserve the specific cardinality diagnostic alongside the report.
-                current._received_beneficiary_id(tree)
-                current._received_principal_id(tree)
-                current.env["account.move"]._l10n_ae_check_pint_report(report)
                 move = current.with_company(current.company_id)._process_received_xml()
         except (
             UserError,
@@ -415,6 +378,61 @@ class UaeEdiInbox(models.Model):
             selected_package=selected_package,
         )
         return True
+
+    def _check_processing_package_identity(self, selected_package):
+        self.ensure_one()
+        prior_identity = False
+        for history in self.processing_history_ids.sorted("id"):
+            if (
+                history.normative_ruleset
+                or history.normative_manifest_hash
+                or history.validation_report
+            ):
+                if history.normative_ruleset or history.normative_manifest_hash:
+                    if not (
+                        history.normative_ruleset and history.normative_manifest_hash
+                    ):
+                        raise UserError(
+                            self.env._(
+                                "This received document's selected PINT "
+                                "evidence is incomplete; contact support."
+                            )
+                        )
+                    prior_identity = {
+                        "ruleset": history.normative_ruleset,
+                        "manifest_sha256": history.normative_manifest_hash,
+                    }
+                else:
+                    try:
+                        report_text = history.validation_report
+                        expected_report_hash = hashlib.sha256(
+                            report_text.encode("utf-8")
+                        ).hexdigest()
+                        if history.validation_report_hash != expected_report_hash:
+                            raise ValueError("Retained PINT report hash mismatch")
+                        retained_report = json.loads(report_text)
+                        prior_identity = {
+                            "ruleset": retained_report["ruleset"],
+                            "manifest_sha256": retained_report["resources"][
+                                "manifest_sha256"
+                            ],
+                        }
+                    except (KeyError, TypeError, ValueError) as error:
+                        raise UserError(
+                            self.env._(
+                                "This received document's retained PINT "
+                                "identity is unavailable; contact support."
+                            )
+                        ) from error
+                break
+        if prior_identity and prior_identity != selected_package:
+            raise UserError(
+                self.env._(
+                    "This received document's pinned PINT package differs "
+                    "from the configured package. Ask support to restore "
+                    "the original configuration before retrying."
+                )
+            )
 
     def _processing_failure_diagnostic(self, error):
         if not isinstance(error, UniqueViolation):
