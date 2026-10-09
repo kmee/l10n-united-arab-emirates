@@ -14,7 +14,7 @@ from odoo.addons.l10n_ae_edi.tools.controlled_client import (
 
 
 class UnreadableReceivedReplay(AccessError):
-    """An exact retained replay exists, but its original cannot be disclosed."""
+    """Exact received evidence exists, but its original cannot be disclosed."""
 
 
 class ControlledInboxWorker:
@@ -208,7 +208,7 @@ class ControlledInboxWorker:
                                 binding.id, remote_id, content, event_id=event_id
                             )
                         except UnreadableReceivedReplay:
-                            # Exact bytes were already retained; reveal no source ID.
+                            # Exact bytes are retained; reveal no unreadable source ID.
                             # Other access/authority failures still abort the page.
                             continue
                         inbox_ids.append(inbox.id)

@@ -94,7 +94,7 @@ class UaeEdiInboxRejection(models.Model):
                 )
             return current
         digest = hashlib.sha256(b"").hexdigest()
-        return (
+        current = (
             super(UaeEdiInboxRejection, ledger)
             .create(
                 {
@@ -112,6 +112,11 @@ class UaeEdiInboxRejection(models.Model):
             )
             .with_env(self.env)
         )
+        if not current.has_access("read"):
+            raise UnreadableReceivedReplay(
+                self.env._("The retained rejected retrieval is not readable.")
+            )
+        return current
 
     @api.model_create_multi
     def create(self, vals_list):
