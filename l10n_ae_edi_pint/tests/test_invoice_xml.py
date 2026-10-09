@@ -5,6 +5,7 @@ import io
 import json
 import logging
 import os
+import sys
 import tempfile
 import uuid
 import zipfile
@@ -1824,6 +1825,45 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         self.assertFalse(invoice.l10n_ae_transmission_ids)
         self.assertFalse(invoice.ubl_cii_xml_id or invoice.invoice_pdf_report_id)
         self.assertEqual(invoice.line_ids.sorted("id").read(ledger_fields), ledger)
+
+    def test_unprepared_preview_builds_one_native_xml_without_creating_an_issue(self):
+        self.env.company.l10n_ae_edi_auto_prepare = False
+        invoice = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a
+        ).with_user(self.simple_accountman)
+        self.assertFalse(invoice.env.su)
+        calls = []
+        previous_profiler = sys.getprofile()
+
+        def observe_native_export(frame, event, argument):
+            if (
+                event == "call"
+                and frame.f_code.co_name == "_export_invoice"
+                and frame.f_code.co_filename.endswith(
+                    "/account_edi_ubl_cii/models/account_edi_ubl.py"
+                )
+            ):
+                calls.append(frame.f_code.co_filename)
+            if previous_profiler:
+                previous_profiler(frame, event, argument)
+
+        # Observe real Python calls, without replacing a product collaborator.
+        sys.setprofile(observe_native_export)
+        try:
+            content = invoice.preview_l10n_ae_pint()
+        finally:
+            sys.setprofile(previous_profiler)
+        _logger.info("UAE_PUBLIC_PREVIEW_NATIVE_EXPORTS=%s", len(calls))
+        tree = etree.fromstring(content.encode())
+        self.assertEqual(
+            tree.findtext("cac:LegalMonetaryTotal/cbc:PayableAmount", namespaces=NS),
+            "105.00",
+        )
+        self.assertEqual(len(calls), 1, "One public preview must build one native XML")
+        self.assertEqual(invoice.state, "draft")
+        self.assertFalse(invoice.l10n_ae_fiscal_uuid)
+        self.assertFalse(invoice.l10n_ae_transmission_ids)
+        self.assertFalse(invoice.ubl_cii_xml_id or invoice.invoice_pdf_report_id)
 
     def test_native_send_cron_isolates_invalid_invoice_across_companies(self):
         self.env.company.l10n_ae_edi_auto_prepare = False
