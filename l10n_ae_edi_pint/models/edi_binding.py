@@ -66,6 +66,12 @@ class UaeEdiBinding(models.Model):
     def _record_controlled_receive_review(self, code=False):
         self.ensure_one()
         self.check_access("read")
+        if self.controlled_receive_error == code and bool(
+            self.controlled_receive_error_at
+        ) == bool(code):
+            # Keep the time of the diagnostic transition. Repeated polls must
+            # not rewrite an unchanged binding and conflict with review locks.
+            return True
         return super(UaeEdiBinding, self.sudo()).write(
             {
                 "controlled_receive_error": code,
