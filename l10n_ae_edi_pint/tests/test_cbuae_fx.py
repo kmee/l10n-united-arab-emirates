@@ -73,7 +73,11 @@ class TestUaeCbuaeFx(TestUaeInvoiceXml):
         # Administrative master change, in this disposable fixture only. ZAR is a
         # valid invoice currency code: schema validity must not hide the fact that
         # the imported source was reviewed for USD on this native currency ID.
-        self.env.ref("base.ZAR").write({"name": "ZZX"})
+        zar = self.env.ref("base.ZAR")
+        zar.write({"name": "ZZX"})
+        # Release the unique code before reusing it: deferred writes to two
+        # records do not promise the administrative edit order at flush_all.
+        zar.flush_recordset(["name"])
         usd.write({"name": "ZAR"})
         # Complete the native master edit before measuring any UAE replay.
         self.env.flush_all()
