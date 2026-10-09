@@ -8084,8 +8084,20 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
                 comparison = bill.l10n_ae_received_aed_comparison
                 self.assertEqual(comparison["vat_converted"], "18.36")
                 self.assertEqual(comparison["gross_converted"], "385.61")
-                with Form(bill) as form:
-                    self.assertIn("before posting", form.l10n_ae_received_aed_review)
+                unchanged_fields = [
+                    "invoice_date",
+                    "write_uid",
+                    "write_date",
+                    "l10n_ae_received_tax_amount",
+                    "l10n_ae_received_tax_inclusive_amount",
+                    "l10n_ae_received_aed_comparison",
+                ]
+                before_form_read = bill.read(unchanged_fields)
+                # Inspect the readonly notice without the context manager's
+                # implicit save of unrelated native/Enterprise form fields.
+                form = Form(bill)
+                self.assertIn("before posting", form.l10n_ae_received_aed_review)
+                self.assertEqual(bill.read(unchanged_fields), before_form_read)
                 notice = bill.l10n_ae_received_aed_review
                 rate.rate = 1 / 3.70
                 bill.invoice_line_ids[0].price_unit = 99
