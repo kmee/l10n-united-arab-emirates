@@ -1351,6 +1351,102 @@ class TestUaeFiscalCategoryMatrix(AccountTestInvoicingCommon):
                 or transmission.validation_receipt
             )
 
+    def test_small_usd_quantity_emits_decimal_aed_without_binary_residue(self):
+        # Independent worked vector: 3 * USD0.10, VAT5% gives raw USD0.015
+        # VAT / USD0.315 gross. At AED/USD3.672500: 0.0550875 / 1.1568375.
+        usd = self.env.ref("base.USD")
+        usd.active = True
+        self.env["res.currency.rate"].create(
+            {
+                "currency_id": usd.id,
+                "company_id": self.env.company.id,
+                "name": "2019-01-01",
+                "rate": 1 / 3.6725,
+            }
+        )
+        tax = self.tax_sale_a.copy(
+            {"name": "Synthetic small S", "amount": 5, "ubl_cii_tax_category_code": "S"}
+        )
+        binding = review_controlled_binding(
+            self.env["l10n_ae.edi.binding"].create({"name": "Synthetic decimal AED"}),
+            self.simple_accountman,
+            capabilities=CONTROLLED_CAPABILITIES,
+            note="Synthetic reviewed controlled contract fixture.",
+        )
+        invoice = (
+            self.env["account.move"]
+            .with_user(self.simple_accountman)
+            .create(
+                {
+                    "move_type": "out_invoice",
+                    "partner_id": self.partner_a.id,
+                    "journal_id": self.company_data["default_journal_sale"].id,
+                    "currency_id": usd.id,
+                    "invoice_date": "2019-01-01",
+                    "l10n_ae_binding_id": binding.id,
+                    "l10n_ae_tax_exchange_rate": "3.672500",
+                    "l10n_ae_tax_exchange_date": "2019-01-01",
+                    "l10n_ae_tax_exchange_source": "SYNTH-SMALL-DECIMAL",
+                    "invoice_line_ids": [
+                        Command.create(
+                            {
+                                "name": "Synthetic small service",
+                                "quantity": 3,
+                                "price_unit": 0.10,
+                                "account_id": self.company_data[
+                                    "default_account_revenue"
+                                ].id,
+                                "tax_ids": [Command.set(tax.ids)],
+                            }
+                        )
+                    ],
+                }
+            )
+        )
+        self.assertFalse(invoice.env.su)
+        invoice.action_post()
+        ledger_fields = [
+            "account_id",
+            "debit",
+            "credit",
+            "amount_currency",
+            "currency_id",
+            "create_date",
+            "write_date",
+        ]
+        ledger = invoice.line_ids.read(ledger_fields)
+        invoice.action_l10n_ae_validate()
+        invoice.action_l10n_ae_prepare()
+        issue = invoice.l10n_ae_transmission_id
+        xml = etree.fromstring(issue.xml_content.encode())
+        line = xml.find("cac:InvoiceLine", NS)
+        self.assertEqual(
+            line.findtext("cac:ItemPriceExtension/cbc:Amount", namespaces=NS),
+            "1.1568375",
+        )
+        self.assertEqual(
+            line.findtext(
+                "cac:ItemPriceExtension/cac:TaxTotal/cbc:TaxAmount", namespaces=NS
+            ),
+            "0.0550875",
+        )
+        report = invoice.validate_l10n_ae_pint()
+        self.assertTrue(report["valid"], report)
+        self.assertTrue(report["xsd_valid"], report)
+        evidence_fields = [
+            "xml_content",
+            "payload",
+            "idempotency_key",
+            "create_date",
+            "write_date",
+        ]
+        original = issue.read(evidence_fields)
+        invoice.action_l10n_ae_prepare()
+        self.assertEqual(invoice.preview_l10n_ae_pint(), issue.xml_content)
+        self.assertEqual(issue.read(evidence_fields), original)
+        self.assertEqual(invoice.line_ids.read(ledger_fields), ledger)
+        self.assertFalse(issue.attempt_ids or issue.event_ids or issue.remote_id)
+
     def test_fractional_usd_quantity_keeps_high_precision_price_and_raw_aed_lines(self):
         # Worked vector, independent of the exporter: 400.1234 USD * 0.125
         # = 50.015425 net, 2.50077125 VAT, 52.51619625 gross before rounding.
