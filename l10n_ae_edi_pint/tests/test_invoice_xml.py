@@ -8092,6 +8092,7 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
                     "l10n_ae_received_tax_inclusive_amount",
                     "l10n_ae_received_aed_comparison",
                 ]
+                bill.flush_recordset()
                 before_form_read = bill.read(unchanged_fields)
                 # Inspect the readonly notice without the context manager's
                 # implicit save of unrelated native/Enterprise form fields.
