@@ -10,6 +10,8 @@ from odoo.exceptions import UserError
 from odoo.addons.account_edi_ubl_cii.models.account_edi_common import FloatFmt
 from odoo.addons.account_edi_ubl_cii.tools.ubl_21_common import CustomerParty, TaxTotal
 
+from ..tools.errors import UaePintExportReview
+
 
 class AccountEdiUblUae(models.AbstractModel):
     _name = "account.edi.ubl.kmee_ae"
@@ -188,7 +190,12 @@ class AccountEdiUblUae(models.AbstractModel):
         account_builder = (
             self._ubl_get_payment_means_payee_financial_account_node_from_partner_bank
         )
-        if instruction := vals["invoice"]._l10n_ae_payment_means():
+        try:
+            instruction = vals["invoice"]._l10n_ae_payment_means()
+        except UaePintExportReview as error:
+            vals["l10n_ae_constraints"]["uae-payment-means"] = str(error)
+            return result
+        if instruction:
             vals["document_node"]["cac:PaymentMeans"] = [
                 {
                     "cbc:PaymentMeansCode": {

@@ -11,6 +11,7 @@ from odoo.exceptions import UserError
 from odoo.addons.base.models.res_partner_bank import sanitize_account_number
 from odoo.addons.l10n_ae_edi.tools.errors import UaeDocumentValidationError
 
+from ..tools.errors import UaePintExportReview
 from ..tools.validation import (
     DEFAULT_RULESET,
     OfflinePintValidator,
@@ -82,7 +83,7 @@ class AccountMove(models.Model):
         elif journal.type == "bank" and method.code == "manual":
             code, name = "30", "Credit transfer"
         else:
-            raise UserError(
+            raise UaePintExportReview(
                 self.env._(
                     "Review UAE Payment Instrument on the selected journal method "
                     "before preparation. Its native payment method does not "
@@ -94,7 +95,7 @@ class AccountMove(models.Model):
             sanitize_account_number(account.account_number) if account else None
         )
         if code == "30" and not identifier:
-            raise UserError(
+            raise UaePintExportReview(
                 self.env._(
                     "IBR-192-AE: credit transfer requires the recipient bank account. "
                     "Review the native invoice recipient bank before preparation."
