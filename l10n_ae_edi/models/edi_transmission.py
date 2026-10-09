@@ -101,6 +101,7 @@ class UaeEdiTransmission(models.Model):
             ("xml_integrity", "Frozen XML Integrity Review Required"),
             ("package_mismatch", "Pinned PINT Package Review Required"),
             ("endpoint_mismatch", "Original Controlled Endpoint Required"),
+            ("provider_mismatch", "Original Provider Binding Required"),
         ],
         readonly=True,
         copy=False,
