@@ -238,3 +238,11 @@ and preview remain distinct from formal Validate:100 lines atUSD 1.23/5% with pe
 rounding still fail aligned-ibrp-s-09 for source VAT 6.00 versus expected6.15. No ledger
 patch bypasses that rule. Scenario14 describes the actions, repair boundaries and
 pending complete rounding/browser/ASP qualification.
+
+
+For an unprepared UAE invoice, native **Send → Format for this Send** offers
+**Customer default**, **PINT-AE** and **PDF only**. This choice belongs to the current
+wizard and does not change the customer preference. Changing the sending method keeps
+an explicit choice. PINT generation retains its mandatory checks; PDF-only generation
+does not fulfill a required electronic invoice obligation. Already prepared originals
+retain their PINT format. Native batch Send still uses customer defaults per invoice.
