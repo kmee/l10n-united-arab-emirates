@@ -12,7 +12,7 @@ from odoo import api, fields
 from odoo.exceptions import AccessError, UserError
 
 from .controlled_client import ControlledAspClient, ControlledAspError
-from .errors import UaeDocumentValidationError
+from .errors import UaeControlledEndpointMismatch, UaeDocumentValidationError
 
 
 class ControlledExecutor:
@@ -209,5 +209,14 @@ class ControlledExecutor:
                     cursor.commit()
                 if outcome["result"] == "blocked":
                     outcome["error_kind"] = "local_review"
+            except UaeControlledEndpointMismatch:
+                with self.registry.cursor() as cursor:
+                    record = self._record(cursor, record_id).sudo()
+                    outcome["result"] = record._mark_controlled_endpoint_review(
+                        self.endpoint, self.clock()
+                    )
+                    cursor.commit()
+                if outcome["result"] == "blocked":
+                    outcome["error_kind"] = "endpoint_mismatch"
             outcomes.append(outcome)
         return outcomes

@@ -11,3 +11,7 @@ class UaeDocumentValidationError(UserError):
     def __init__(self, message, report=None):
         super().__init__(message)
         self.report = report
+
+
+class UaeControlledEndpointMismatch(UserError):
+    """A frozen transmission must reconcile through its original route."""

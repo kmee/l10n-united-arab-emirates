@@ -10,6 +10,8 @@ from odoo.exceptions import UserError
 from odoo.fields import Domain
 from odoo.tools.binary import BinaryBytes
 
+from ..tools.errors import UaeControlledEndpointMismatch
+
 
 class UaeEdiTransmission(models.Model):
     _name = "l10n_ae.edi.transmission"
@@ -94,7 +96,12 @@ class UaeEdiTransmission(models.Model):
     claim_token = fields.Char(readonly=True, copy=False, groups="base.group_system")
     dispatch_review_required = fields.Boolean(readonly=True, copy=False)
     dispatch_error_kind = fields.Selection(
-        [("local_review", "Local Document Validation")], readonly=True, copy=False
+        [
+            ("local_review", "Local Document Validation"),
+            ("endpoint_mismatch", "Original Controlled Endpoint Required"),
+        ],
+        readonly=True,
+        copy=False,
     )
     dispatch_review_at = fields.Datetime(readonly=True, copy=False)
     dispatch_validation_receipt = fields.Text(
@@ -350,6 +357,34 @@ class UaeEdiTransmission(models.Model):
         super().write(values)
         return "blocked"
 
+    def _mark_controlled_endpoint_review(self, endpoint, now):
+        """Retain an ambiguous original route without blocking later work."""
+        self.ensure_one()
+        self.env.cr.execute(
+            "SELECT id FROM l10n_ae_edi_transmission WHERE id = %s FOR UPDATE",
+            [self.id],
+        )
+        self.invalidate_recordset()
+        if (
+            self.submission_state == "accepted"
+            or (
+                self.submission_state == "sending"
+                and self.lease_until
+                and self.lease_until > now
+            )
+            or not self.transport_endpoint
+            or self.transport_endpoint == endpoint
+        ):
+            return self.submission_state
+        super().write(
+            {
+                "dispatch_review_required": True,
+                "dispatch_error_kind": "endpoint_mismatch",
+                "dispatch_review_at": now,
+            }
+        )
+        return "blocked"
+
     def _claim_controlled(self, endpoint, now, validation):
         """Called only by the executor's short, dedicated transaction."""
         self.ensure_one()
@@ -374,7 +409,7 @@ class UaeEdiTransmission(models.Model):
         ):
             return None
         if self.transport_endpoint and self.transport_endpoint != endpoint:
-            raise UserError(
+            raise UaeControlledEndpointMismatch(
                 self.env._("Reconcile using the original controlled endpoint.")
             )
         operation = "submit" if self.submission_state == "queued" else "lookup"
