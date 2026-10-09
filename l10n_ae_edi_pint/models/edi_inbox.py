@@ -627,7 +627,7 @@ class UaeEdiInbox(models.Model):
             )
         journal = self.env["account.journal"].search(
             [
-                ("company_id", "=", self.company_id.id),
+                *self.env["account.journal"]._check_company_domain(self.company_id),
                 ("type", "=", "sale" if selfbilling else "purchase"),
                 ("is_self_billing", "=", False),
             ],
