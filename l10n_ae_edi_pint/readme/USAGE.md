@@ -1,5 +1,14 @@
 Install only in an isolated Odoo 20.0 development database. Read the repository architecture and QA instructions before preparing synthetic documents. These Alpha modules are not approved for production fiscal transmission.
 
+**Check UAE Data** includes the native XML builder's returned constraints for tax,
+commercial and eligible self-billed documents. A missing buyer country produces
+IBR-011; a missing supplier country produces IBR-009. Review the corresponding Contact
+or authorized company address, save and repeat Check on the same draft. Check does not
+post or freeze a fiscal issue. Unprepared Preview uses the same checked build once;
+prepared Preview verifies and reads the original frozen XML. Local formal validation
+and actual provider/FTA confirmations are separate operations. Native Send may still
+export again after Check; no cross-request cache is introduced.
+
 Accounting managers can open **Received UAE Documents**, inspect the preserved XML and
 select **Process Received Document**. A supported ordinary AED tax invoice creates a
 supplier bill in draft; **Open Accounting Document** opens it for accounting review. Unknown
