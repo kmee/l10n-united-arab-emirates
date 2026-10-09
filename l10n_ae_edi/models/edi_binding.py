@@ -330,6 +330,17 @@ class UaeEdiBinding(models.Model):
         scope = hashlib.sha256(identity).hexdigest().upper()
         return f"KMEE_UAE_CONTROLLED_DB_{scope}_{self.id}"
 
+    def _get_controlled_client(self, endpoint, token):
+        """Build a cursor-independent client; installed addons own their routes.
+
+        Construction validates local configuration and performs no HTTP. Overrides
+        must return the controlled transport interface without retaining this record.
+        """
+        self.ensure_one()
+        if self.provider != "controlled":
+            raise ControlledAspError("unsupported_mock_provider")
+        return ControlledAspClient(endpoint, token, "controlled")
+
     @api.model
     def _cron_dispatch_controlled(self):
         if not self.env.context.get("cron_id"):
@@ -369,7 +380,7 @@ class UaeEdiBinding(models.Model):
             configured = bool(endpoint and token)
             if configured:
                 try:
-                    ControlledAspClient(endpoint, token, binding.provider)
+                    binding._get_controlled_client(endpoint, token)
                 except (ControlledAspError, ValueError):
                     configured = False
             if not configured:

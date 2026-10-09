@@ -11,7 +11,7 @@ from psycopg2.errors import SerializationFailure
 from odoo import api, fields
 from odoo.exceptions import AccessError, UserError
 
-from .controlled_client import ControlledAspClient, ControlledAspError
+from .controlled_client import ControlledAspError
 from .errors import UaeControlledEndpointMismatch, UaeDocumentValidationError
 
 
@@ -99,7 +99,7 @@ class ControlledExecutor:
             key, provider = record.idempotency_key, record.provider
             tin = json.loads(record.payload)["company"]["tin"]
             pending_dimensions = record._controlled_pending_dimensions()
-        client = ControlledAspClient(self.endpoint, self.token, provider)
+            client = record.binding_id._get_controlled_client(self.endpoint, self.token)
         # Commit the durable reservation BEFORE remote I/O; a crash leaves a lease.
         try:
             with self.registry.cursor() as cursor:
