@@ -1816,6 +1816,8 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         ]
         ledger = invoice.line_ids.sorted("id").read(ledger_fields)
         with self.assertRaisesRegex(UserError, "IBR-011"):
+            invoice.preview_l10n_ae_pint()
+        with self.assertRaisesRegex(UserError, "IBR-011"):
             invoice.action_l10n_ae_validate()
         self.assertEqual(invoice.state, "draft")
         self.assertFalse(invoice.l10n_ae_fiscal_uuid)
