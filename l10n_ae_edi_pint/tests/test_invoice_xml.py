@@ -7676,6 +7676,78 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         self.assertEqual(inbox.move_id, bill)
         self.assertEqual(inbox.original_xml.content, content)
 
+    def test_received_credit_codes_normalize_while_unknown_reason_stays_in_review(self):
+        source = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
+        )
+        source.l10n_ae_fiscal_uuid = "cccccccd-1111-4111-8111-111111111111"
+        binding = review_controlled_binding(
+            self.env["l10n_ae.edi.binding"].create({"name": "Received code review"}),
+            self.simple_accountman,
+            capabilities=("receive",),
+            note="Synthetic reviewed receiving contract for code normalization.",
+        )
+        inboxes = self.env["l10n_ae.edi.inbox"].with_user(self.simple_accountman)
+        original = inboxes.receive_controlled_document(
+            binding.id, "code-original", etree.tostring(self._received_test_xml(source))
+        )
+        self.assertTrue(original.action_process(), original.diagnostic)
+        credit = self.init_invoice("out_refund", amounts=[40], taxes=self.tax_sale_a)
+        credit.write(
+            {
+                "reversed_entry_id": source.id,
+                "l10n_ae_credit_reason": "DL8.61.1.C",
+                "l10n_ae_fiscal_uuid": "cccccccd-2222-4222-8222-222222222222",
+                "l10n_ae_billing_frequency_code": "OTH",
+                "l10n_ae_billing_frequency_note": "Synthetic reviewed other cadence.",
+            }
+        )
+        credit.action_post()
+        for code, accepted in ((" \tDL8.61.1.C\n ", True), ("UNKNOWN", False)):
+            with self.subTest(code=code):
+                tree = self._received_test_xml(credit)
+                tree.find("./{*}DiscrepancyResponse/{*}ResponseCode").text = code
+                tree.find("./{*}InvoicePeriod/{*}DescriptionCode").text = " \tOTH\n "
+                content = etree.tostring(tree)
+                inbox = inboxes.receive_controlled_document(
+                    binding.id,
+                    "credit-code-" + ("padded" if accepted else "unknown"),
+                    content,
+                )
+                self.assertEqual(inbox.action_process(), accepted, inbox.diagnostic)
+                self.assertEqual(inbox.original_xml.content, content)
+                self.assertEqual(inbox.xml_hash, hashlib.sha256(content).hexdigest())
+                history = inbox.processing_history_ids
+                self.assertEqual(len(history), 1)
+                report = json.loads(history.validation_report)
+                self.assertEqual(report["valid"], accepted)
+                self.assertTrue(report["xsd_valid"])
+                if accepted:
+                    refund = inbox.move_id
+                    self.assertEqual(
+                        (refund.move_type, refund.state), ("in_refund", "draft")
+                    )
+                    self.assertEqual(refund.reversed_entry_id, original.move_id)
+                    self.assertEqual(refund.l10n_ae_credit_reason, "DL8.61.1.C")
+                    self.assertEqual(refund.l10n_ae_billing_frequency_code, "OTH")
+                    self.assertEqual(
+                        refund.l10n_ae_billing_frequency_note,
+                        tree.findtext("./{*}Note"),
+                    )
+                    self.assertEqual(
+                        (refund.amount_untaxed, refund.amount_tax, refund.amount_total),
+                        (40, 2, 42),
+                    )
+                    self.assertTrue(inbox.action_process(), inbox.diagnostic)
+                    self.assertEqual(inbox.move_id, refund)
+                    self.assertEqual(inbox.processing_history_ids, history)
+                else:
+                    self.assertEqual(inbox.state, "review")
+                    self.assertFalse(inbox.move_id)
+                    self.assertIn("ibr-001-ae", inbox.diagnostic.lower())
+                    self.assertFalse(history.move_id)
+                    self.assertEqual(history.outcome, "review")
+
     def test_received_partial_credit_links_the_supplier_bill_and_preserves_reason(self):
         original = self.init_invoice(
             "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
