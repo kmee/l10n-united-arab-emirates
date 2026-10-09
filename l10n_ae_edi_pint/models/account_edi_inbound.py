@@ -36,7 +36,7 @@ class AccountEdiUblUaeInbound(models.AbstractModel):
         # pylint: disable=method-required-super
         domain = [
             ("parent_id", "=", False),
-            ("company_id", "in", [False, company_id.id]),
+            *self.env["res.partner"]._check_company_domain(company_id),
         ]
         routing = kwargs.get("routing_identifier")
         if routing:
