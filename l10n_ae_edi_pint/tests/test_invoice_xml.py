@@ -2392,7 +2392,9 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         self.assertFalse(any(invoices.mapped("l10n_ae_fiscal_uuid")))
         self.assertFalse(any(invoices.mapped("sending_data")))
 
-    def test_native_pdf_only_generate_keeps_review_without_fiscal_emission(self):
+    def test_native_pdf_only_generate_skips_pint_alerts_without_fiscal_emission(
+        self,
+    ):
         self.env.company.l10n_ae_edi_auto_prepare = False
         self.partner_a.invoice_sending_method = "manual"
         invoice = self.init_invoice(
@@ -2424,11 +2426,14 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         self.assertFalse(wizard.env.su)
         self.assertFalse(wizard.sending_methods)
         self.assertFalse(wizard.invoice_edi_format)
-        alert = next(
-            v for k, v in wizard.alerts.items() if k.startswith("l10n_ae_edi_")
+        self.assertFalse(
+            {
+                k: v
+                for k, v in (wizard.alerts or {}).items()
+                if k.startswith("l10n_ae_edi_")
+            },
+            "PDF-only Generate must not display a PINT-AE review warning.",
         )
-        self.assertEqual(alert["level"], "warning")
-        self.assertIn("IBR-007-AE", alert["message"])
         wizard.action_send_and_print()
         self.assertTrue(invoice.invoice_pdf_report_id)
         # Native no-HTTP test mode renders HTML into the report attachment;
