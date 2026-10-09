@@ -580,6 +580,7 @@ class UaeEdiInbox(models.Model):
                 self.env._("The received document currency requires review.")
             )
         fiscal_values = self._received_fiscal_values(tree, currency_code)
+        aed_comparison = fiscal_values.pop("l10n_ae_received_aed_comparison")
         recipient_role = "AccountingSupplier" if selfbilling else "AccountingCustomer"
         endpoint = tree.find(f"./{{*}}{recipient_role}Party/{{*}}Party/{{*}}EndpointID")
         if (
@@ -751,6 +752,7 @@ class UaeEdiInbox(models.Model):
                         "Received totals do not match the draft accounting document."
                     )
                 )
+        move._l10n_ae_set_received_aed_comparison(aed_comparison)
         super(UaeEdiInbox, self.sudo()).write(
             {
                 "credit_reference_snapshot": reference_snapshot,
@@ -906,6 +908,7 @@ class UaeEdiInbox(models.Model):
             quantum = Decimal("0.01")
             rate_text = tree.findtext("./{*}TaxExchangeRate/{*}CalculationRate")
             rate = Decimal(1)
+            comparison = False
             vat = amount("./{*}TaxTotal/{*}TaxAmount[@currencyID='AED']")
             gross = amount("./{*}LegalMonetaryTotal/{*}TaxInclusiveAmount")
             if currency_code != "AED":
@@ -926,14 +929,22 @@ class UaeEdiInbox(models.Model):
                 document_vat = amount(
                     f"./{{*}}TaxTotal/{{*}}TaxAmount[@currencyID='{currency_code}']"
                 )
-                if vat != (document_vat * rate).quantize(
-                    quantum, rounding=ROUND_HALF_UP
-                ):
-                    raise ValueError("fiscal_vat_mismatch")
-                if declared_gross != (gross * rate).quantize(
-                    quantum, rounding=ROUND_HALF_UP
-                ):
-                    raise ValueError("fiscal_gross_mismatch")
+                # Preserve the sender's declarations. Converting rounded
+                # document headers once can differ from allocated AED totals;
+                # this is a review comparison, not a PINT equality gate.
+                comparison = {
+                    "policy": "header-conversion-half-up-2/v1",
+                    "currency": currency_code,
+                    "rate": rate_text,
+                    "vat_declared": str(vat),
+                    "vat_converted": str(
+                        (document_vat * rate).quantize(quantum, rounding=ROUND_HALF_UP)
+                    ),
+                    "gross_declared": str(declared_gross),
+                    "gross_converted": str(
+                        (gross * rate).quantize(quantum, rounding=ROUND_HALF_UP)
+                    ),
+                }
                 gross = declared_gross
             self._check_received_fiscal_lines(tree, rate)
         except (InvalidOperation, ValueError) as error:
@@ -949,6 +960,7 @@ class UaeEdiInbox(models.Model):
             else False,
             "l10n_ae_received_tax_amount": float(vat),
             "l10n_ae_received_tax_inclusive_amount": float(gross),
+            "l10n_ae_received_aed_comparison": comparison,
         }
 
     @staticmethod

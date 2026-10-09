@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import re
+from decimal import Decimal
 
 from odoo import api, fields, models
 from odoo.exceptions import UserError
@@ -34,6 +35,61 @@ class AccountMove(models.Model):
     l10n_ae_received_inbox_ids = fields.One2many(
         "l10n_ae.edi.inbox", "move_id", readonly=True
     )
+    l10n_ae_received_aed_comparison = fields.Json(readonly=True, copy=False)
+    l10n_ae_received_aed_review = fields.Text(
+        string="Received AED Header Review",
+        compute="_compute_l10n_ae_received_aed_review",
+        compute_sudo=False,
+    )
+
+    @api.depends("l10n_ae_received_aed_comparison")
+    def _compute_l10n_ae_received_aed_review(self):
+        for move in self:
+            comparison = move.l10n_ae_received_aed_comparison or {}
+            differs = comparison and any(
+                Decimal(comparison[f"{kind}_declared"])
+                != Decimal(comparison[f"{kind}_converted"])
+                for kind in ("vat", "gross")
+            )
+            move.l10n_ae_received_aed_review = (
+                self.env._(
+                    "Sender-declared AED totals differ from a conversion of the "
+                    "document totals. Review the received XML and draft accounting "
+                    "before posting.\n"
+                    "VAT: declared %(vat_declared)s; header conversion "
+                    "%(vat_converted)s AED.\n"
+                    "Gross: declared %(gross_declared)s; header conversion "
+                    "%(gross_converted)s AED.\n"
+                    "This comparison is a review aid; it does not replace the "
+                    "sender's declarations.",
+                    vat_declared=comparison["vat_declared"],
+                    vat_converted=comparison["vat_converted"],
+                    gross_declared=comparison["gross_declared"],
+                    gross_converted=comparison["gross_converted"],
+                )
+                if differs
+                else False
+            )
+
+    @api.model_create_multi
+    def create(self, vals_list):
+        if any("l10n_ae_received_aed_comparison" in vals for vals in vals_list):
+            raise UserError(self.env._("The received AED comparison is protected."))
+        return super().create(vals_list)
+
+    def write(self, vals):
+        if "l10n_ae_received_aed_comparison" in vals:
+            raise UserError(self.env._("The received AED comparison is protected."))
+        return super().write(vals)
+
+    def _l10n_ae_set_received_aed_comparison(self, comparison):
+        self.ensure_one()
+        if not comparison:
+            return
+        if not self.l10n_ae_received_document or self.l10n_ae_received_aed_comparison:
+            raise UserError(self.env._("The received AED comparison is protected."))
+        return super().write({"l10n_ae_received_aed_comparison": comparison})
+
     l10n_ae_received_credit_reference_summary = fields.Text(
         string="Received Invoice References",
         compute="_compute_l10n_ae_received_credit_reference_summary",

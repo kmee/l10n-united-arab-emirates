@@ -14,6 +14,16 @@
                     invisible="country_code != 'AE' or move_type == 'entry' or l10n_ae_received_document"
                 />
             </xpath>
+            <xpath
+                expr="//field[@name='l10n_ae_received_tax_inclusive_amount']"
+                position="after"
+            >
+                <field
+                    name="l10n_ae_received_aed_review"
+                    readonly="1"
+                    invisible="not l10n_ae_received_aed_review"
+                />
+            </xpath>
             <xpath expr="//page[@name='uae_edi']/group[1]" position="after">
                 <group
                     string="Prepared PINT Package"
