@@ -2042,15 +2042,31 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         ledger_fields = ["account_id", "debit", "credit", "amount_currency", "tax_ids"]
         ledger = invoice.line_ids.sorted("id").read(ledger_fields)
         builder = invoice.partner_id._get_edi_builder("kmee_ae_pint")
-        content, errors = builder._export_invoice(invoice)
-        self.assertIsInstance(content, bytes)
-        self.assertIsInstance(errors, set)
-        self.assertTrue(
-            any("AED exchange rate does not match accounting" in e for e in errors)
-        )
-        for action in (invoice.action_l10n_ae_validate, invoice.preview_l10n_ae_pint):
-            with self.assertRaisesRegex(UserError, "AED.*accounting"):
-                action()
+        for reviewed_rate in ("0.272294", "3.672501"):
+            with self.subTest(reviewed_rate=reviewed_rate):
+                invoice.l10n_ae_tax_exchange_rate = reviewed_rate
+                content, errors = builder._export_invoice(invoice)
+                self.assertIsInstance(content, bytes)
+                self.assertIsInstance(errors, set)
+                self.assertTrue(
+                    any(
+                        "AED exchange rate does not match accounting" in e
+                        for e in errors
+                    )
+                )
+                self.assertTrue(
+                    any("posted invoice rate: 3.672500" in e for e in errors)
+                )
+                for action in (
+                    invoice.action_l10n_ae_validate,
+                    invoice.preview_l10n_ae_pint,
+                ):
+                    with self.assertRaisesRegex(UserError, "AED.*accounting"):
+                        action()
+                self.assertFalse(invoice.l10n_ae_transmission_ids)
+                self.assertEqual(
+                    invoice.line_ids.sorted("id").read(ledger_fields), ledger
+                )
         self.assertEqual(invoice.amount_total, 105)
         self.assertEqual(invoice.amount_total_signed, 385.61)
         invoice.l10n_ae_tax_exchange_rate = "3.672500"
