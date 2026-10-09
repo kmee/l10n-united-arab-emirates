@@ -322,14 +322,14 @@ class AccountMove(models.Model):
             )
         return consumed
 
-    def action_l10n_ae_validate(self):
+    def _l10n_ae_check_pint_data(self):
         self.check_access("read")
         # Advance eligibility must be checked before full XML preflight. A
         # mismatched advance currency cannot be diagnosed as an exchange-rate
         # rounding problem just because the formatter runs earlier at Check.
         for move in self:
             move._l10n_ae_advance_references()
-        return super().action_l10n_ae_validate()
+        return super()._l10n_ae_check_pint_data()
 
     def _l10n_ae_snapshot(self):
         snapshot = super()._l10n_ae_snapshot()
