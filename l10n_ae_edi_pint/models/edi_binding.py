@@ -7,7 +7,6 @@ from odoo import api, fields, models
 from odoo.exceptions import AccessError, UserError, ValidationError
 
 from odoo.addons.l10n_ae_edi.tools.controlled_client import (
-    ControlledAspClient,
     ControlledAspError,
 )
 
@@ -137,7 +136,6 @@ class UaeEdiBinding(models.Model):
                 (
                     binding.id,
                     binding.company_id.id,
-                    binding.provider,
                     os.environ.get(prefix + "_ENDPOINT") if prefix else None,
                     os.environ.get(prefix + "_TOKEN") if prefix else None,
                 )
@@ -146,11 +144,11 @@ class UaeEdiBinding(models.Model):
         progress = self.env["ir.cron"]
         if not progress._commit_progress(remaining=len(routes)):
             return
-        for binding_id, company_id, provider, endpoint, token in routes:
+        for binding_id, company_id, endpoint, token in routes:
             configured = bool(endpoint and token)
             if configured:
                 try:
-                    ControlledAspClient(endpoint, token, provider)
+                    self.browse(binding_id)._get_controlled_client(endpoint, token)
                 except (ControlledAspError, ValueError):
                     configured = False
             if not configured:

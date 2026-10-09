@@ -8,7 +8,6 @@ from odoo import api
 from odoo.exceptions import AccessError, UserError
 
 from odoo.addons.l10n_ae_edi.tools.controlled_client import (
-    ControlledAspClient,
     ControlledAspError,
 )
 
@@ -72,10 +71,9 @@ class ControlledInboxWorker:
                         "Confirm the UAE recipient TIN before retrieving documents."
                     )
                 )
+            client = binding._get_controlled_client(self.endpoint, self.token)
         # No live database cursor or lock during remote retrieval.
-        receipt = ControlledAspClient(
-            self.endpoint, self.token, provider
-        ).lookup_inbound(tin, remote_id, event_id=event_id)
+        receipt = client.lookup_inbound(tin, remote_id, event_id=event_id)
         if receipt is None:
             with self.registry.cursor() as cursor:
                 binding = self._binding(cursor, binding_id, process=process)
@@ -153,8 +151,8 @@ class ControlledInboxWorker:
             binding._require_receiving_capabilities()
             tin, provider, route = self._receiving_route(binding)
             checkpoint = binding.controlled_inbound_cursor or ""
+            client = binding._get_controlled_client(self.endpoint, self.token)
         # Neither listing nor artifact retrieval keeps a database transaction open.
-        client = ControlledAspClient(self.endpoint, self.token, provider)
         page = client.list_inbound(tin, checkpoint, limit=limit)
         originals = []
         for document in page["documents"]:
