@@ -275,6 +275,51 @@ class TestUaeInvoicePreparation(AccountTestInvoicingCommon):
         self.assertEqual(issue.read(evidence_fields), original)
         self.assertEqual(actor.line_ids.read(ledger_fields), ledger)
 
+    def test_native_journal_line_edit_preserves_parent_audit_metadata(self):
+        entry = self.env["account.move"].create(
+            {
+                "move_type": "entry",
+                "journal_id": self.company_data["default_journal_misc"].id,
+                "line_ids": [
+                    Command.create(
+                        {
+                            "name": "Synthetic native journal line",
+                            "account_id": self.company_data[
+                                "default_account_expense"
+                            ].id,
+                            "debit": 100,
+                        }
+                    ),
+                    Command.create(
+                        {
+                            "name": "Synthetic native journal counterpart",
+                            "account_id": self.company_data[
+                                "default_account_revenue"
+                            ].id,
+                            "credit": 100,
+                        }
+                    ),
+                ],
+            }
+        )
+        self.assertFalse(entry.is_invoice(include_receipts=True))
+        self.assertFalse(entry.l10n_ae_transmission_id)
+        parent_audit = entry.read(["write_uid", "write_date"])
+        line = entry.line_ids[0].with_user(self.simple_accountman)
+        self.assertFalse(line.env.su)
+        self.assertNotEqual(entry.write_uid, self.simple_accountman)
+        line.write({"name": "Synthetic reviewed journal description"})
+        self.assertEqual(line.name, "Synthetic reviewed journal description")
+        self.assertEqual(line.write_uid, self.simple_accountman)
+        self.assertEqual(
+            entry.read(["write_uid", "write_date"]),
+            parent_audit,
+            "Editing a native journal description must not rewrite the parent "
+            "through the UAE invoice guard",
+        )
+        self.assertEqual(sum(entry.line_ids.mapped("balance")), 0)
+        self.assertFalse(entry.l10n_ae_transmission_id)
+
     def test_frozen_invoice_line_price_cannot_be_rewritten(self):
         invoice = self.init_invoice(
             "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
