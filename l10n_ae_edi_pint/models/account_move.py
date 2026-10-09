@@ -288,9 +288,25 @@ class AccountMove(models.Model):
                     "content": content,
                 }
             ]
-        return super()._get_invoice_legal_documents(
+        documents = super()._get_invoice_legal_documents(
             filetype, allow_fallback=allow_fallback
         )
+        if (
+            filetype == "ubl"
+            and allow_fallback
+            and self.commercial_partner_id.with_company(
+                self.company_id
+            )._get_ubl_cii_edi_format()
+            == "kmee_ae_pint"
+        ):
+            # Inspect this result before native HTTP/portal callers consume it.
+            # The pinned download controller checks the previous document list.
+            errors = {
+                error for document in documents for error in document.get("errors", [])
+            }
+            if errors:
+                raise UserError("\n".join(sorted(errors)))
+        return documents
 
     def _get_invoice_legal_documents_all(self, allow_fallback=False):
         self.ensure_one()
