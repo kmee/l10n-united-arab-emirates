@@ -80,7 +80,7 @@ nature, payment and AED consistency errors return per-document native
 constraints. Direct integrations must honor ``(content, errors)``; bytes
 with errors are not usable invoices. This is focused local
 qualification, separate from formal PINT validation and fiscal
-acceptance. See scenario2 and its execution limits.
+acceptance. See scenario 2 and its execution limits.
 
 Accounting managers can open **Received UAE Documents**, inspect the
 preserved XML and select **Process Received Document**. A supported
@@ -125,7 +125,7 @@ queue page without importing or posting it. The binding displays a
 protected receiving cursor/route and any configuration or retrieval
 review code. Failed pages remain retrievable; the cursor cannot be reset
 through ordinary editing. Accounting managers review each original
-separately in **Received UAE Documents**. See scenario22 in the PT/EN
+separately in **Received UAE Documents**. See scenario 22 in the PT/EN
 user manuals for the tested workflow and suspension semantics.
 
 An administrator may assign **UAE Integration / Controlled Document
@@ -240,8 +240,8 @@ Reviews**. It preserves request, assignment and processing history and
 completes only its own outstanding activity. Completing an activity
 alone does not process XML, resolve conflicts or acknowledge a fiscal
 document. Changing future company routing does not rewrite earlier
-assignments. See scenario29 in the PT/EN manuals for the selected native
-journey and proof limits.
+assignments. See scenario 29 in the PT/EN manuals for the selected
+native journey and proof limits.
 
 When **Remote ID Conflict** is present, an Accounting Manager who can
 read every retained original may use **Review Identity Variant**.
@@ -327,16 +327,26 @@ self-billing keeps the original cadence and full OTH Note on its
 protected draft; an absent cadence is not inferred from local payment
 terms. See scenarios 61–62.
 
-Computed AED line amounts and allowance bases preserve decimal precision
-without the reproduced binary arithmetic tails. For quantity3 ×USD0.10,
-raw AED VAT/gross at 3.672500 are0.0550875/1.1568375; the separate
-header/accounting mismatch still requires review and prevents
-preparation. At100% discount, the allowance base/amount remain USD0.3
-and native totals zero. Native high-precision fractional cases require
-exact line/allowance values and frozen replay; the addon does not change
-source quantities, prices, rate text or the posted ledger. Scenario14
-describes usage and limits; full fiscal/accounting rounding policy and
-dedicated browser qualification remain open.
+Computed AED line amounts and allowance bases preserve precision without
+reproduced binary arithmetic tails. Quantity 3 ×USD 0.10 at 3.672500
+retains raw line AED VAT 0.0550875/gross 1.1568375 and prepares with
+native AED header 0.07/1.17. A full discount retains allowance
+base/amount USD 0.3 and zero totals. Source inputs and ledger remain
+unchanged.
+
+For foreign documents on an AED ledger, retain the core AED TaxTotal and
+full accounting gross normalized for document direction. Independently
+compare the reviewed quote with the inverse persisted
+invoice_currency_rate at six decimals; mismatched quotes require review.
+This avoids false cent-rounding refusals on matching multi-line
+invoices. Non-AED ledgers retain their separate reviewed fiscal
+conversion. This is a documented engineering policy, not a statutory FX
+aggregation equation or ASP acceptance. Check and preview remain
+distinct from formal Validate:100 lines atUSD 1.23/5% with per-line
+rounding still fail aligned-ibrp-s-09 for source VAT 6.00 versus
+expected6.15. No ledger patch bypasses that rule. Scenario14 describes
+the actions, repair boundaries and pending complete rounding/browser/ASP
+qualification.
 
 Known issues / Roadmap
 ======================
