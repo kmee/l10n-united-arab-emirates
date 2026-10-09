@@ -5,7 +5,6 @@ from decimal import ROUND_HALF_UP, Decimal
 from lxml import etree
 
 from odoo import fields, models
-from odoo.exceptions import UserError
 
 from odoo.addons.account_edi_ubl_cii.models.account_edi_common import FloatFmt
 from odoo.addons.account_edi_ubl_cii.tools.ubl_21_common import CustomerParty, TaxTotal
@@ -641,19 +640,17 @@ class AccountEdiUblUae(models.AbstractModel):
                     str(-invoice.direction_sign * invoice.amount_total_signed)
                 ).quantize(quantum, rounding=ROUND_HALF_UP)
                 if (fiscal_vat, fiscal_gross) != (accounting_vat, accounting_gross):
-                    raise UserError(
-                        self.env._(
-                            "The fiscal AED amounts do not match accounting. "
-                            "Fiscal VAT: %(fiscal_vat)s AED; accounting VAT: "
-                            "%(accounting_vat)s AED. Fiscal gross: %(fiscal_gross)s "
-                            "AED; accounting gross: %(accounting_gross)s AED. "
-                            "Review the exchange rate and rounding before "
-                            "preparing the e-invoice.",
-                            fiscal_vat=str(fiscal_vat),
-                            accounting_vat=str(accounting_vat),
-                            fiscal_gross=str(fiscal_gross),
-                            accounting_gross=str(accounting_gross),
-                        )
+                    vals["l10n_ae_constraints"]["uae-aed-accounting"] = self.env._(
+                        "The fiscal AED amounts do not match accounting. "
+                        "Fiscal VAT: %(fiscal_vat)s AED; accounting VAT: "
+                        "%(accounting_vat)s AED. Fiscal gross: %(fiscal_gross)s "
+                        "AED; accounting gross: %(accounting_gross)s AED. "
+                        "Review the exchange rate and rounding before "
+                        "preparing the e-invoice.",
+                        fiscal_vat=str(fiscal_vat),
+                        accounting_vat=str(accounting_vat),
+                        fiscal_gross=str(fiscal_gross),
+                        accounting_gross=str(accounting_gross),
                     )
             document["cac:TaxTotal"].append(
                 {
