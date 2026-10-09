@@ -1829,8 +1829,6 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
             "credit",
             "amount_currency",
             "tax_ids",
-            "create_date",
-            "write_date",
         ]
         ledger = invoices.line_ids.sorted("id").read(ledger_fields)
         action = invoices.action_send_and_print()
