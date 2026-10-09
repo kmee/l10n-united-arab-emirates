@@ -9,6 +9,7 @@ from odoo import api, fields, models
 from odoo.exceptions import UserError
 
 from odoo.addons.base.models.res_partner_bank import sanitize_account_number
+from odoo.addons.l10n_ae_edi.tools.errors import UaeDocumentValidationError
 
 from ..tools.validation import (
     DEFAULT_RULESET,
@@ -257,8 +258,9 @@ class AccountMove(models.Model):
                 )
             content = transmission.xml_content.encode("utf-8")
             if hashlib.sha256(content).hexdigest() != transmission.xml_hash:
-                raise UserError(
-                    self.env._("The frozen UAE XML failed its integrity check.")
+                raise UaeDocumentValidationError(
+                    self.env._("The frozen UAE XML failed its integrity check."),
+                    kind="xml_integrity",
                 )
             return transmission.xml_content
         self.action_l10n_ae_validate()
