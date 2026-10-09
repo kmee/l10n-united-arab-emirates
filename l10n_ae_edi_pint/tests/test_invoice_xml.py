@@ -2377,6 +2377,13 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
             [key for key in (wizard.alerts or {}) if key.startswith("l10n_ae_edi_")]
         )
         self.assertFalse(wizard.sending_methods)
+        # Even a direct RPC/ORM mode write cannot override a preserved original.
+        wizard.write({"l10n_ae_send_format": "pdf_only"})
+        self.env.flush_all()
+        wizard.invalidate_recordset()
+        self.assertFalse(wizard.l10n_ae_can_choose_send_format)
+        self.assertEqual(wizard.invoice_edi_format, "kmee_ae_pint")
+        self.assertEqual(frozen_facts(), original)
         wizard.write({"invoice_edi_format": "facturx"})
         self.assertEqual(wizard.invoice_edi_format, "facturx")
         with (
