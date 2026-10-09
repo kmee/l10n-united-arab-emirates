@@ -23,6 +23,12 @@ from .account_tax import UAE_EXEMPTION_REASONS
 class AccountMove(models.Model):
     _inherit = "account.move"
 
+    _l10n_ae_received_fiscal_uuid_unique = models.UniqueIndex(
+        "(company_id, l10n_ae_fiscal_uuid) WHERE l10n_ae_received_document IS TRUE "
+        "AND l10n_ae_fiscal_uuid IS NOT NULL AND l10n_ae_fiscal_uuid <> ''",
+        "This received fiscal UUID already exists for this company.",
+    )
+
     l10n_ae_received_inbox_ids = fields.One2many(
         "l10n_ae.edi.inbox", "move_id", readonly=True
     )

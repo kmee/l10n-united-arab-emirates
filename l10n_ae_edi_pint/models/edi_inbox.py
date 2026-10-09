@@ -7,6 +7,7 @@ import re
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 
 from lxml import etree
+from psycopg2.errors import UniqueViolation
 
 from odoo import api, fields, models
 from odoo.exceptions import AccessError, UserError
@@ -386,13 +387,32 @@ class UaeEdiInbox(models.Model):
                 current._received_principal_id(tree)
                 current.env["account.move"]._l10n_ae_check_pint_report(report)
                 move = current.with_company(current.company_id)._process_received_xml()
-        except (UserError, UnsafeInvoiceXml, ValidationUnavailable) as error:
+        except (
+            UserError,
+            UnsafeInvoiceXml,
+            ValidationUnavailable,
+            UniqueViolation,
+        ) as error:
+            if isinstance(error, UniqueViolation):
+                moves = current.env["account.move"]
+                if error.diag.constraint_name != (
+                    moves._l10n_ae_received_fiscal_uuid_unique.full_name(moves)
+                ):
+                    raise
+                # The competing move can be outside this repeatable-read snapshot.
+                # The savepoint rolled back the import. Retry in a fresh transaction.
+                diagnostic = current.env._(
+                    "Received fiscal UUID was imported concurrently. "
+                    "Retry processing to reconcile the retained original."
+                )
+            else:
+                diagnostic = str(error)
             super(UaeEdiInbox, current.sudo()).write(
-                {"state": "review", "diagnostic": str(error)}
+                {"state": "review", "diagnostic": diagnostic}
             )
             current._record_processing_history(
                 "review",
-                diagnostic=str(error),
+                diagnostic=diagnostic,
                 validation_report=report,
                 selected_package=selected_package,
             )
