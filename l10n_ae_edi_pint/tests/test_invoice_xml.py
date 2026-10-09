@@ -1795,6 +1795,69 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         self.assertFalse(issue.attempt_ids)
         self.assertFalse(issue.event_ids)
 
+    def test_native_send_cron_isolates_invalid_invoice_across_companies(self):
+        self.env.company.l10n_ae_edi_auto_prepare = False
+        other = self.setup_other_company(name="Synthetic independent Send company")
+        other_company = other["company"]
+        other_company.l10n_ae_edi_auto_prepare = False
+        self.simple_accountman.company_ids |= other_company
+        self.partner_a.with_company(self.env.company).write(
+            {"invoice_sending_method": "manual", "invoice_edi_format": "kmee_ae_pint"}
+        )
+        self.partner_a.with_company(other_company).write(
+            {"invoice_sending_method": "manual", "invoice_edi_format": False}
+        )
+        invalid = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a
+        ).with_user(self.simple_accountman)
+        invalid.l10n_ae_free_zone = True
+        valid = self.init_invoice(
+            "out_invoice",
+            amounts=[100],
+            taxes=other["default_tax_sale"],
+            company=other_company,
+        ).with_user(self.simple_accountman)
+        invoices = invalid | valid
+        self.assertFalse(invoices.env.su)
+        self.assertNotEqual(invalid.company_id, valid.company_id)
+        invoices.action_post()
+        with self.assertRaisesRegex(UserError, "IBR-007-AE"):
+            invalid.action_l10n_ae_validate()
+        ledger_fields = [
+            "account_id",
+            "debit",
+            "credit",
+            "amount_currency",
+            "tax_ids",
+            "create_date",
+            "write_date",
+        ]
+        ledger = invoices.line_ids.sorted("id").read(ledger_fields)
+        action = invoices.action_send_and_print()
+        wizard = (
+            self.env[action["res_model"]]
+            .with_user(self.simple_accountman)
+            .with_context(**action["context"])
+            .create({})
+        )
+        wizard.action_send_and_print()
+        self.assertTrue(all(invoices.mapped("sending_data")))
+        self.assertFalse(invoices.invoice_pdf_report_id)
+        with self.enter_registry_test_mode():
+            result = self.env.ref(
+                "account.ir_cron_account_move_send"
+            ).method_direct_trigger()
+        self.assertIs(result, True)
+        self.assertTrue(valid.invoice_pdf_report_id)
+        self.assertFalse(invalid.invoice_pdf_report_id)
+        self.assertFalse(invalid.ubl_cii_xml_id)
+        self.assertFalse(invoices.l10n_ae_transmission_ids)
+        self.assertFalse(any(invoices.mapped("sending_data")))
+        self.assertTrue(
+            any("IBR-007-AE" in (m.body or "") for m in invalid.message_ids)
+        )
+        self.assertEqual(invoices.line_ids.sorted("id").read(ledger_fields), ledger)
+
     def test_native_batch_send_groups_category_review_without_emitting(self):
         self.env.company.l10n_ae_edi_auto_prepare = False
         self.partner_a.invoice_sending_method = "manual"
