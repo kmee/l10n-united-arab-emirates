@@ -132,14 +132,14 @@ class UaeEdiBinding(models.Model):
         )
         routes = []
         for binding in bindings:
-            prefix = f"KMEE_UAE_CONTROLLED_{binding.id}"
+            prefix = binding._controlled_environment_prefix()
             routes.append(
                 (
                     binding.id,
                     binding.company_id.id,
                     binding.provider,
-                    os.environ.get(prefix + "_ENDPOINT"),
-                    os.environ.get(prefix + "_TOKEN"),
+                    os.environ.get(prefix + "_ENDPOINT") if prefix else None,
+                    os.environ.get(prefix + "_TOKEN") if prefix else None,
                 )
             )
         registry, uid = self.env.registry, self.env.uid
