@@ -40,7 +40,19 @@ class TestUaeInvoiceIdentity(AccountTestInvoicingCommon):
             invoice.action_l10n_ae_validate()
 
     def test_confirmed_identity_allows_local_validation(self):
-        self.env.company.partner_id.state_id = self.env.ref("base.state_ae_du")
+        # The optional PINT extension checks electronic addresses at this same
+        # public action. Keep a complete positive fixture without depending on it.
+        for partner, endpoint in (
+            (self.env.company.partner_id, "1000000001"),
+            (self.partner_a, "1000000002"),
+        ):
+            values = {
+                "country_id": self.env.ref("base.ae").id,
+                "state_id": self.env.ref("base.state_ae_du").id,
+            }
+            if {"routing_scheme", "routing_endpoint"} <= set(partner._fields):
+                values.update(routing_scheme="0235", routing_endpoint=endpoint)
+            partner.write(values)
         self.env.company.write(
             {"l10n_ae_tin": "1000000001", "l10n_ae_tin_confirmed": True}
         )
