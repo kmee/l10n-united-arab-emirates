@@ -8092,7 +8092,10 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
                     "l10n_ae_received_tax_inclusive_amount",
                     "l10n_ae_received_aed_comparison",
                 ]
-                bill.flush_recordset()
+                # Compare persisted values across Form's native cache refresh,
+                # rather than mixing creation-time cache and database metadata.
+                self.env.flush_all()
+                self.env.invalidate_all()
                 before_form_read = bill.read(unchanged_fields)
                 # Inspect the readonly notice without the context manager's
                 # implicit save of unrelated native/Enterprise form fields.
