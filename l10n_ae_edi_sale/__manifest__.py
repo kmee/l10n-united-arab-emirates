@@ -3,10 +3,11 @@
 {
     "name": "UAE Electronic Invoicing Sales",
     "summary": "Preserve taxed advance references on final sales invoices",
-    "version": "20.0.1.3.0",
+    "version": "20.0.1.0.0",
     "development_status": "Alpha",
     "category": "Accounting/Localizations",
-    "author": "KMEE",
+    "author": "KMEE, Odoo Community Association (OCA)",
+    "maintainers": ["mileo"],
     "website": "https://github.com/kmee/l10n-uae",
     "license": "AGPL-3",
     "depends": ["l10n_ae_edi_pint", "sale"],
