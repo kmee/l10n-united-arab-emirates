@@ -623,6 +623,11 @@ class AccountEdiUblUae(models.AbstractModel):
         }
         currency = vals["currency"].name
         document = vals["document_node"]
+        native_aed_tax_totals = [
+            node
+            for node in document["cac:TaxTotal"]
+            if node["cbc:TaxAmount"]["currencyID"] == "AED"
+        ]
         document["cac:TaxTotal"] = [
             node
             for node in document["cac:TaxTotal"]
@@ -655,38 +660,44 @@ class AccountEdiUblUae(models.AbstractModel):
                 * rate
             )
             if invoice.company_id.currency_id.name == "AED":
-                quantum = Decimal("0.01")
-                fiscal_vat = vat.quantize(quantum, rounding=ROUND_HALF_UP)
-                fiscal_gross = gross.quantize(quantum, rounding=ROUND_HALF_UP)
-                accounting_vat = Decimal(
-                    str(-invoice.direction_sign * invoice.amount_tax_signed)
-                ).quantize(quantum, rounding=ROUND_HALF_UP)
-                accounting_gross = Decimal(
-                    str(-invoice.direction_sign * invoice.amount_total_signed)
-                ).quantize(quantum, rounding=ROUND_HALF_UP)
-                if (fiscal_vat, fiscal_gross) != (accounting_vat, accounting_gross):
+                # Native tax details already allocate the posted AED cents.
+                # Validate the quote itself, rather than comparing two different
+                # rounding orders and blocking otherwise valid multi-line moves.
+                native_rate = Decimal(1) / Decimal(str(invoice.invoice_currency_rate))
+                native_rate = native_rate.quantize(
+                    Decimal("0.000001"), rounding=ROUND_HALF_UP
+                )
+                if rate != native_rate:
                     vals["l10n_ae_constraints"]["uae-aed-accounting"] = self.env._(
-                        "The fiscal AED amounts do not match accounting. "
-                        "Fiscal VAT: %(fiscal_vat)s AED; accounting VAT: "
-                        "%(accounting_vat)s AED. Fiscal gross: %(fiscal_gross)s "
-                        "AED; accounting gross: %(accounting_gross)s AED. "
-                        "Review the exchange rate and rounding before "
+                        "The reviewed AED exchange rate does not match accounting. "
+                        "Reviewed rate: %(reviewed)s AED per %(currency)s; "
+                        "posted invoice rate: %(native)s AED per %(currency)s. "
+                        "Review the quote or correct the accounting document "
+                        "through its authorized accounting workflow before "
                         "preparing the e-invoice.",
-                        fiscal_vat=str(fiscal_vat),
-                        accounting_vat=str(accounting_vat),
-                        fiscal_gross=str(fiscal_gross),
-                        accounting_gross=str(accounting_gross),
+                        reviewed=str(rate),
+                        native=str(native_rate),
+                        currency=currency,
                     )
-            document["cac:TaxTotal"].append(
-                {
-                    "cbc:TaxAmount": {
-                        "_text": format(
-                            vat.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP), "f"
-                        ),
-                        "currencyID": "AED",
+                document["cac:TaxTotal"].extend(native_aed_tax_totals)
+                gross = Decimal(
+                    str(-invoice.direction_sign * invoice.amount_total_signed)
+                )
+            if (
+                not native_aed_tax_totals
+                or invoice.company_id.currency_id.name != "AED"
+            ):
+                document["cac:TaxTotal"].append(
+                    {
+                        "cbc:TaxAmount": {
+                            "_text": format(
+                                vat.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP),
+                                "f",
+                            ),
+                            "currencyID": "AED",
+                        }
                     }
-                }
-            )
+                )
             document.setdefault("cac:AdditionalDocumentReference", []).append(
                 {
                     "cbc:ID": {"_text": "AED"},
