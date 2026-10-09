@@ -1826,6 +1826,38 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         self.assertFalse(invoice.ubl_cii_xml_id or invoice.invoice_pdf_report_id)
         self.assertEqual(invoice.line_ids.sorted("id").read(ledger_fields), ledger)
 
+    def test_native_ubl_contract_returns_tax_category_errors_without_freezing(self):
+        self.env.company.l10n_ae_edi_auto_prepare = False
+        invoice = self.init_invoice("out_invoice", amounts=[100], taxes=False)
+        invoice = invoice.with_user(self.simple_accountman)
+        invoice.l10n_ae_document_category = "tax"
+        self.assertFalse(invoice.env.su)
+        ledger_fields = ["account_id", "debit", "credit", "write_date"]
+        ledger = invoice.line_ids.sorted("id").read(ledger_fields)
+        # This is the native UBL extension protocol used by Send/download,
+        # resolved by the public core's registered format selection.
+        builder = invoice.partner_id._get_edi_builder("kmee_ae_pint")
+        content, errors = builder._export_invoice(invoice)
+        self.assertIsInstance(content, bytes)
+        self.assertIsInstance(errors, set)
+        self.assertTrue(any("IBR-151-AE" in error for error in errors), errors)
+        tree = etree.fromstring(content)
+        self.assertEqual(tree.findtext("cbc:InvoiceTypeCode", namespaces=NS), "380")
+        self.assertEqual(
+            tree.findtext("cac:LegalMonetaryTotal/cbc:PayableAmount", namespaces=NS),
+            "100.00",
+        )
+        with self.assertRaisesRegex(UserError, "IBR-151-AE"):
+            invoice.action_l10n_ae_validate()
+        with self.assertRaisesRegex(UserError, "IBR-151-AE"):
+            invoice.preview_l10n_ae_pint()
+        self.assertEqual(invoice.state, "draft")
+        self.assertFalse(
+            invoice.l10n_ae_transmission_ids or invoice.l10n_ae_fiscal_uuid
+        )
+        self.assertFalse(invoice.ubl_cii_xml_id or invoice.invoice_pdf_report_id)
+        self.assertEqual(invoice.line_ids.sorted("id").read(ledger_fields), ledger)
+
     def test_commercial_check_refuses_native_buyer_country_constraint(self):
         self.env.company.l10n_ae_edi_auto_prepare = False
         outside_scope = self.tax_sale_a.copy(
