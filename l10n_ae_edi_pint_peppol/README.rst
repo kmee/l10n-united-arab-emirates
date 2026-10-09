@@ -80,6 +80,14 @@ Contributors
 Maintainers
 -----------
 
+.. |maintainer-mileo| image:: https://github.com/mileo.png?size=40px
+    :target: https://github.com/mileo
+    :alt: mileo
+
+Current maintainer:
+
+|maintainer-mileo| 
+
 This module is part of the `kmee/l10n-uae <https://github.com/kmee/l10n-uae/tree/20.0/l10n_ae_edi_pint_peppol>`_ project on GitHub.
 
 You are welcome to contribute.
