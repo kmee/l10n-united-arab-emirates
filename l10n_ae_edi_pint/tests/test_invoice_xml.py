@@ -2016,6 +2016,66 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         invoice.action_l10n_ae_validate()
         self.assertFalse(invoice.l10n_ae_transmission_ids)
 
+    def test_native_ubl_contract_returns_aed_accounting_mismatch(self):
+        self.env.company.l10n_ae_edi_auto_prepare = False
+        usd = self.env.ref("base.USD")
+        usd.active = True
+        self.env["res.currency.rate"].create(
+            {
+                "currency_id": usd.id,
+                "company_id": self.env.company.id,
+                "name": "2019-01-01",
+                "rate": 1 / 3.6725,
+            }
+        )
+        invoice = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a, currency=usd
+        ).with_user(self.simple_accountman)
+        invoice.write(
+            {
+                "l10n_ae_tax_exchange_rate": "0.272294",
+                "l10n_ae_tax_exchange_date": invoice.invoice_date,
+                "l10n_ae_tax_exchange_source": "SYNTH-WRONG-DIRECTION",
+            }
+        )
+        self.assertFalse(invoice.env.su)
+        ledger_fields = ["account_id", "debit", "credit", "amount_currency", "tax_ids"]
+        ledger = invoice.line_ids.sorted("id").read(ledger_fields)
+        builder = invoice.partner_id._get_edi_builder("kmee_ae_pint")
+        content, errors = builder._export_invoice(invoice)
+        self.assertIsInstance(content, bytes)
+        self.assertIsInstance(errors, set)
+        self.assertTrue(any("AED amounts do not match accounting" in e for e in errors))
+        for action in (invoice.action_l10n_ae_validate, invoice.preview_l10n_ae_pint):
+            with self.assertRaisesRegex(UserError, "AED.*accounting"):
+                action()
+        self.assertEqual(invoice.amount_total, 105)
+        self.assertEqual(invoice.amount_total_signed, 385.61)
+        invoice.l10n_ae_tax_exchange_rate = "3.672500"
+        content, errors = builder._export_invoice(invoice)
+        self.assertFalse(errors)
+        document = etree.fromstring(content)
+        self.assertEqual(
+            document.xpath(
+                "./cac:TaxTotal/cbc:TaxAmount[@currencyID='AED']/text()", namespaces=NS
+            ),
+            ["18.36"],
+        )
+        self.assertEqual(
+            document.xpath(
+                "./cac:AdditionalDocumentReference[cbc:ID='AED']/"
+                "cbc:DocumentDescription/text()",
+                namespaces=NS,
+            ),
+            ["385.61"],
+        )
+        invoice.action_l10n_ae_validate()
+        self.assertEqual(invoice.line_ids.sorted("id").read(ledger_fields), ledger)
+        self.assertEqual(invoice.state, "draft")
+        self.assertFalse(invoice.l10n_ae_fiscal_uuid)
+        self.assertFalse(invoice.l10n_ae_transmission_ids)
+        self.assertFalse(invoice.ubl_cii_xml_id or invoice.invoice_pdf_report_id)
+
     def test_native_send_cron_isolates_invalid_invoice_across_companies(self):
         self.env.company.l10n_ae_edi_auto_prepare = False
         other = self.setup_other_company(name="Synthetic independent Send company")
