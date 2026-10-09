@@ -338,7 +338,11 @@ class UaeEdiTransmission(models.Model):
             [self.id],
         )
         self.invalidate_recordset()
-        if self.submission_state in {"accepted", "sending"}:
+        if self.submission_state == "accepted" or (
+            self.submission_state == "sending"
+            and self.lease_until
+            and self.lease_until > now
+        ):
             return self.submission_state
         values = {
             "dispatch_review_required": True,
