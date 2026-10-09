@@ -1829,7 +1829,11 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
     def test_commercial_check_refuses_native_buyer_country_constraint(self):
         self.env.company.l10n_ae_edi_auto_prepare = False
         outside_scope = self.tax_sale_a.copy(
-            {"amount": 0, "ubl_cii_tax_category_code": "O"}
+            {
+                "name": "Synthetic commercial Check outside scope",
+                "amount": 0,
+                "ubl_cii_tax_category_code": "O",
+            }
         )
         invoice = self.init_invoice(
             "out_invoice", amounts=[100], taxes=outside_scope
