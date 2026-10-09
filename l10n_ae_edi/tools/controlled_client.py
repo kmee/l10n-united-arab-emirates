@@ -33,7 +33,9 @@ class ControlledAspClient:
             or parsed.password
         ):
             raise ControlledAspError("nonlocal_mock_endpoint")
-        if provider not in ("controlled", "cleartax", "suntech_tca"):
+        if not isinstance(provider, str) or not re.fullmatch(
+            r"[a-z][a-z0-9_]{0,63}", provider
+        ):
             raise ControlledAspError("unsupported_mock_provider")
         self.host, self.port = parsed.hostname, parsed.port or 80
         self.token, self.provider, self.timeout = token, provider, timeout
