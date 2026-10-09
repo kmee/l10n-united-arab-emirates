@@ -1,6 +1,7 @@
 # Copyright 2026 KMEE
 # License AGPL-3.0 or later (https://www.gnu.org/licenses/agpl).
 from decimal import ROUND_HALF_UP, Decimal
+from math import inf, isfinite, nextafter
 
 from lxml import etree
 
@@ -552,14 +553,37 @@ class AccountEdiUblUae(models.AbstractModel):
         )
         return raw_base
 
+    @staticmethod
+    def _l10n_ae_computed_decimal(value):
+        # Native tax results are binary64 intermediates, not exact decimal
+        # inputs. Choose the shortest decimal that maps to this float or one
+        # adjacent representable float. This removes arithmetic tails without
+        # an absolute decimal-place cutoff (small/high-precision values survive).
+        # Never apply this boundary to entered prices, quantities or quote text.
+        if not isfinite(value):
+            raise ValueError("Non-finite native fiscal amount")
+        raw = Decimal(str(value))
+        if not value:
+            return raw
+        neighbours = (nextafter(value, -inf), value, nextafter(value, inf))
+        for digits in range(1, 18):
+            scale = Decimal(1).scaleb(raw.adjusted() - digits + 1)
+            candidate = raw.quantize(scale)
+            if float(candidate) in neighbours:
+                return candidate
+        return raw
+
     def _l10n_ae_add_line_aed_amounts(self, vals):
         details = self._l10n_ae_raw_fiscal_base_line(vals)["tax_details"]
         rate = self._l10n_ae_exchange_rate(vals)
-        gross = Decimal(str(details["raw_total_included_currency"])) * rate
-        vat = (
-            Decimal(str(details["raw_total_included_currency"]))
-            - Decimal(str(details["raw_total_excluded_currency"]))
-        ) * rate
+        included = self._l10n_ae_computed_decimal(
+            details["raw_total_included_currency"]
+        )
+        excluded = self._l10n_ae_computed_decimal(
+            details["raw_total_excluded_currency"]
+        )
+        gross = included * rate
+        vat = (included - excluded) * rate
         extension = vals["line_node"]["cac:ItemPriceExtension"] = {
             "cbc:Amount": {
                 "_text": self._l10n_ae_decimal_text(gross),
