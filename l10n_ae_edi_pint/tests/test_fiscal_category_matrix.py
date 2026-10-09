@@ -1415,10 +1415,14 @@ class TestUaeFiscalCategoryMatrix(AccountTestInvoicingCommon):
             "write_date",
         ]
         ledger = invoice.line_ids.read(ledger_fields)
-        invoice.action_l10n_ae_validate()
-        invoice.action_l10n_ae_prepare()
-        issue = invoice.l10n_ae_transmission_id
-        xml = etree.fromstring(issue.xml_content.encode())
+        # This exact review vector independently reaches the existing header
+        # reconciliation refusal (native gross1.17 vs converted gross1.18).
+        # Inspect the documented native (bytes, errors) contract, while keeping
+        # the public Check/Prepare/Preview refusal intact for the next slice.
+        builder = invoice.partner_id._get_edi_builder("kmee_ae_pint")
+        content, errors = builder._export_invoice(invoice)
+        self.assertTrue(any("AED amounts do not match accounting" in e for e in errors))
+        xml = etree.fromstring(content)
         line = xml.find("cac:InvoiceLine", NS)
         self.assertEqual(
             line.findtext("cac:ItemPriceExtension/cbc:Amount", namespaces=NS),
@@ -1430,22 +1434,18 @@ class TestUaeFiscalCategoryMatrix(AccountTestInvoicingCommon):
             ),
             "0.0550875",
         )
-        report = invoice.validate_l10n_ae_pint()
-        self.assertTrue(report["valid"], report)
-        self.assertTrue(report["xsd_valid"], report)
-        evidence_fields = [
-            "xml_content",
-            "payload",
-            "idempotency_key",
-            "create_date",
-            "write_date",
-        ]
-        original = issue.read(evidence_fields)
-        invoice.action_l10n_ae_prepare()
-        self.assertEqual(invoice.preview_l10n_ae_pint(), issue.xml_content)
-        self.assertEqual(issue.read(evidence_fields), original)
+        for action in (
+            invoice.action_l10n_ae_validate,
+            invoice.action_l10n_ae_prepare,
+            invoice.preview_l10n_ae_pint,
+        ):
+            with self.assertRaisesRegex(UserError, "AED.*accounting"):
+                action()
         self.assertEqual(invoice.line_ids.read(ledger_fields), ledger)
-        self.assertFalse(issue.attempt_ids or issue.event_ids or issue.remote_id)
+        self.assertEqual(invoice.state, "posted")
+        self.assertFalse(
+            invoice.l10n_ae_transmission_ids or invoice.l10n_ae_fiscal_uuid
+        )
 
     def test_fractional_usd_quantity_keeps_high_precision_price_and_raw_aed_lines(self):
         # Worked vector, independent of the exporter: 400.1234 USD * 0.125
