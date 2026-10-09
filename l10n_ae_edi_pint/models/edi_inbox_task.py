@@ -3,6 +3,8 @@
 from datetime import timedelta
 from typing import ClassVar
 
+from psycopg2.errors import SerializationFailure
+
 from odoo import api, fields, models
 from odoo.exceptions import AccessError, UserError, ValidationError
 
@@ -218,49 +220,73 @@ class UaeEdiInboxTask(models.Model):
             .sudo(False)
             .with_context(allowed_company_ids=actor.company_ids.ids)
         )
-        sources = model.env["l10n_ae.edi.inbox"].search(
-            [
-                "|",
-                "&",
-                ("state", "in", ["received", "review"]),
-                ("internal_review_task_ids", "=", False),
-                (
-                    "internal_review_task_ids",
-                    "any",
-                    [
-                        ("state", "=", "open"),
-                        ("next_check_at", "<=", fields.Datetime.now()),
-                    ],
-                ),
-            ],
-            order="received_at, id",
-            limit=100,
-        )
-        for source in sources:
-            task = model._for_original(source)
-            outcome, note = "checked", False
+        domain = [
+            "|",
+            "&",
+            ("state", "in", ["received", "review"]),
+            ("internal_review_task_ids", "=", False),
+            (
+                "internal_review_task_ids",
+                "any",
+                [
+                    ("state", "=", "open"),
+                    ("next_check_at", "<=", fields.Datetime.now()),
+                ],
+            ),
+        ]
+        inboxes = model.env["l10n_ae.edi.inbox"]
+        progress = model.env["ir.cron"]
+        if not progress._commit_progress(remaining=inboxes.search_count(domain)):
+            return 0
+        source_ids = inboxes.search(domain, order="received_at, id", limit=100).ids
+        completed = 0
+        for source_id in source_ids:
+            # Each commit starts another transaction. Do not reuse prefetched
+            # source/task facts from the preceding transaction's snapshot.
+            model.env.invalidate_all(flush=False)
+            source = inboxes.browse(source_id)
             try:
                 with self.env.cr.savepoint():
-                    if source.state == "processed":
-                        task.action_resolve_review()
-                    else:
-                        task._notify_reviewer()
-            except (AccessError, UserError):
-                outcome = "review_required"
-                note = self.env._(
-                    "Review the current original, company, reviewer or access "
-                    "before retrying."
-                )
-            checked = fields.Datetime.now()
-            super(UaeEdiInboxTask, task).write(
-                {
-                    "last_checked_at": checked,
-                    "next_check_at": checked + timedelta(hours=1),
-                    "last_check_state": outcome,
-                    "check_review_note": note,
-                }
-            )
-        return len(sources)
+                    # Route/original locks must be inside the same boundary as
+                    # the task, activity and diagnostic writes they protect.
+                    task = model._for_original(source)
+                    outcome, note = "checked", False
+                    try:
+                        with self.env.cr.savepoint():
+                            if source.state == "processed":
+                                task.action_resolve_review()
+                            else:
+                                task._notify_reviewer()
+                    except (AccessError, UserError):
+                        outcome = "review_required"
+                        note = self.env._(
+                            "Review the current original, company, reviewer or access "
+                            "before retrying."
+                        )
+                    checked = fields.Datetime.now()
+                    super(UaeEdiInboxTask, task).write(
+                        {
+                            "last_checked_at": checked,
+                            "next_check_at": checked + timedelta(hours=1),
+                            "last_check_state": outcome,
+                            "check_review_note": note,
+                        }
+                    )
+            except SerializationFailure:
+                # Rolling back a savepoint alone retains REPEATABLE READ's
+                # stale snapshot. Previous items have already been committed;
+                # roll back only this item and keep it in the due backlog.
+                progress._rollback_progress()
+                model.env.invalidate_all(flush=False)
+                if not progress._commit_progress(
+                    remaining=inboxes.search_count(domain)
+                ):
+                    break
+                continue
+            completed += 1
+            if not progress._commit_progress(1, remaining=inboxes.search_count(domain)):
+                break
+        return completed
 
     def action_resolve_review(self):
         self.ensure_one()
