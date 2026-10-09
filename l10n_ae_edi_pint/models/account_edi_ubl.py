@@ -506,11 +506,9 @@ class AccountEdiUblUae(models.AbstractModel):
         # Reuse native tax arithmetic for the undiscounted net basis.
         # IBR-131-AE permits an exact percentage allowance; cent rounding here
         # can violate IBR-147-AE against the preserved high-precision price.
-        basis = Decimal(
-            str(
-                self.env["account.tax"]._get_gross_total_without_tax(
-                    raw_base, vals["company"]
-                )
+        basis = self._l10n_ae_computed_decimal(
+            self.env["account.tax"]._get_gross_total_without_tax(
+                raw_base, vals["company"]
             )
         )
         amount = basis * Decimal(str(discount)) / Decimal(100)
@@ -569,7 +567,10 @@ class AccountEdiUblUae(models.AbstractModel):
         for digits in range(1, 18):
             scale = Decimal(1).scaleb(raw.adjusted() - digits + 1)
             candidate = raw.quantize(scale)
-            if float(candidate) in neighbours:
+            represented = float(candidate)
+            # A finite endpoint's nextafter neighbour can be infinity. Never
+            # admit an overflowing decimal candidate through that neighbour.
+            if isfinite(represented) and represented in neighbours:
                 return candidate
         return raw
 
