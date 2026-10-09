@@ -235,7 +235,9 @@ class AccountMove(models.Model):
         ):
             # Check the same generated categories used by Preview/Prepare/Send;
             # the public core decides which taxes become actual item nodes.
-            formatter._export_invoice(move)
+            _content, errors = formatter._export_invoice(move)
+            if errors:
+                raise UserError("\n".join(sorted(errors)))
         return result
 
     def preview_l10n_ae_pint(self):
