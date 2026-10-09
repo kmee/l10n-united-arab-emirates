@@ -155,10 +155,11 @@ class UaeEdiInbox(models.Model):
             )
 
     @api.model
+    @api.private
     def receive_controlled_document(
         self, binding_id, remote_id, content, event_id=None
     ):
-        """Persist controlled authenticated bytes without an accounting commit."""
+        """Persist authenticated worker bytes; never accept this call over RPC."""
         self._check_operator(process=False)
         binding = self.env["l10n_ae.edi.binding"].browse(binding_id).exists()
         binding.check_access("read")
