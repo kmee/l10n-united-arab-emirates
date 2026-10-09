@@ -139,6 +139,9 @@ class AccountEdiUblUae(models.AbstractModel):
 
     def _init_invoice_export_values(self, invoice):
         vals = super()._init_invoice_export_values(invoice)
+        # Core copies vals for each line. Initialize once so all copies share
+        # the document's local constraint accumulator.
+        vals["l10n_ae_constraints"] = {}
         # Pinned public 20.0 mixes new and legacy currency keys in UBL/PINT.
         # Keep this adapter local; do not patch the deployed core.
         vals["currency_id"] = vals["currency"]
@@ -146,6 +149,12 @@ class AccountEdiUblUae(models.AbstractModel):
         # OCB 20.0 still reads a removed flag; absence means normal tax nodes.
         vals.setdefault("no_party_tax_scheme", False)
         return vals
+
+    def _export_document_node_constraints(self, vals):
+        return {
+            **super()._export_document_node_constraints(vals),
+            **vals["l10n_ae_constraints"],
+        }
 
     def _ubl_add_customization_id_node(self, vals):
         result = super()._ubl_add_customization_id_node(vals)
@@ -425,12 +434,11 @@ class AccountEdiUblUae(models.AbstractModel):
         facts = line._l10n_ae_item_classification()
         nature = facts.get("rcm_nature_code")
         if not nature:
-            raise UserError(
-                self.env._(
-                    "IBR-166-AE: select the reviewed UAE reverse-charge nature "
-                    "before preparing this AE item."
-                )
+            vals["l10n_ae_constraints"]["ibr-166-ae"] = self.env._(
+                "IBR-166-AE: select the reviewed UAE reverse-charge nature "
+                "before preparing this AE item."
             )
+            return result
         # Inspect the category already computed by the core; no second tax
         # calculation, tax-name inference or NatureCode per tax-category row.
         classifications = item["cac:CommodityClassification"]
