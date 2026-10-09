@@ -70,4 +70,4 @@ access_uae_credit_reference_readonly,UAE credit reference reader,l10n_ae.credit.
 access_uae_credit_reference_invoice,UAE credit reference invoice user,l10n_ae.credit.reference,account.group_account_invoice,crud,
 access_uae_correction_reader,UAE local correction reader,l10n_ae.edi.correction,account.group_account_invoice,r,
 access_uae_correction_accountant,UAE local correction accountant,l10n_ae.edi.correction,account.group_account_readonly,r,
-access_uae_correction_wizard,UAE local correction manager,l10n_ae.edi.correction.wizard,account.group_account_manager,crud,
+access_uae_correction_wizard,UAE local correction invoice editor,l10n_ae.edi.correction.wizard,account.group_account_invoice,crud,

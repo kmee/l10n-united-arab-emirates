@@ -1089,10 +1089,6 @@ class AccountMove(models.Model):
     def action_l10n_ae_start_local_correction(self):
         self.ensure_one()
         self.check_access("write")
-        if not self.env.user.has_group("account.group_account_manager"):
-            raise AccessError(
-                self.env._("Only accounting managers can correct UAE issues.")
-            )
         return {
             "type": "ir.actions.act_window",
             "res_model": "l10n_ae.edi.correction.wizard",
@@ -1107,10 +1103,6 @@ class AccountMove(models.Model):
     def _start_l10n_ae_local_correction(self, source, reason):
         self.ensure_one()
         self.check_access("write")
-        if not self.env.user.has_group("account.group_account_manager"):
-            raise AccessError(
-                self.env._("Only accounting managers can correct UAE issues.")
-            )
         with self.env.cr.savepoint():
             if self._l10n_ae_begin_local_correction(source, reason):
                 self.button_draft()
