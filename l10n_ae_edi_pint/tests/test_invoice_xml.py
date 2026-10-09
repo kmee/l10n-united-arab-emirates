@@ -7792,6 +7792,90 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
                     before,
                 )
 
+    def test_received_native_multiline_aed_declarations_create_a_reviewable_draft(self):
+        usd = self.env.ref("base.USD")
+        usd.active = True
+        self.env["res.currency.rate"].create(
+            {
+                "currency_id": usd.id,
+                "company_id": self.env.company.id,
+                "name": "2019-01-01",
+                "rate": 1 / 3.6725,
+            }
+        )
+        source = self.init_invoice(
+            "out_invoice",
+            amounts=[1.23, 1.23, 1.23],
+            taxes=self.tax_sale_a,
+            currency=usd,
+        ).with_user(self.simple_accountman)
+        source.action_post()
+        source.write(
+            {
+                "l10n_ae_tax_exchange_rate": "3.672500",
+                "l10n_ae_tax_exchange_date": source.invoice_date,
+                "l10n_ae_tax_exchange_source": "SYNTH-INCOMING-HEADER-COMPARISON",
+                "l10n_ae_fiscal_uuid": "aaaaaaad-1111-4111-8111-111111111111",
+            }
+        )
+        # Independent native example: USD3.87 *3.6725 rounds to14.21,
+        # while the sender's cent-allocated AED ledger declares14.22.
+        self.assertEqual((source.amount_tax, source.amount_total), (0.18, 3.87))
+        self.assertEqual(
+            (source.amount_tax_signed, source.amount_total_signed), (0.66, 14.22)
+        )
+        ledger_fields = ["debit", "credit", "amount_currency", "write_date"]
+        ledger = source.line_ids.read(ledger_fields)
+        content = etree.tostring(self._received_test_xml(source))
+        binding = review_controlled_binding(
+            self.env["l10n_ae.edi.binding"].create({"name": "Incoming AED comparison"}),
+            self.simple_accountman,
+            capabilities=("receive",),
+            note="Synthetic receive-only contract for native multiline declarations.",
+        )
+        receiver = self.env["l10n_ae.edi.inbox"].with_user(self.simple_accountman)
+        inbox = receiver.receive_controlled_document(
+            binding.id, "multiline-aed", content
+        )
+        processed = inbox.action_process()
+        report = json.loads(inbox.processing_history_ids.validation_report)
+        self.assertTrue(report["valid"], report)
+        self.assertTrue(processed, inbox.diagnostic)
+        bill = inbox.move_id
+        self.assertFalse(bill.env.su)
+        self.assertEqual(
+            (inbox.state, bill.state, bill.move_type),
+            ("processed", "draft", "in_invoice"),
+        )
+        self.assertEqual((bill.amount_tax, bill.amount_total), (0.18, 3.87))
+        self.assertEqual(
+            (
+                bill.l10n_ae_received_tax_amount,
+                bill.l10n_ae_received_tax_inclusive_amount,
+            ),
+            (0.66, 14.22),
+        )
+        comparison = bill.l10n_ae_received_aed_comparison
+        self.assertEqual(comparison["gross_declared"], "14.22")
+        self.assertEqual(comparison["gross_converted"], "14.21")
+        self.assertIn("before posting", bill.l10n_ae_received_aed_review)
+        self.assertIn("14.22", bill.l10n_ae_received_aed_review)
+        self.assertIn("14.21", bill.l10n_ae_received_aed_review)
+        with self.assertRaisesRegex(UserError, "comparison is protected"):
+            bill.write({"l10n_ae_received_aed_comparison": False})
+        replay = receiver.receive_controlled_document(
+            binding.id, "multiline-aed", content
+        )
+        self.assertTrue(replay.action_process(), replay.diagnostic)
+        self.assertEqual(replay.move_id, bill)
+        self.assertEqual(bill.l10n_ae_received_aed_comparison, comparison)
+        self.assertEqual(inbox.original_xml.content, content)
+        self.assertEqual(len(inbox.processing_history_ids), 1)
+        self.assertFalse(
+            bill.l10n_ae_transmission_ids or source.l10n_ae_transmission_ids
+        )
+        self.assertEqual(source.line_ids.read(ledger_fields), ledger)
+
     def test_received_fx_header_discrepancies_stay_in_review_without_a_draft(self):
         original, _rate, _source = self._foreign_received_fixture()
         binding = self.env["l10n_ae.edi.binding"].create(
