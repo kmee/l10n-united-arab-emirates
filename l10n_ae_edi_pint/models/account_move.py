@@ -162,6 +162,14 @@ class AccountMove(models.Model):
             )
 
     def action_l10n_ae_validate(self):
+        if not self:
+            return self._l10n_ae_check_pint_data()
+        for move in self:
+            _content, result = move._l10n_ae_build_xml()
+        return result
+
+    def _l10n_ae_check_pint_data(self):
+        """Shared semantic preflight, extended by optional accounting bridges."""
         result = super().action_l10n_ae_validate()
         formatter = self.env["account.edi.ubl.kmee_ae"]
         for move in self:
@@ -228,17 +236,17 @@ class AccountMove(models.Model):
                 move.company_id.partner_id | move.partner_id.commercial_partner_id
             ):
                 party._l10n_ae_country_subentity()
-        for move in self.filtered(
-            lambda record: (
-                record.l10n_ae_document_category == "tax" and not record.is_self_billing
-            )
-        ):
-            # Check the same generated categories used by Preview/Prepare/Send;
-            # the public core decides which taxes become actual item nodes.
-            _content, errors = formatter._export_invoice(move)
-            if errors:
-                raise UserError("\n".join(sorted(errors)))
         return result
+
+    def _l10n_ae_build_xml(self):
+        """Build once after semantic checks, retaining the native Check response."""
+        self.ensure_one()
+        self.check_access("read")
+        result = self._l10n_ae_check_pint_data()
+        content, errors = self.env["account.edi.ubl.kmee_ae"]._export_invoice(self)
+        if errors:
+            raise UserError("\n".join(sorted(errors)))
+        return content, result
 
     def preview_l10n_ae_pint(self):
         """Read frozen XML when prepared; otherwise preview without submitting."""
@@ -265,10 +273,7 @@ class AccountMove(models.Model):
                     kind="xml_integrity",
                 )
             return transmission.xml_content
-        self.action_l10n_ae_validate()
-        content, errors = self.env["account.edi.ubl.kmee_ae"]._export_invoice(self)
-        if errors:
-            raise UserError("\n".join(sorted(errors)))
+        content, _result = self._l10n_ae_build_xml()
         return content.decode("utf-8")
 
     def _get_invoice_legal_documents(self, filetype, allow_fallback=False):
