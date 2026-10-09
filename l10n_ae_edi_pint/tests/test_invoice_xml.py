@@ -2045,7 +2045,9 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         content, errors = builder._export_invoice(invoice)
         self.assertIsInstance(content, bytes)
         self.assertIsInstance(errors, set)
-        self.assertTrue(any("AED amounts do not match accounting" in e for e in errors))
+        self.assertTrue(
+            any("AED exchange rate does not match accounting" in e for e in errors)
+        )
         for action in (invoice.action_l10n_ae_validate, invoice.preview_l10n_ae_pint):
             with self.assertRaisesRegex(UserError, "AED.*accounting"):
                 action()
@@ -10444,6 +10446,123 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         self.assertEqual(issue.read(evidence_fields), original)
         self.assertEqual(invoice.line_ids.read(ledger_fields), ledger)
         self.assertFalse(issue.attempt_ids or issue.event_ids or issue.remote_id)
+
+    def test_small_usd_selfbilling_invoice_and_credit_keep_native_aed_signs(self):
+        usd = self.env.ref("base.USD")
+        usd.active = True
+        self.env["res.currency.rate"].create(
+            {
+                "currency_id": usd.id,
+                "company_id": self.env.company.id,
+                "name": "2019-01-01",
+                "rate": 1 / 3.6725,
+            }
+        )
+        bill, agreement = self._selfbilling_bill_with_agreement()
+        bill = bill.with_user(self.simple_accountman)
+        bill.write(
+            {
+                "currency_id": usd.id,
+                "l10n_ae_tax_exchange_rate": "3.672500",
+                "l10n_ae_tax_exchange_date": bill.invoice_date,
+                "l10n_ae_tax_exchange_source": "SYNTH-SELF-FX",
+            }
+        )
+        bill.invoice_line_ids.write({"quantity": 3, "price_unit": 0.10})
+        self.assertFalse(bill.env.su)
+        bill.action_post()
+        bill.action_l10n_ae_prepare()
+        ledger_fields = [
+            "account_id",
+            "debit",
+            "credit",
+            "amount_currency",
+            "create_date",
+            "write_date",
+        ]
+        source = bill.l10n_ae_transmission_id.read(
+            ["payload", "xml_content", "idempotency_key"]
+        )
+        reversal = (
+            self.env["account.move.reversal"]
+            .with_user(self.simple_accountman)
+            .with_context(
+                active_model="account.move",
+                active_ids=bill.ids,
+            )
+            .create(
+                {
+                    "move_ids": [(6, 0, bill.ids)],
+                    "journal_id": bill.journal_id.id,
+                    "date": bill.invoice_date,
+                    "l10n_ae_credit_reason": "DL8.61.1.C",
+                }
+            )
+        )
+        reversal.refund_moves()
+        credit = reversal.new_move_ids
+        credit.write(
+            {
+                "l10n_ae_selfbilling_agreement_id": agreement.id,
+                "l10n_ae_binding_id": bill.l10n_ae_binding_id.id,
+                "l10n_ae_fiscal_uuid": "ddddddda-7777-4777-8777-777777777777",
+                "l10n_ae_tax_exchange_rate": "3.672500",
+                "l10n_ae_tax_exchange_date": credit.invoice_date,
+                "l10n_ae_tax_exchange_source": "SYNTH-SELF-FX-CREDIT",
+            }
+        )
+        credit.action_post()
+        for move, kind, code, signed_total in (
+            (bill, "Invoice", "389", -1.17),
+            (credit, "CreditNote", "261", 1.17),
+        ):
+            with self.subTest(kind=kind):
+                self.assertFalse(move.env.su)
+                self.assertEqual(move.amount_total_signed, signed_total)
+                ledger = move.line_ids.read(ledger_fields)
+                move.action_l10n_ae_validate()
+                move.action_l10n_ae_prepare()
+                issue = move.l10n_ae_transmission_id
+                xml = etree.fromstring(issue.xml_content.encode())
+                self.assertEqual(etree.QName(xml).localname, kind)
+                self.assertEqual(
+                    xml.findtext("cbc:" + kind + "TypeCode", namespaces=NS), code
+                )
+                self.assertEqual(
+                    xml.xpath(
+                        "./cac:TaxTotal/cbc:TaxAmount[@currencyID='AED']/text()",
+                        namespaces=NS,
+                    ),
+                    ["0.07"],
+                )
+                self.assertEqual(
+                    xml.xpath(
+                        "./cac:AdditionalDocumentReference[cbc:ID='AED']/"
+                        "cbc:DocumentDescription/text()",
+                        namespaces=NS,
+                    ),
+                    ["1.17"],
+                )
+                report = move.validate_l10n_ae_pint()
+                self.assertTrue(report["valid"], report)
+                evidence = issue.read(
+                    ["payload", "xml_content", "idempotency_key", "write_date"]
+                )
+                move.action_l10n_ae_prepare()
+                self.assertEqual(move.preview_l10n_ae_pint(), issue.xml_content)
+                self.assertEqual(
+                    issue.read(
+                        ["payload", "xml_content", "idempotency_key", "write_date"]
+                    ),
+                    evidence,
+                )
+                self.assertEqual(move.line_ids.read(ledger_fields), ledger)
+        self.assertEqual(
+            bill.l10n_ae_transmission_id.read(
+                ["payload", "xml_content", "idempotency_key"]
+            ),
+            source,
+        )
 
     def test_standard_tax_invoice_uses_ae_profile_and_core_accounting_totals(self):
         invoice = self.init_invoice(

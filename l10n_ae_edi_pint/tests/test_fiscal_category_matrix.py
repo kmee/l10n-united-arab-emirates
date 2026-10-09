@@ -1368,7 +1368,12 @@ class TestUaeFiscalCategoryMatrix(AccountTestInvoicingCommon):
             {"name": "Synthetic small S", "amount": 5, "ubl_cii_tax_category_code": "S"}
         )
         binding = review_controlled_binding(
-            self.env["l10n_ae.edi.binding"].create({"name": "Synthetic decimal AED"}),
+            self.env["l10n_ae.edi.binding"].create(
+                {
+                    "name": "Synthetic decimal AED",
+                    "fiscal_uuid_policy": "controlled_local",
+                }
+            ),
             self.simple_accountman,
             capabilities=CONTROLLED_CAPABILITIES,
             note="Synthetic reviewed controlled contract fixture.",
@@ -1415,13 +1420,13 @@ class TestUaeFiscalCategoryMatrix(AccountTestInvoicingCommon):
             "write_date",
         ]
         ledger = invoice.line_ids.read(ledger_fields)
-        # This exact review vector independently reaches the existing header
-        # reconciliation refusal (native gross1.17 vs converted gross1.18).
-        # Inspect the documented native (bytes, errors) contract, while keeping
-        # the public Check/Prepare/Preview refusal intact for the next slice.
-        builder = invoice.partner_id._get_edi_builder("kmee_ae_pint")
-        content, errors = builder._export_invoice(invoice)
-        self.assertTrue(any("AED amounts do not match accounting" in e for e in errors))
+        invoice.action_l10n_ae_validate()
+        self.assertFalse(
+            invoice.l10n_ae_transmission_ids or invoice.l10n_ae_fiscal_uuid
+        )
+        invoice.action_l10n_ae_prepare()
+        issue = invoice.l10n_ae_transmission_id
+        content = issue.xml_content.encode()
         xml = etree.fromstring(content)
         line = xml.find("cac:InvoiceLine", NS)
         self.assertEqual(
@@ -1434,18 +1439,36 @@ class TestUaeFiscalCategoryMatrix(AccountTestInvoicingCommon):
             ),
             "0.0550875",
         )
-        for action in (
-            invoice.action_l10n_ae_validate,
-            invoice.action_l10n_ae_prepare,
-            invoice.preview_l10n_ae_pint,
-        ):
-            with self.assertRaisesRegex(UserError, "AED.*accounting"):
-                action()
+        self.assertEqual(
+            xml.xpath(
+                "./cac:TaxTotal/cbc:TaxAmount[@currencyID='AED']/text()", namespaces=NS
+            ),
+            ["0.07"],
+        )
+        self.assertEqual(
+            xml.xpath(
+                "./cac:AdditionalDocumentReference[cbc:ID='AED']/"
+                "cbc:DocumentDescription/text()",
+                namespaces=NS,
+            ),
+            ["1.17"],
+        )
+        report = invoice.validate_l10n_ae_pint()
+        self.assertTrue(report["valid"], report)
+        evidence_fields = [
+            "payload",
+            "xml_content",
+            "idempotency_key",
+            "create_date",
+            "write_date",
+        ]
+        original = issue.read(evidence_fields)
+        invoice.action_l10n_ae_prepare()
+        self.assertEqual(invoice.preview_l10n_ae_pint(), issue.xml_content)
+        self.assertEqual(issue.read(evidence_fields), original)
         self.assertEqual(invoice.line_ids.read(ledger_fields), ledger)
         self.assertEqual(invoice.state, "posted")
-        self.assertFalse(
-            invoice.l10n_ae_transmission_ids or invoice.l10n_ae_fiscal_uuid
-        )
+        self.assertFalse(issue.attempt_ids or issue.event_ids or issue.remote_id)
 
     def test_small_usd_discount_emits_exact_allowance_and_preserves_original(self):
         # Independent allowance vector: 3 * USD0.10 = USD0.30 basis;
@@ -1983,11 +2006,12 @@ class TestUaeFiscalCategoryMatrix(AccountTestInvoicingCommon):
             or issue.validation_receipt
         )
 
-    def test_many_small_usd_lines_show_both_fiscal_accounting_differences(self):
+    def test_many_small_usd_lines_retain_native_aed_and_fail_source_vat_rules(self):
         # Independent worked per-line policy: 100 * USD1.23, each tax USD0.06.
         # Native AED base 100 * 4.52 = 452; native VAT 100 * 0.22 = 22;
         # native gross 474. Header conversion: USD6 * 3.6725 -> AED22.04,
-        # USD129 * 3.6725 -> AED473.75. Report both differences, never patch them.
+        # USD129 * 3.6725 -> AED473.75. Keep native AED totals; the distinct
+        # source category USD6 vs USD123 *5% =USD6.15 must still fail formal rules.
         self.env.company.tax_calculation_rounding_method = "round_per_line"
         usd = self.env.ref("base.USD")
         usd.active = True
@@ -2071,19 +2095,38 @@ class TestUaeFiscalCategoryMatrix(AccountTestInvoicingCommon):
             "write_date",
         ]
         ledger = invoice.line_ids.read(ledger_fields)
-        for action in (invoice.action_l10n_ae_prepare, invoice.preview_l10n_ae_pint):
-            with self.assertRaisesRegex(
-                UserError,
-                r"Fiscal VAT: 22\.04 AED; accounting VAT: 22\.00 AED\. "
-                r"Fiscal gross: 473\.75 AED; accounting gross: 474\.00 AED",
-            ):
-                action()
-            self.assertEqual(invoice.state, "posted")
-            self.assertFalse(invoice.l10n_ae_transmission_ids)
-            self.assertEqual(invoice.line_ids.read(ledger_fields), ledger)
-            self.assertEqual(
-                self.env.company.tax_calculation_rounding_method, "round_per_line"
-            )
+        invoice.action_l10n_ae_validate()
+        xml = etree.fromstring(invoice.preview_l10n_ae_pint().encode())
+        self.assertEqual(
+            xml.xpath(
+                "./cac:TaxTotal/cbc:TaxAmount[@currencyID='AED']/text()", namespaces=NS
+            ),
+            ["22.00"],
+        )
+        self.assertEqual(
+            xml.xpath(
+                "./cac:AdditionalDocumentReference[cbc:ID='AED']/"
+                "cbc:DocumentDescription/text()",
+                namespaces=NS,
+            ),
+            ["474.00"],
+        )
+        report = invoice.validate_l10n_ae_pint()
+        self.assertFalse(report["valid"], report)
+        codes = {
+            failure["code"]
+            for layer in report["layers"]
+            for failure in layer["failures"]
+        }
+        self.assertIn("aligned-ibrp-s-09", codes)
+        with self.assertRaisesRegex(UserError, "aligned-ibrp-s-09"):
+            invoice.action_l10n_ae_validate_pint()
+        self.assertEqual(invoice.state, "posted")
+        self.assertFalse(invoice.l10n_ae_transmission_ids)
+        self.assertEqual(invoice.line_ids.read(ledger_fields), ledger)
+        self.assertEqual(
+            self.env.company.tax_calculation_rounding_method, "round_per_line"
+        )
 
     def test_all_exempt_tax_invoice_requires_review_without_blocking_posting(self):
         tax = self.env.ref(f"account.{self.env.company.id}_uae_sale_tax_exempted")
