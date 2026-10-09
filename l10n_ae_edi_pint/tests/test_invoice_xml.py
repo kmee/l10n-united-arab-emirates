@@ -1883,6 +1883,48 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
             invoice.l10n_ae_fiscal_uuid or invoice.l10n_ae_transmission_ids
         )
 
+    def test_native_ubl_contract_returns_reverse_charge_nature_error(self):
+        self.env.company.l10n_ae_edi_auto_prepare = False
+        tax = self.tax_sale_a.copy(
+            {
+                "name": "Synthetic export contract reverse charge",
+                "amount": 0,
+                "ubl_cii_tax_category_code": "AE",
+            }
+        )
+        invoice = self.init_invoice("out_invoice", amounts=[100], taxes=tax)
+        invoice = invoice.with_user(self.simple_accountman)
+        invoice.invoice_line_ids.product_id = False
+        self.assertFalse(invoice.env.su)
+        builder = invoice.partner_id._get_edi_builder("kmee_ae_pint")
+        content, errors = builder._export_invoice(invoice)
+        self.assertIsInstance(content, bytes)
+        self.assertIsInstance(errors, set)
+        self.assertTrue(any("IBR-166-AE" in error for error in errors), errors)
+        with self.assertRaisesRegex(UserError, "IBR-166-AE"):
+            invoice.action_l10n_ae_validate()
+        with self.assertRaisesRegex(UserError, "IBR-166-AE"):
+            invoice.preview_l10n_ae_pint()
+        self.assertEqual(invoice.state, "draft")
+        self.assertEqual(
+            (invoice.amount_untaxed, invoice.amount_tax, invoice.amount_total),
+            (100, 0, 100),
+        )
+        self.assertFalse(invoice.l10n_ae_transmission_ids)
+        invoice.invoice_line_ids.l10n_ae_edi_rcm_nature_code = "DL8.48.8.2"
+        content, errors = builder._export_invoice(invoice)
+        self.assertFalse(any("IBR-166-AE" in error for error in errors), errors)
+        tree = etree.fromstring(content)
+        self.assertEqual(
+            tree.findtext(
+                "cac:InvoiceLine/cac:Item/cac:CommodityClassification/cbc:NatureCode",
+                namespaces=NS,
+            ),
+            "DL8.48.8.2",
+        )
+        invoice.action_l10n_ae_validate()
+        self.assertFalse(invoice.l10n_ae_transmission_ids)
+
     def test_unprepared_preview_builds_one_native_xml_without_creating_an_issue(self):
         self.env.company.l10n_ae_edi_auto_prepare = False
         invoice = self.init_invoice(
