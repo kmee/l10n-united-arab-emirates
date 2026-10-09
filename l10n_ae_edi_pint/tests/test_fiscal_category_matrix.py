@@ -1481,6 +1481,7 @@ class TestUaeFiscalCategoryMatrix(AccountTestInvoicingCommon):
                     "currency_id": usd.id,
                     "invoice_date": "2019-01-01",
                     "l10n_ae_binding_id": binding.id,
+                    "l10n_ae_fiscal_uuid": "fafafafa-7777-4777-8777-777777777777",
                     "l10n_ae_tax_exchange_rate": "3.672500",
                     "l10n_ae_tax_exchange_date": "2019-01-01",
                     "l10n_ae_tax_exchange_source": "SYNTH-SMALL-DECIMAL",
@@ -1824,11 +1825,8 @@ class TestUaeFiscalCategoryMatrix(AccountTestInvoicingCommon):
             ("cbc:Amount", "5.0015425"),
             ("cbc:MultiplierFactorNumeric", "10"),
         ]:
-            self.assertLess(
-                abs(
-                    Decimal(allowance.findtext(path, namespaces=NS)) - Decimal(expected)
-                ),
-                Decimal("0.00000001"),
+            self.assertEqual(
+                Decimal(allowance.findtext(path, namespaces=NS)), Decimal(expected)
             )
         self.assertEqual(allowance.find("cbc:Amount", NS).get("currencyID"), "USD")
         for path, expected in [
