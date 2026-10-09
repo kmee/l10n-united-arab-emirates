@@ -8,6 +8,7 @@ from decimal import ROUND_HALF_UP, Decimal
 
 from odoo import api, fields, models
 from odoo.exceptions import AccessError, UserError
+from odoo.tools import SQL
 
 from .account_payment_term import UAE_BILLING_FREQUENCIES
 
@@ -477,8 +478,25 @@ class AccountMove(models.Model):
         copy=False,
     )
     l10n_ae_origin_document_id = fields.Char(
-        default=lambda self: str(uuid.uuid4()), required=True, copy=False
+        default=lambda self: str(uuid.uuid4()),
+        required=True,
+        copy=False,
+        init_storage="_init_column_l10n_ae_origin_document_id",
     )
+    _l10n_ae_origin_identity_unique = models.UniqueIndex(
+        "(company_id, l10n_ae_origin_system, l10n_ae_origin_document_id)"
+    )
+
+    def _init_column_l10n_ae_origin_document_id(self):
+        # A callable field default is evaluated once when a new column is filled.
+        # Existing accounting moves require a distinct identity for each row.
+        self.env.execute_query(
+            SQL(
+                "UPDATE %s SET l10n_ae_origin_document_id = gen_random_uuid()::text "
+                "WHERE l10n_ae_origin_document_id IS NULL",
+                SQL.identifier(self._table),
+            )
+        )
 
     def _post(self, soft=True):
         candidates = self.filtered(
