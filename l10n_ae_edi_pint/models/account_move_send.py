@@ -39,6 +39,7 @@ class AccountMoveSend(models.AbstractModel):
         for move in moves.filtered(
             lambda invoice: (
                 invoice.company_id.country_id.code == "AE"
+                and moves_data[invoice].get("invoice_edi_format") == "kmee_ae_pint"
                 and not invoice.l10n_ae_transmission_id
                 and not invoice.l10n_ae_received_document
                 and (
