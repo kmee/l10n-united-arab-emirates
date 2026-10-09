@@ -2157,7 +2157,9 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
 
     def test_native_batch_send_groups_category_review_without_emitting(self):
         self.env.company.l10n_ae_edi_auto_prepare = False
-        self.partner_a.invoice_sending_method = "manual"
+        self.partner_a.write(
+            {"invoice_sending_method": "manual", "invoice_edi_format": "kmee_ae_pint"}
+        )
         exempt = self.env.ref(f"account.{self.env.company.id}_uae_sale_tax_exempted")
         exempt.ubl_cii_tax_exemption_reason_code = "DL8.46.2"
         invoices = self.env["account.move"]
@@ -2237,6 +2239,74 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
             .ids,
             artifacts,
         )
+
+    def test_native_mixed_format_batch_reviews_only_the_selected_pint_invoice(self):
+        self.env.company.l10n_ae_edi_auto_prepare = False
+        for partner, selected_format in (
+            (self.partner_a, "kmee_ae_pint"),
+            (self.partner_b, False),
+        ):
+            partner.write(
+                {
+                    "invoice_sending_method": "email",
+                    "invoice_edi_format": selected_format,
+                    "email": False,
+                }
+            )
+        pint = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a, partner=self.partner_a
+        )
+        pdf = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a, partner=self.partner_b
+        )
+        invoices = (pint | pdf).with_user(self.simple_accountman)
+        invoices.l10n_ae_free_zone = True
+        invoices.action_post()
+        self.assertFalse(invoices.env.su)
+        self.assertFalse(invoices.env.user.has_group("base.group_system"))
+        self.assertEqual(invoices.mapped("amount_total"), [105, 105])
+        fields_before = [
+            "write_date",
+            "l10n_ae_fiscal_uuid",
+            "l10n_ae_transmission_ids",
+            "ubl_cii_xml_id",
+            "invoice_pdf_report_id",
+        ]
+        ledger_fields = [
+            "id",
+            "account_id",
+            "debit",
+            "credit",
+            "amount_currency",
+            "currency_id",
+            "write_date",
+        ]
+        original = invoices.read(fields_before)
+        ledger = invoices.line_ids.read(ledger_fields)
+        action = invoices.action_send_and_print()
+        wizard = (
+            invoices.env[action["res_model"]]
+            .with_context(**action["context"])
+            .create({})
+        )
+        uae = [
+            value
+            for key, value in (wizard.alerts or {}).items()
+            if key.startswith("l10n_ae_edi_")
+        ]
+        self.assertEqual(len(uae), 1)
+        self.assertIn("IBR-007-AE", uae[0]["message"])
+        self.assertEqual(uae[0]["action"]["res_id"], pint.id)
+        self.assertEqual(uae[0]["action"]["res_model"], "account.move")
+        core = wizard.alerts["account_missing_email"]
+        self.assertEqual(core["level"], "warning")
+        self.assertEqual(core["action"]["res_model"], "res.partner")
+        self.assertCountEqual(
+            invoices.env["res.partner"].search(core["action"]["domain"]).ids,
+            [self.partner_a.id, self.partner_b.id],
+        )
+        self.assertEqual(invoices.read(fields_before), original)
+        self.assertEqual(invoices.line_ids.read(ledger_fields), ledger)
 
     def test_prepared_native_send_refuses_explicit_conflicting_format(self):
         binding = review_controlled_binding(
@@ -2357,7 +2427,13 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
 
     def test_native_send_preserves_core_alerts_and_distinct_review_groups(self):
         self.env.company.l10n_ae_edi_auto_prepare = False
-        self.partner_a.write({"invoice_sending_method": "email", "email": False})
+        self.partner_a.write(
+            {
+                "invoice_sending_method": "email",
+                "invoice_edi_format": "kmee_ae_pint",
+                "email": False,
+            }
+        )
         zone = self.init_invoice("out_invoice", amounts=[25], taxes=self.tax_sale_a)
         zone.l10n_ae_free_zone = True
         agent = self.init_invoice("out_invoice", amounts=[25], taxes=self.tax_sale_a)
