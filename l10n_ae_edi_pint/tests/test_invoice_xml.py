@@ -8779,6 +8779,95 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         self.assertFalse(changed.action_process())
         self.assertIn("identity", changed.diagnostic)
 
+    def test_received_branch_uses_parent_supplier_tax_and_purchase_journal(self):
+        root = self.env.company
+        self.partner_a.company_id = root
+        content = etree.tostring(self._received_test_xml())
+        branch = self.env["res.company"].create(
+            {
+                "name": "Synthetic received accounting branch",
+                "parent_id": root.id,
+                "country_id": root.country_id.id,
+                "currency_id": root.currency_id.id,
+                "l10n_ae_tin": root.l10n_ae_tin,
+                "l10n_ae_tin_confirmed": True,
+                "l10n_ae_edi_auto_prepare": False,
+            }
+        )
+        self.env["account.chart.template"].with_company(branch).try_loading(
+            "ae", branch, install_demo=False
+        )
+        manager = new_test_user(
+            self.env,
+            login="synthetic-received-branch-manager",
+            groups="account.group_account_manager",
+            company_id=branch.id,
+            company_ids=branch.ids,
+        )
+        actor = (
+            self.env["l10n_ae.edi.inbox"]
+            .with_user(manager)
+            .with_context(allowed_company_ids=branch.ids)
+            .with_company(branch)
+        )
+        self.assertFalse(actor.env.su)
+        self.assertEqual(manager.company_ids, branch)
+        self.assertEqual(self.partner_a.company_id, root)
+        self.assertEqual(self.tax_purchase_a.company_id, root)
+        purchase = self.company_data["default_journal_purchase"]
+        self.assertEqual(purchase.company_id, root)
+        self.assertEqual(
+            self.env["account.journal"].search_count(
+                [("company_id", "=", branch.id), ("type", "=", "purchase")]
+            ),
+            0,
+        )
+        binding = review_controlled_binding(
+            actor.env["l10n_ae.edi.binding"].create(
+                {"name": "Synthetic received branch contract", "company_id": branch.id}
+            ),
+            manager,
+            capabilities=("receive",),
+            note="Synthetic receive-only accounting branch master-data contract.",
+        )
+        inbox = actor.receive_controlled_document(
+            binding.id, "received-branch-parent-masters", content
+        )
+        self.assertTrue(inbox.action_process(), inbox.diagnostic)
+        bill = inbox.move_id
+        self.assertEqual(inbox.state, "processed")
+        self.assertEqual((bill.move_type, bill.state), ("in_invoice", "draft"))
+        self.assertEqual(bill.company_id, branch)
+        self.assertEqual(bill.partner_id, self.partner_a)
+        self.assertEqual(bill.journal_id, purchase)
+        self.assertEqual(bill.invoice_line_ids.tax_ids, self.tax_purchase_a)
+        self.assertEqual(
+            (bill.amount_untaxed, bill.amount_tax, bill.amount_total), (100, 5, 105)
+        )
+        self.assertEqual(inbox.original_xml.content, content)
+        self.assertEqual(inbox.xml_hash, hashlib.sha256(content).hexdigest())
+        self.assertEqual(len(inbox.processing_history_ids), 1)
+        report = json.loads(inbox.processing_history_ids.validation_report)
+        self.assertTrue(report["xsd_valid"], report)
+        self.assertTrue(report["valid"], report)
+        replay = actor.receive_controlled_document(
+            binding.id, "received-branch-parent-masters", content
+        )
+        self.assertEqual(replay, inbox)
+        self.assertTrue(replay.action_process(), replay.diagnostic)
+        self.assertEqual(replay.move_id, bill)
+        self.assertEqual(len(replay.processing_history_ids), 1)
+        self.assertEqual(
+            actor.env["account.move"].search_count(
+                [
+                    ("company_id", "=", branch.id),
+                    ("l10n_ae_received_document", "=", True),
+                ]
+            ),
+            1,
+        )
+        self.assertFalse(bill.l10n_ae_transmission_id)
+
     def test_received_invoice_creates_one_draft_bill_for_the_known_supplier(self):
         source = self.init_invoice(
             "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
