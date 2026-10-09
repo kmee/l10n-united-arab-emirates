@@ -1966,6 +1966,8 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
 
     def test_native_ubl_contract_returns_payment_review_error(self):
         self.env.company.l10n_ae_edi_auto_prepare = False
+        # Repairing a bank account requires the native Contact / Creation role.
+        self.simple_accountman.group_ids |= self.env.ref("base.group_partner_manager")
         journal = self.company_data["default_journal_bank"]
         journal.bank_account_id = False
         method = journal.inbound_payment_method_line_ids.filtered(
