@@ -73,7 +73,9 @@ class AccountMove(models.Model):
 
     @api.model_create_multi
     def create(self, vals_list):
-        if any("l10n_ae_received_aed_comparison" in vals for vals in vals_list):
+        if "default_l10n_ae_received_aed_comparison" in self.env.context or any(
+            "l10n_ae_received_aed_comparison" in vals for vals in vals_list
+        ):
             raise UserError(self.env._("The received AED comparison is protected."))
         return super().create(vals_list)
 
