@@ -6014,6 +6014,10 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
             ),
             (18.36, 385.61),
         )
+        self.assertEqual(
+            bill.l10n_ae_received_aed_comparison["gross_declared"], "385.61"
+        )
+        self.assertFalse(bill.l10n_ae_received_aed_review)
         self.assertFalse(bill.l10n_ae_tax_exchange_rate)
         self.assertFalse(bill.l10n_ae_tax_exchange_date)
         self.assertFalse(bill.l10n_ae_tax_exchange_source)
@@ -7876,7 +7880,70 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         )
         self.assertEqual(source.line_ids.read(ledger_fields), ledger)
 
-    def test_received_fx_header_discrepancies_stay_in_review_without_a_draft(self):
+    def test_received_aed_comparison_cannot_be_forged_through_create_defaults(self):
+        moves = self.env["account.move"].with_user(self.simple_accountman)
+        with self.assertRaisesRegex(UserError, "comparison is protected"):
+            moves.create({"l10n_ae_received_aed_comparison": {"gross_declared": "1"}})
+        with self.assertRaisesRegex(UserError, "comparison is protected"):
+            moves.with_context(
+                default_l10n_ae_received_aed_comparison={
+                    "gross_declared": "1",
+                }
+            ).create({})
+
+    def test_received_unequal_aed_headers_preserve_declarations_for_draft_review(self):
+        original, rate, _source = self._foreign_received_fixture()
+        binding = review_controlled_binding(
+            self.env["l10n_ae.edi.binding"].create(
+                {"name": "Incoming declared headers"}
+            ),
+            self.simple_accountman,
+            capabilities=("receive",),
+            note="Synthetic receive-only contract for unequal header declarations.",
+        )
+        receiver = self.env["l10n_ae.edi.inbox"].with_user(self.simple_accountman)
+        cases = (
+            ("cac:TaxTotal/cbc:TaxAmount[@currencyID='AED']", "19.00", 19, 385.61),
+            (
+                "cac:AdditionalDocumentReference[cbc:DocumentTypeCode='aedtotal-incl-vat']/cbc:DocumentDescription",
+                "385.62",
+                18.36,
+                385.62,
+            ),
+        )
+        for index, (xpath, value, vat, gross) in enumerate(cases):
+            with self.subTest(index=index):
+                tree = etree.fromstring(etree.tostring(original))
+                tree.find("cbc:UUID", NS).text = f"aaaaaaad-2222-4222-8222-{index:012d}"
+                tree.find(xpath, NS).text = value
+                content = etree.tostring(tree)
+                inbox = receiver.receive_controlled_document(
+                    binding.id,
+                    f"declared-header-{index}",
+                    content,
+                )
+                self.assertTrue(inbox.action_process(), inbox.diagnostic)
+                self.assertTrue(
+                    json.loads(inbox.processing_history_ids.validation_report)["valid"]
+                )
+                bill = inbox.move_id
+                self.assertEqual((bill.state, bill.amount_total), ("draft", 105))
+                self.assertEqual(bill.l10n_ae_received_tax_amount, vat)
+                self.assertEqual(bill.l10n_ae_received_tax_inclusive_amount, gross)
+                comparison = bill.l10n_ae_received_aed_comparison
+                self.assertEqual(comparison["vat_converted"], "18.36")
+                self.assertEqual(comparison["gross_converted"], "385.61")
+                with Form(bill) as form:
+                    self.assertIn("before posting", form.l10n_ae_received_aed_review)
+                notice = bill.l10n_ae_received_aed_review
+                rate.rate = 1 / 3.70
+                bill.invoice_line_ids[0].price_unit = 99
+                self.assertEqual(bill.l10n_ae_received_aed_comparison, comparison)
+                self.assertEqual(bill.l10n_ae_received_aed_review, notice)
+                self.assertEqual(inbox.original_xml.content, content)
+                self.assertFalse(bill.l10n_ae_transmission_ids)
+
+    def test_received_malformed_fx_headers_stay_in_review_without_a_draft(self):
         original, _rate, _source = self._foreign_received_fixture()
         binding = self.env["l10n_ae.edi.binding"].create(
             {"name": "Incoming FX arithmetic"}
@@ -7888,11 +7955,6 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
             note="Synthetic reviewed receive-only contract for this inbound fixture.",
         )
         cases = (
-            ("cac:TaxTotal/cbc:TaxAmount[@currencyID='AED']", "19.00"),
-            (
-                "cac:AdditionalDocumentReference[cbc:DocumentTypeCode='aedtotal-incl-vat']/cbc:DocumentDescription",
-                "385.62",
-            ),
             ("cac:TaxExchangeRate/cbc:CalculationRate", "0"),
             ("cac:TaxExchangeRate/cbc:CalculationRate", "3.700000"),
             (
