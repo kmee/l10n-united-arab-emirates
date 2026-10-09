@@ -6,6 +6,13 @@ supplier bill in draft; **Open Accounting Document** opens it for accounting rev
 suppliers/taxes, invalid XML and unsupported scenarios remain in review with diagnostics.
 The original evidence cannot be edited, and a received document cannot be emitted again.
 
+Native accounting branches can use eligible shared or parent-owned supplier, tax and
+economic-role journal records under the receiving user's ordinary access rules. Keep
+the receiving branch selected. Unrelated-company records remain excluded and ambiguity
+requires review. Fiscal identities, credit references and self-billing agreements remain
+specific to the receiving company; the parent's agreement does not authorize its branch.
+Scenario23 in the PT/EN manuals describes this distinction and the focused test limits.
+
 Before a new controlled receipt, an ordinary company-authorized Accounting Manager must
 declare **Retrieve Incoming Documents** in the binding's controlled contract, enter a
 review note and select **Review Contract Capabilities**. A receive-only contract is
