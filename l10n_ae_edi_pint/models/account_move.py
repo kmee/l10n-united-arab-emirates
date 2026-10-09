@@ -328,12 +328,13 @@ class AccountMove(models.Model):
                     "normative"
                 )
                 if pinned != identity:
-                    raise UserError(
+                    raise UaeDocumentValidationError(
                         self.env._(
                             "The pinned PINT package differs from the configured "
                             "package. Restore the originally pinned configuration "
                             "before validating this prepared document."
-                        )
+                        ),
+                        kind="package_mismatch",
                     )
             return OfflinePintValidator(directory, ruleset=ruleset).validate(content)
         except ValidationUnavailable as error:
