@@ -6121,6 +6121,76 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
                     0,
                 )
 
+    def test_received_forms_open_when_evidence_export_refuses_integrity(self):
+        binding = review_controlled_binding(
+            self.env["l10n_ae.edi.binding"].create({"name": "Received form integrity"}),
+            self.simple_accountman,
+            capabilities=("receive",),
+            note="Synthetic reviewed receiving contract for form/export isolation.",
+        )
+        content = etree.tostring(self._received_test_xml())
+        inbox = (
+            self.env["l10n_ae.edi.inbox"]
+            .with_user(self.simple_accountman)
+            .receive_controlled_document(binding.id, "received-form-integrity", content)
+        )
+        actors = [
+            (
+                new_test_user(
+                    self.env,
+                    login="synthetic-export-form-manager",
+                    groups="account.group_account_manager,base.group_allow_export",
+                    company_id=self.env.company.id,
+                    company_ids=self.env.company.ids,
+                ),
+                "l10n_ae_edi_pint.edi_inbox_form",
+            ),
+            (
+                new_test_user(
+                    self.env,
+                    login="synthetic-export-form-auditor",
+                    groups="l10n_ae_edi.group_fiscal_auditor,base.group_allow_export",
+                    company_id=self.env.company.id,
+                    company_ids=self.env.company.ids,
+                ),
+                "l10n_ae_edi_pint.edi_audit_inbox_form",
+            ),
+        ]
+        # PostgreSQL system edge simulates damaged historical evidence. No ORM,
+        # archive builder or form collaborator is replaced.
+        self.env.flush_all()
+        self.env.cr.execute(
+            "UPDATE l10n_ae_edi_inbox SET xml_hash=%s WHERE id=%s",
+            ["0" * 64, inbox.id],
+        )
+        self.env.invalidate_all()
+        for actor, view_xmlid in actors:
+            with self.subTest(view=view_xmlid):
+                original = inbox.with_user(actor).with_context(bin_size=True)
+                self.assertFalse(original.env.su)
+                view = original.get_view(
+                    view_id=self.env.ref(view_xmlid).id, view_type="form"
+                )
+                tree = etree.fromstring(view["arch"].encode())
+                # Read the root fields requested by this effective native form.
+                # Nested one2many subforms have their own read specifications.
+                names = tree.xpath("//field[not(ancestor::field)]/@name")
+                values = original.web_read({name: {} for name in names})
+                self.assertEqual(len(values), 1)
+                self.assertEqual(values[0]["id"], inbox.id)
+                self.assertEqual(values[0]["remote_id"], "received-form-integrity")
+                self.assertEqual(values[0]["xml_hash"], "0" * 64)
+                self.assertEqual(values[0]["state"], "received")
+                self.assertFalse(inbox.move_id)
+                self.assertEqual(inbox.original_xml.content, content)
+                with self.assertRaisesRegex(UserError, "integrity check failed"):
+                    original.with_context(bin_size=False).read(["evidence_archive"])
+                if view_xmlid.endswith(".edi_inbox_form"):
+                    for action in ("action_process", "action_request_review"):
+                        self.assertEqual(
+                            len(tree.xpath(f"//button[@name='{action}']")), 1
+                        )
+
     def test_received_ecommerce_archive_refuses_a_tampered_delivery_snapshot(self):
         tree = self._received_test_xml()
         tree.find("cbc:ProfileExecutionID", NS).text = "00000010"
