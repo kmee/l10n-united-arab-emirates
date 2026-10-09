@@ -297,6 +297,20 @@ class UaeEdiBinding(models.Model):
                 self.env._("UAE integration is blocked in a neutralized database.")
             )
 
+    def _controlled_environment_prefix(self):
+        """Pin process credentials to the exact database name and native UUID."""
+        self.ensure_one()
+        database_uuid = self.env["ir.config_parameter"].sudo().get_str("database.uuid")
+        if not database_uuid:
+            return None
+        identity = json.dumps(
+            [self.env.cr.dbname, database_uuid],
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        scope = hashlib.sha256(identity).hexdigest().upper()
+        return f"KMEE_UAE_CONTROLLED_DB_{scope}_{self.id}"
+
     @api.model
     def _cron_dispatch_controlled(self):
         if not self.env.context.get("cron_id"):
@@ -323,9 +337,9 @@ class UaeEdiBinding(models.Model):
         )
         routes = []
         for binding in bindings:
-            prefix = f"KMEE_UAE_CONTROLLED_{binding.id}"
-            endpoint = os.environ.get(prefix + "_ENDPOINT")
-            token = os.environ.get(prefix + "_TOKEN")
+            prefix = binding._controlled_environment_prefix()
+            endpoint = os.environ.get(prefix + "_ENDPOINT") if prefix else None
+            token = os.environ.get(prefix + "_TOKEN") if prefix else None
             routes.append((binding.id, binding.company_id.id, endpoint, token))
         registry, uid = self.env.registry, self.env.uid
         progress = self.env["ir.cron"]
