@@ -6,6 +6,7 @@ import os
 
 from odoo import api, fields, models
 from odoo.exceptions import AccessError, UserError, ValidationError
+from odoo.tools import SQL
 
 from ..tools.controlled_client import ControlledAspClient, ControlledAspError
 from ..tools.controlled_executor import ControlledExecutor
@@ -169,12 +170,14 @@ class UaeEdiBinding(models.Model):
                 self.env._("Review capabilities only for an authorized active company.")
             )
 
-    def _lock_capability_contract(self):
+    def _lock_capability_contract(self, *, shared=False):
         if self:
             self.env.cr.execute(
-                "SELECT id FROM l10n_ae_edi_binding "
-                "WHERE id IN %s ORDER BY id FOR UPDATE",
-                (tuple(self.ids),),
+                SQL(
+                    "SELECT id FROM l10n_ae_edi_binding WHERE id IN %s ORDER BY id %s",
+                    tuple(self.ids),
+                    SQL("FOR SHARE") if shared else SQL("FOR UPDATE"),
+                )
             )
             self.invalidate_recordset()
 
@@ -247,7 +250,10 @@ class UaeEdiBinding(models.Model):
 
     def _require_document_capability(self, process, credit):
         self._require_sending_capabilities()
-        self._lock_capability_contract()
+        # Preparations read the contract without later updating this binding.
+        # Receiving/checkpoint mutations keep the default exclusive lock to
+        # avoid promoting concurrent shared locks into a write-lock deadlock.
+        self._lock_capability_contract(shared=True)
         self._require_sending_capabilities()
         document = "credit" if credit else "invoice"
         code = f"{process}_{document}"
