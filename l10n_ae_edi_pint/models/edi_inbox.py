@@ -393,20 +393,7 @@ class UaeEdiInbox(models.Model):
             ValidationUnavailable,
             UniqueViolation,
         ) as error:
-            if isinstance(error, UniqueViolation):
-                moves = current.env["account.move"]
-                if error.diag.constraint_name != (
-                    moves._l10n_ae_received_fiscal_uuid_unique.full_name(moves)
-                ):
-                    raise
-                # The competing move can be outside this repeatable-read snapshot.
-                # The savepoint rolled back the import. Retry in a fresh transaction.
-                diagnostic = current.env._(
-                    "Received fiscal UUID was imported concurrently. "
-                    "Retry processing to reconcile the retained original."
-                )
-            else:
-                diagnostic = str(error)
+            diagnostic = current._processing_failure_diagnostic(error)
             super(UaeEdiInbox, current.sudo()).write(
                 {"state": "review", "diagnostic": diagnostic}
             )
@@ -427,6 +414,21 @@ class UaeEdiInbox(models.Model):
             selected_package=selected_package,
         )
         return True
+
+    def _processing_failure_diagnostic(self, error):
+        if not isinstance(error, UniqueViolation):
+            return str(error)
+        moves = self.env["account.move"]
+        if error.diag.constraint_name != (
+            moves._l10n_ae_received_fiscal_uuid_unique.full_name(moves)
+        ):
+            raise error
+        # A competing move can be outside this repeatable-read snapshot.
+        # The import savepoint rolled back; reconcile in a fresh transaction.
+        return self.env._(
+            "Received fiscal UUID was imported concurrently. "
+            "Retry processing to reconcile the retained original."
+        )
 
     def _record_processing_history(
         self,
