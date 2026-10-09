@@ -105,8 +105,13 @@ verify CBUAE publication.
 For a received foreign-currency bill, review **Amounts Declared by the Sender** in the
 UAE tab. Document currency, declared exchange rate, fiscal AED VAT and gross amounts
 remain protected. They do not set the local reviewed quote or create a payment. Currency
-must already be active; inconsistent fiscal values stay in the inbox for review. Worked
-USD invoice/partial-credit vectors are tested; full combinations remain pending.
+must already be active; malformed rates/amounts and inconsistent fiscal lines stay in
+review. Unequal converted-versus-declared AED headers create a draft with **Received AED
+Header Review**: check the original XML and accounting before posting. The immutable
+comparison preserves both values and does not replace declarations or certify tax
+compliance. Matching headers have no discrepancy notice. Worked USD invoice/partial-credit
+vectors and a native multiline receipt browser journey are tested; full combinations
+remain pending.
 
 The received-document form retains **Processing History**. Failed processing keeps
 its operator, time, diagnostic and original XML hash even after reviewed master-data
