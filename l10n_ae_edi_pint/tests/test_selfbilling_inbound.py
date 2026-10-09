@@ -1968,6 +1968,30 @@ class TestUaeSelfBillingInbound(AccountTestInvoicingCommon):
             self.assertTrue(report["valid"], report)
         self.assertFalse(sale.l10n_ae_transmission_id)
 
+    def test_selfbilling_check_refuses_native_supplier_country_constraint(self):
+        source, _agreement, _binding = self._selfbilling_fixture(post=False)
+        self.env.company.country_id = False
+        manager = new_test_user(
+            self.env,
+            login="synthetic-selfbilling-export-check",
+            groups="account.group_account_manager",
+            company_id=self.buyer.id,
+            company_ids=self.buyer.ids,
+        )
+        invoice = (
+            source.with_user(manager)
+            .with_context(allowed_company_ids=self.buyer.ids)
+            .with_company(self.buyer)
+        )
+        self.assertFalse(invoice.env.su)
+        with self.assertRaisesRegex(UserError, "IBR-009"):
+            invoice.action_l10n_ae_validate()
+        with self.assertRaisesRegex(UserError, "IBR-009"):
+            invoice.preview_l10n_ae_pint()
+        self.assertEqual(invoice.state, "draft")
+        self.assertEqual(invoice.amount_total, 105)
+        self.assertFalse(invoice.l10n_ae_transmission_ids or invoice.ubl_cii_xml_id)
+
     def test_buyer_issued_invoice_is_received_as_a_supplier_sale_without_emission(self):
         supplier = self.env.company
         source, recipient_agreement, binding = self._selfbilling_fixture()

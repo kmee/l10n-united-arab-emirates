@@ -1826,6 +1826,27 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         self.assertFalse(invoice.ubl_cii_xml_id or invoice.invoice_pdf_report_id)
         self.assertEqual(invoice.line_ids.sorted("id").read(ledger_fields), ledger)
 
+    def test_commercial_check_refuses_native_buyer_country_constraint(self):
+        self.env.company.l10n_ae_edi_auto_prepare = False
+        outside_scope = self.tax_sale_a.copy(
+            {"amount": 0, "ubl_cii_tax_category_code": "O"}
+        )
+        invoice = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=outside_scope
+        ).with_user(self.simple_accountman)
+        invoice.l10n_ae_document_category = "commercial"
+        self.partner_a.country_id = False
+        self.assertFalse(invoice.env.su)
+        with self.assertRaisesRegex(UserError, "IBR-011"):
+            invoice.action_l10n_ae_validate()
+        with self.assertRaisesRegex(UserError, "IBR-011"):
+            invoice.preview_l10n_ae_pint()
+        self.assertEqual(invoice.state, "draft")
+        self.assertEqual(invoice.amount_total, 100)
+        self.assertFalse(
+            invoice.l10n_ae_fiscal_uuid or invoice.l10n_ae_transmission_ids
+        )
+
     def test_unprepared_preview_builds_one_native_xml_without_creating_an_issue(self):
         self.env.company.l10n_ae_edi_auto_prepare = False
         invoice = self.init_invoice(
