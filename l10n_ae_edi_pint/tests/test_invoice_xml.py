@@ -1795,6 +1795,34 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         self.assertFalse(issue.attempt_ids)
         self.assertFalse(issue.event_ids)
 
+    def test_check_uae_data_refuses_native_buyer_country_constraint(self):
+        self.env.company.l10n_ae_edi_auto_prepare = False
+        self.partner_a.country_id = False
+        invoice = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a
+        ).with_user(self.simple_accountman)
+        self.assertFalse(invoice.env.su)
+        self.assertEqual(
+            (invoice.amount_untaxed, invoice.amount_tax, invoice.amount_total),
+            (100, 5, 105),
+        )
+        ledger_fields = [
+            "account_id",
+            "debit",
+            "credit",
+            "amount_currency",
+            "tax_ids",
+            "write_date",
+        ]
+        ledger = invoice.line_ids.sorted("id").read(ledger_fields)
+        with self.assertRaisesRegex(UserError, "IBR-011"):
+            invoice.action_l10n_ae_validate()
+        self.assertEqual(invoice.state, "draft")
+        self.assertFalse(invoice.l10n_ae_fiscal_uuid)
+        self.assertFalse(invoice.l10n_ae_transmission_ids)
+        self.assertFalse(invoice.ubl_cii_xml_id or invoice.invoice_pdf_report_id)
+        self.assertEqual(invoice.line_ids.sorted("id").read(ledger_fields), ledger)
+
     def test_native_send_cron_isolates_invalid_invoice_across_companies(self):
         self.env.company.l10n_ae_edi_auto_prepare = False
         other = self.setup_other_company(name="Synthetic independent Send company")
