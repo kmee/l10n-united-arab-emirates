@@ -1856,8 +1856,19 @@ class TestUaeSelfBillingInbound(AccountTestInvoicingCommon):
         root = self.env.company
         source, parent_agreement, _binding = self._selfbilling_fixture()
         content = source.preview_l10n_ae_pint().encode()
-        buyer_partner = self.buyer.partner_id
-        buyer_partner.company_id = root
+        external_buyer = self.buyer.partner_id
+        external_buyer.company_id = self.buyer
+        buyer_partner = external_buyer.copy(
+            {
+                "name": external_buyer.name,
+                "company_id": root.id,
+                "vat": external_buyer.vat,
+                "routing_scheme": external_buyer.routing_scheme,
+                "routing_endpoint": external_buyer.routing_endpoint,
+            }
+        )
+        parent_agreement.partner_id = buyer_partner
+        self.assertEqual(parent_agreement.company_id, root)
         self.assertEqual(parent_agreement.partner_id, buyer_partner)
         branch = self.env["res.company"].create(
             {
