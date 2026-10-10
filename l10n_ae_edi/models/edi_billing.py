@@ -160,6 +160,7 @@ class UaeEdiBilling(models.AbstractModel):
         except UniqueViolation as error:
             transmissions = billing.env["l10n_ae.edi.transmission"]
             identity_constraints = {
+                moves._l10n_ae_origin_identity_unique.full_name(moves),
                 receipts._origin_identity_unique.full_name(receipts),
                 transmissions._business_revision_unique.full_name(transmissions),
             }
