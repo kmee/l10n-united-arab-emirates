@@ -261,6 +261,9 @@ class TestUaeLocalCorrectionWizard(AccountTestInvoicingCommon):
         ]
 
         def snapshot():
+            # Observe completed native accounting writes before comparing audit
+            # fields across a refused operation; keep every ledger assertion.
+            self.env.flush_all()
             return {
                 "move": move.read(
                     [
