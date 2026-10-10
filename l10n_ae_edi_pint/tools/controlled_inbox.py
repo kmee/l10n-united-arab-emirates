@@ -9,6 +9,7 @@ from odoo.exceptions import AccessError, UserError
 
 from odoo.addons.l10n_ae_edi.tools.controlled_client import (
     ControlledAspError,
+    ControlledAspResponseLimit,
 )
 
 
@@ -157,14 +158,33 @@ class ControlledInboxWorker:
         originals = []
         for document in page["documents"]:
             event_id = document.get("event_id")
-            receipt = client.lookup_inbound(
-                tin, document["remote_id"], event_id=event_id
-            )
+            try:
+                receipt = client.lookup_inbound(
+                    tin, document["remote_id"], event_id=event_id
+                )
+            except ControlledAspResponseLimit as error:
+                # The authenticated listing supplies identity, not verified XML.
+                # Only this measured cap refusal can advance with retained evidence.
+                originals.append(
+                    (
+                        document["remote_id"],
+                        None,
+                        event_id,
+                        {
+                            "limit_bytes": error.limit_bytes,
+                            "observed_bytes": error.observed_bytes,
+                            "declared_xml_hash": document["xml_sha256"],
+                        },
+                    )
+                )
+                continue
             if receipt is None:
                 raise ControlledAspError("missing_inbound_artifact")
             if receipt["xml_sha256"] != document["xml_sha256"]:
                 raise ControlledAspError("correlation")
-            originals.append((document["remote_id"], receipt["xml"].encode(), event_id))
+            originals.append(
+                (document["remote_id"], receipt["xml"].encode(), event_id, None)
+            )
         for attempt in range(3):
             try:
                 with self.registry.cursor() as cursor:
@@ -192,8 +212,19 @@ class ControlledInboxWorker:
                         }
                     inbox_ids = []
                     rejection_ids = []
-                    for remote_id, content, event_id in originals:
+                    for remote_id, content, event_id, response_limit in originals:
                         try:
+                            if response_limit is not None:
+                                rejected = binding.env[
+                                    "l10n_ae.edi.inbox.rejection"
+                                ]._record_response_limit(
+                                    binding,
+                                    remote_id,
+                                    event_id=event_id,
+                                    **response_limit,
+                                )
+                                rejection_ids.append(rejected.id)
+                                continue
                             if not content:
                                 rejected = binding.env[
                                     "l10n_ae.edi.inbox.rejection"

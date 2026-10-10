@@ -1,8 +1,9 @@
 # Copyright 2026 KMEE
 # License AGPL-3.0 or later (https://www.gnu.org/licenses/agpl).
-"""Retain correlated empty retrievals without inventing an invoice or ingestion."""
+"""Retain bounded retrieval refusals without inventing an invoice or ingestion."""
 
 import hashlib
+import re
 
 from odoo import api, fields, models
 from odoo.exceptions import UserError
@@ -31,11 +32,34 @@ class UaeEdiInboxRejection(models.Model):
     remote_id = fields.Char(required=True, readonly=True, index=True)
     event_id = fields.Char(string="Retrieved Delivery Event Reference", readonly=True)
     reason = fields.Selection(
-        [("empty_xml", "Empty XML Artifact")], required=True, readonly=True
+        [
+            ("empty_xml", "Empty XML Artifact"),
+            ("response_limit", "HTTP Response Exceeds Retrieval Limit"),
+        ],
+        required=True,
+        readonly=True,
     )
-    artifact = fields.Json(required=True, readonly=True)
-    xml_size = fields.Integer(string="XML Byte Count", required=True, readonly=True)
-    xml_hash = fields.Char(string="XML SHA-256", required=True, readonly=True)
+    artifact = fields.Json(readonly=True)
+    xml_retrieved = fields.Boolean(compute="_compute_xml_retrieved")
+    xml_size = fields.Integer(
+        string="XML Byte Count",
+        readonly=True,
+        help="Available only when the complete XML was retrieved.",
+    )
+    xml_hash = fields.Char(string="XML SHA-256", readonly=True)
+    response_limit_bytes = fields.Integer(
+        string="HTTP Response Byte Limit", readonly=True
+    )
+    observed_response_bytes = fields.Integer(
+        string="Observed HTTP Response Bytes (Lower Bound)",
+        readonly=True,
+        help="Read stopped here; this is not the full response or XML size.",
+    )
+    declared_xml_hash = fields.Char(
+        string="Listing XML SHA-256 (Unverified)",
+        readonly=True,
+        help="Declared by the authenticated listing; not verified against an original.",
+    )
     operator_id = fields.Many2one(
         "res.users", required=True, readonly=True, ondelete="restrict"
     )
@@ -46,11 +70,82 @@ class UaeEdiInboxRejection(models.Model):
         "This rejected retrieval is already retained.",
     )
     _empty_artifact = models.Constraint(
-        "CHECK(xml_size = 0 AND reason = 'empty_xml')",
-        "Only an empty XML artifact belongs in this evidence ledger.",
+        """CHECK(xml_size IS NOT NULL AND xml_size = 0 AND (
+            (reason = 'empty_xml'
+             AND artifact IS NOT NULL AND xml_hash IS NOT NULL
+             AND artifact = jsonb_build_object('xml', '', 'xml_sha256', xml_hash)
+             AND xml_hash =
+                 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'
+             AND COALESCE(response_limit_bytes, 0) = 0
+             AND COALESCE(observed_response_bytes, 0) = 0
+             AND declared_xml_hash IS NULL)
+            OR (reason = 'response_limit'
+                AND artifact IS NULL AND xml_hash IS NULL
+                AND response_limit_bytes IS NOT NULL AND response_limit_bytes > 0
+                AND observed_response_bytes IS NOT NULL
+                AND observed_response_bytes = response_limit_bytes + 1
+                AND declared_xml_hash IS NOT NULL
+                AND declared_xml_hash ~ '^[0-9a-f]{64}$')
+        ))""",
+        "Rejected retrieval evidence must retain only the observed facts.",
     )
 
+    @api.depends("reason")
+    def _compute_xml_retrieved(self):
+        for record in self:
+            record.xml_retrieved = record.reason == "empty_xml"
+
     def _record_empty(self, binding, remote_id, event_id=None):
+        digest = hashlib.sha256(b"").hexdigest()
+        return self._record_observation(
+            binding,
+            remote_id,
+            event_id,
+            {
+                "reason": "empty_xml",
+                "artifact": {"xml": "", "xml_sha256": digest},
+                "xml_size": 0,
+                "xml_hash": digest,
+                "response_limit_bytes": 0,
+                "observed_response_bytes": 0,
+                "declared_xml_hash": False,
+            },
+        )
+
+    def _record_response_limit(
+        self,
+        binding,
+        remote_id,
+        limit_bytes,
+        observed_bytes,
+        declared_xml_hash,
+        event_id=None,
+    ):
+        if (
+            type(limit_bytes) is not int
+            or not 0 < limit_bytes < 2147483647
+            or type(observed_bytes) is not int
+            or observed_bytes != limit_bytes + 1
+            or not isinstance(declared_xml_hash, str)
+            or not re.fullmatch(r"[0-9a-f]{64}", declared_xml_hash)
+        ):
+            raise UserError(self.env._("Invalid bounded retrieval observation."))
+        return self._record_observation(
+            binding,
+            remote_id,
+            event_id,
+            {
+                "reason": "response_limit",
+                "artifact": False,
+                "xml_size": 0,  # Integer storage sentinel; no XML was retrieved.
+                "xml_hash": False,
+                "response_limit_bytes": limit_bytes,
+                "observed_response_bytes": observed_bytes,
+                "declared_xml_hash": declared_xml_hash,
+            },
+        )
+
+    def _record_observation(self, binding, remote_id, event_id, facts):
         """Called by the page worker after authenticated/correlated HTTP retrieval.
 
         The worker holds the binding lock and commits this observation atomically
@@ -92,8 +187,11 @@ class UaeEdiInboxRejection(models.Model):
                 raise UnreadableReceivedReplay(
                     self.env._("The retained rejected retrieval is not readable.")
                 )
+            if any(current[name] != value for name, value in facts.items()):
+                raise UserError(
+                    self.env._("The retained rejected retrieval has different facts.")
+                )
             return current
-        digest = hashlib.sha256(b"").hexdigest()
         current = (
             super(UaeEdiInboxRejection, ledger)
             .create(
@@ -102,10 +200,7 @@ class UaeEdiInboxRejection(models.Model):
                     "company_id": binding.company_id.id,
                     "remote_id": remote_id,
                     "event_id": event_id or False,
-                    "reason": "empty_xml",
-                    "artifact": {"xml": "", "xml_sha256": digest},
-                    "xml_size": 0,
-                    "xml_hash": digest,
+                    **facts,
                     "operator_id": self.env.uid,
                     "received_at": fields.Datetime.now(),
                 }

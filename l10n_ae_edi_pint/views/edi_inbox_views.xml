@@ -20,11 +20,26 @@
         <field name="arch" type="xml">
             <form create="false" edit="false" delete="false">
                 <sheet>
-                    <div class="alert alert-warning" role="alert">
+                    <div
+                        class="alert alert-warning"
+                        role="alert"
+                        invisible="reason != 'empty_xml'"
+                    >
                         This retrieved artifact contains no XML. It is retained as
                         local retrieval evidence, not an invoice or an ASP rejection.
                         Contact integration support; do not create a replacement bill
                         from this artifact.
+                    </div>
+                    <div
+                        class="alert alert-warning"
+                        role="alert"
+                        invisible="reason != 'response_limit'"
+                    >
+                        Retrieval stopped at the HTTP response limit. No complete XML
+                        or verified XML hash was retained. The listing hash is an
+                        unverified claim. This local refusal is not an ASP rejection.
+                        Contact integration support; do not create a replacement bill
+                        from this observation. Other received documents can continue.
                     </div>
                     <group>
                         <field name="remote_id" />
@@ -32,9 +47,27 @@
                         <field name="binding_id" />
                         <field name="company_id" groups="base.group_multi_company" />
                         <field name="reason" />
-                        <field name="xml_size" />
-                        <field name="xml_hash" class="text-wrap text-break" />
-                        <field name="artifact" />
+                        <field name="xml_retrieved" invisible="1" />
+                        <field name="xml_size" invisible="not xml_retrieved" />
+                        <field
+                            name="xml_hash"
+                            class="text-wrap text-break"
+                            invisible="not xml_retrieved"
+                        />
+                        <field name="artifact" invisible="not xml_retrieved" />
+                        <field
+                            name="response_limit_bytes"
+                            invisible="reason != 'response_limit'"
+                        />
+                        <field
+                            name="observed_response_bytes"
+                            invisible="reason != 'response_limit'"
+                        />
+                        <field
+                            name="declared_xml_hash"
+                            class="text-wrap text-break"
+                            invisible="reason != 'response_limit'"
+                        />
                         <field name="operator_id" />
                         <field name="received_at" />
                     </group>
