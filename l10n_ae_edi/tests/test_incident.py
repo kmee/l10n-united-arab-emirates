@@ -400,7 +400,10 @@ class TestUaeIncident(AccountTestInvoicingCommon):
         approved_before = calendar.read()
         self.assertTrue(calendar.action_approve())
         self.assertEqual(calendar.read(), approved_before)
-        with self.cr.savepoint(), self.assertRaises(UserError):
+        with (
+            self.cr.savepoint(),
+            self._assert_user_error("Reviewed calendar versions are immutable"),
+        ):
             calendar.write({"calendar_holiday_dates": "2026-12-04"})
 
         with Form(
@@ -804,7 +807,9 @@ class TestUaeIncident(AccountTestInvoicingCommon):
             with (
                 self.subTest(field=field),
                 self.cr.savepoint(),
-                self.assertRaises(UserError),
+                self._assert_user_error(
+                    "captured confirmation fixes the registration clock basis"
+                ),
             ):
                 incident.write({field: value})
         for changed in (
@@ -815,7 +820,7 @@ class TestUaeIncident(AccountTestInvoicingCommon):
             with (
                 self.subTest(changed=changed),
                 self.cr.savepoint(),
-                self.assertRaises(UserError),
+                self._assert_user_error("conflicting confirmation evidence"),
             ):
                 incident.record_fta_confirmation({**evidence, **changed})
         for elevated in (False, True):
@@ -828,10 +833,23 @@ class TestUaeIncident(AccountTestInvoicingCommon):
                     evidence
                 )
         self.assertEqual(confirmation.with_user(reader).document.content, content)
-        with self.cr.savepoint(), self.assertRaises(UserError):
+        with (
+            self.cr.savepoint(),
+            self._assert_user_error("confirmation evidence is immutable"),
+        ):
             confirmation.write({"external_reference": "Changed"})
-        with self.cr.savepoint(), self.assertRaises((AccessError, UserError)):
+        with (
+            self.cr.savepoint(),
+            self.assertRaisesRegex(AccessError, "not allowed to delete"),
+        ):
             confirmation.unlink()
+        with (
+            self.cr.savepoint(),
+            self._assert_user_error("FTA confirmation cannot be deleted"),
+        ):
+            confirmation.sudo().unlink()
+        self.assertTrue(confirmation.exists())
+        self.assertEqual(confirmation.document.content, content)
         select_reviewed_calendar_fixture(incident)
         self.assertTrue(incident.action_open())
         self.assertEqual(incident.notification_due_date, date(2026, 12, 10))
@@ -1132,10 +1150,22 @@ class TestUaeIncident(AccountTestInvoicingCommon):
             ),
             basis_before,
         )
-        with self.cr.savepoint(), self.assertRaises(UserError):
+        with (
+            self.cr.savepoint(),
+            self._assert_user_error("Service restoration review is immutable"),
+        ):
             review.write({"restored_at": "2026-12-08 11:00:00"})
-        with self.cr.savepoint(), self.assertRaises(UserError):
+        with (
+            self.cr.savepoint(),
+            self.assertRaisesRegex(AccessError, "not allowed to delete"),
+        ):
             review.unlink()
+        with (
+            self.cr.savepoint(),
+            self._assert_user_error("Service restoration history cannot be deleted"),
+        ):
+            review.sudo().unlink()
+        self.assertTrue(review.exists())
 
     @freeze_time("2026-12-08 12:00:00")
     def test_recovery_dialogs_recheck_actual_actor_company_and_readonly_overview(self):
@@ -1348,7 +1378,7 @@ class TestUaeIncident(AccountTestInvoicingCommon):
                 with (
                     self.subTest(wizard=wizard._name, target=target.id),
                     self.cr.savepoint(),
-                    self.assertRaises(UserError),
+                    self._assert_user_error("Select an open reviewed system failure"),
                 ):
                     wizard.action_confirm()
             wizard.write({"incident_id": system_a.id})
@@ -1422,7 +1452,7 @@ class TestUaeIncident(AccountTestInvoicingCommon):
             with (
                 self.subTest(computed_create=elevated),
                 self.cr.savepoint(),
-                self.assertRaises(UserError),
+                self._assert_user_error("Use the reviewed incident opening action"),
             ):
                 self.env["l10n_ae.edi.incident"].with_user(manager).sudo(
                     elevated
@@ -1436,7 +1466,9 @@ class TestUaeIncident(AccountTestInvoicingCommon):
             with (
                 self.subTest(computed_write=elevated),
                 self.cr.savepoint(),
-                self.assertRaises(UserError),
+                self._assert_user_error(
+                    "Incident identity and opening history are protected"
+                ),
             ):
                 system_a.with_user(manager).sudo(elevated).write(
                     {"pending_confirmation_count": 0}
@@ -1457,19 +1489,25 @@ class TestUaeIncident(AccountTestInvoicingCommon):
                     with (
                         self.subTest(neutralized_launch=action_name, elevated=elevated),
                         self.cr.savepoint(),
-                        self.assertRaises(UserError),
+                        self._assert_user_error(
+                            "Recovery review is disabled on a neutralized copy"
+                        ),
                     ):
                         getattr(system_a.sudo(elevated), action_name)()
                 with (
                     self.subTest(neutralized_confirm="impact", elevated=elevated),
                     self.cr.savepoint(),
-                    self.assertRaises(UserError),
+                    self._assert_user_error(
+                        "Impact recording is disabled on a neutralized copy"
+                    ),
                 ):
                     impact_wizard.sudo(elevated).action_confirm()
                 with (
                     self.subTest(neutralized_confirm="restoration", elevated=elevated),
                     self.cr.savepoint(),
-                    self.assertRaises(UserError),
+                    self._assert_user_error(
+                        "Restoration review is disabled on a neutralized copy"
+                    ),
                 ):
                     restoration_wizard.sudo(elevated).action_confirm()
         finally:
@@ -1872,7 +1910,10 @@ class TestUaeIncident(AccountTestInvoicingCommon):
         self.assertEqual(activities.summary, "Review UAE registration amendment notice")
         self.assertTrue(incident.action_open())
         self.assertEqual(incident.activity_ids.ids, activities.ids)
-        with self.cr.savepoint(), self.assertRaises(UserError):
+        with (
+            self.cr.savepoint(),
+            self._assert_user_error("An opened incident's reviewed basis is immutable"),
+        ):
             incident.write({"fta_confirmation_received_at": "2026-12-08 08:00:00"})
         self.assertEqual(incident.notification_due_date, date(2026, 12, 10))
 
@@ -1967,7 +2008,10 @@ class TestUaeIncident(AccountTestInvoicingCommon):
             asp_notice.recorded_at, fields.Datetime.to_datetime("2026-12-08 12:00:00")
         )
         self.assertEqual(incident.record_notice(asp_evidence), asp_result)
-        with self.cr.savepoint(), self.assertRaises(UserError):
+        with (
+            self.cr.savepoint(),
+            self._assert_user_error("This notice key has conflicting evidence"),
+        ):
             incident.record_notice({**asp_evidence, "external_reference": "Changed"})
         taxpayer_content = b"Controlled taxpayer issuer and recipient notice\n"
         taxpayer_digest = (
@@ -2002,11 +2046,26 @@ class TestUaeIncident(AccountTestInvoicingCommon):
             self.assertEqual(
                 notice.with_user(reader).document.content, notice.document.content
             )
-            with self.cr.savepoint(), self.assertRaises(UserError):
+            with (
+                self.cr.savepoint(),
+                self._assert_user_error("Supplied notice evidence is immutable"),
+            ):
                 notice.write({"document_filename": "changed.txt"})
-            with self.cr.savepoint(), self.assertRaises(UserError):
+            with (
+                self.cr.savepoint(),
+                self.assertRaisesRegex(AccessError, "not allowed to delete"),
+            ):
                 notice.unlink()
-        with self.cr.savepoint(), self.assertRaises(UserError):
+            with (
+                self.cr.savepoint(),
+                self._assert_user_error("Supplied notice evidence cannot be deleted"),
+            ):
+                notice.sudo().unlink()
+            self.assertTrue(notice.exists())
+        with (
+            self.cr.savepoint(),
+            self._assert_user_error("Use the incident notice evidence action"),
+        ):
             self.env["l10n_ae.edi.incident.notice"].with_user(manager).create(
                 {"incident_id": incident.id, "document": taxpayer_evidence["document"]}
             )
@@ -2239,16 +2298,28 @@ class TestUaeIncident(AccountTestInvoicingCommon):
         self.assertEqual(activities.summary, "Review UAE system failure notification")
         self.assertTrue(incident.action_open())
         self.assertEqual(incident.activity_ids.ids, activities.ids)
-        for values in (
-            {"occurrence_at": "2026-12-01 08:00:00"},
-            {"calendar_holidays": []},
-            {"notification_due_date": "2026-12-04"},
-            {"opened_by_id": reader.id},
+        for values, reason in (
+            (
+                {"occurrence_at": "2026-12-01 08:00:00"},
+                "An opened incident's reviewed basis is immutable",
+            ),
+            (
+                {"calendar_holidays": []},
+                "An opened incident's reviewed basis is immutable",
+            ),
+            (
+                {"notification_due_date": "2026-12-04"},
+                "Incident identity and opening history are protected",
+            ),
+            (
+                {"opened_by_id": reader.id},
+                "Incident identity and opening history are protected",
+            ),
         ):
             with (
                 self.subTest(values=values),
                 self.cr.savepoint(),
-                self.assertRaises(UserError),
+                self._assert_user_error(reason),
             ):
                 incident.write(values)
         self.assertEqual(
@@ -2311,7 +2382,10 @@ class TestUaeIncident(AccountTestInvoicingCommon):
                     }
                 )
             )
-            with self.cr.savepoint(), self.assertRaises(UserError):
+            with (
+                self.cr.savepoint(),
+                self._assert_user_error("Open the reviewed incident first"),
+            ):
                 incident.action_record_notice()
             incident.record_fta_confirmation(
                 {
@@ -2385,7 +2459,12 @@ class TestUaeIncident(AccountTestInvoicingCommon):
             .create({"name": "Synthetic unreviewed case", "company_id": company_a.id})
         )
         wizard.write({"incident_id": draft.id})
-        with self.cr.savepoint(), self.assertRaises(UserError):
+        with (
+            self.cr.savepoint(),
+            self._assert_user_error(
+                "Open the reviewed incident before recording notice evidence"
+            ),
+        ):
             wizard.action_confirm()
         self.assertFalse(draft.notice_ids)
         # Readonly widgets do not prevent public ORM writes; the parent must recheck.
