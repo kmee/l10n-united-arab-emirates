@@ -49,7 +49,17 @@ class TestUaeNativeWorkflow(UaePintTestCommon):
         self.assertFalse(invoice.env.su)
         self.assertFalse(line.product_id or line.label or line.name)
         self.assertEqual((line.quantity, line.price_unit), (1, 100))
-        ledger_fields = ["account_id", "debit", "credit", "amount_currency", "tax_ids"]
+        ledger_fields = [
+            "id",
+            "account_id",
+            "partner_id",
+            "currency_id",
+            "date_maturity",
+            "debit",
+            "credit",
+            "amount_currency",
+            "tax_ids",
+        ]
         ledger = invoice.line_ids.sorted("id").read(ledger_fields)
 
         invoice.action_post()
@@ -69,6 +79,28 @@ class TestUaeNativeWorkflow(UaePintTestCommon):
         with self.assertRaisesRegex(UserError, "IBT-153:.*nonblank item name") as error:
             invoice.action_l10n_ae_validate()
         self.assertIs(type(error.exception), UserError)
+        line.label = " \t\n "
+        with self.assertRaisesRegex(UserError, "IBT-153:.*nonblank item name"):
+            invoice.action_l10n_ae_validate()
+        self.assertFalse(
+            invoice.l10n_ae_fiscal_uuid or invoice.l10n_ae_transmission_ids
+        )
+        self.assertEqual(invoice.line_ids.sorted("id").read(ledger_fields), ledger)
+
+        line.label = "Synthetic repaired service description"
+        invoice.action_l10n_ae_prepare()
+        self.assertEqual(invoice.l10n_ae_preparation_state, "ready")
+        self.assertEqual(len(invoice.l10n_ae_transmission_ids), 1)
+        self.assertTrue(invoice.l10n_ae_fiscal_uuid)
+        self.assertTrue(invoice.validate_l10n_ae_pint()["valid"])
+        xml = etree.fromstring(invoice.preview_l10n_ae_pint().encode())
+        self.assertEqual(
+            xml.findtext("cac:InvoiceLine/cac:Item/cbc:Name", namespaces=NS),
+            "Synthetic repaired service description",
+        )
+        self.assertFalse(line.product_id)
+        self.assertEqual(invoice.state, "posted")
+        self.assertEqual(invoice.line_ids.sorted("id").read(ledger_fields), ledger)
 
     def test_native_partial_credit_freezes_selected_customer_payment_account(self):
         self.env.company.l10n_ae_edi_auto_prepare = False
