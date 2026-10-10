@@ -10,7 +10,7 @@
     "maintainers": ["mileo"],
     "website": "https://github.com/kmee/l10n-uae",
     "license": "AGPL-3",
-    "depends": ["l10n_ae", "account_edi"],
+    "depends": ["l10n_ae", "mail"],
     "data": [
         "security/edi_groups.xml",
         "security/ir.access.csv",
