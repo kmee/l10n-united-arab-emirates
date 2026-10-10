@@ -220,6 +220,33 @@ def _saxon_processor():
     return processor
 
 
+def _schematron_failures(processor, result):
+    """Bound actual diagnostics without serializing routine fired-rule traces."""
+    if result is None or result.size != 1:
+        raise ValidationUnavailable("Invalid offline validation result.")
+    query = processor.new_xpath_processor()
+    query.declare_namespace("svrl", SVRL_NS)
+    query.set_context(xdm_item=result.item_at(0))
+    assertions = query.evaluate("//svrl:failed-assert")
+    failures = []
+    size = 2  # JSON list brackets; the final worker response is bounded as well.
+    for assertion in assertions if assertions is not None else []:
+        fragment = assertion.to_string().encode("utf-8")
+        if len(fragment) > MAX_REPORT_BYTES:
+            raise ValidationUnavailable("Validation report size limit exceeded.")
+        node = parse_invoice_xml(fragment)
+        failure = {
+            "code": node.get("id"),
+            "location": node.get("location"),
+            "message": " ".join(node.itertext()).strip(),
+        }
+        size += len(json.dumps(failure).encode("utf-8")) + 2
+        if size > MAX_REPORT_BYTES:
+            raise ValidationUnavailable("Validation report size limit exceeded.")
+        failures.append(failure)
+    return failures
+
+
 def _validate_offline(content, directory, ruleset=DEFAULT_RULESET):
     root = parse_invoice_xml(content)
     document_type = etree.QName(root).localname
@@ -275,18 +302,8 @@ def _validate_offline(content, directory, ruleset=DEFAULT_RULESET):
             executable = compiler.compile_stylesheet(
                 stylesheet_text=stylesheet.decode("utf-8")
             )
-            svrl = executable.transform_to_string(xdm_node=node)
-            if not svrl or len(svrl.encode("utf-8")) > MAX_REPORT_BYTES:
-                raise ValidationUnavailable("Validation report size limit exceeded.")
-            result = parse_invoice_xml(svrl.encode("utf-8"))
-            failures = [
-                {
-                    "code": assertion.get("id"),
-                    "location": assertion.get("location"),
-                    "message": " ".join(assertion.itertext()).strip(),
-                }
-                for assertion in result.iter(f"{{{SVRL_NS}}}failed-assert")
-            ]
+            result = executable.transform_to_value(xdm_node=node)
+            failures = _schematron_failures(processor, result)
             report["layers"].append(
                 {"name": name, "resource": resource_name, "failures": failures}
             )
