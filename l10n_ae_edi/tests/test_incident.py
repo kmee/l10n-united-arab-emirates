@@ -985,9 +985,12 @@ class TestUaeIncident(AccountTestInvoicingCommon):
         )
         self.assertEqual(issues.read(issue_fields), issue_facts)
         self.assertEqual(json.loads(issues[0].payload)["process"], "billing")
-        with self.cr.savepoint(), self.assertRaises(UserError):
+        with (
+            self.cr.savepoint(),
+            self._assert_user_error("impact history is immutable"),
+        ):
             batch.write({"review_note": "Rewritten review"})
-        with self.cr.savepoint(), self.assertRaises(UserError):
+        with self.cr.savepoint(), self._assert_user_error("impacts cannot be deleted"):
             batch.unlink()
 
     @freeze_time("2026-12-08 12:00:00")
