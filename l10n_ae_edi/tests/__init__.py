@@ -8,3 +8,4 @@ from . import test_retention
 from . import test_deadline
 from . import test_incident
 from . import test_controlled_events_http
+from . import test_local_correction_wizard
