@@ -35,6 +35,16 @@ class TestUaeNativeWorkflow(UaePintTestCommon):
         ).with_user(self.simple_accountman)
         invoice.l10n_ae_binding_id = binding
         line = invoice.invoice_line_ids
+        # Native Sales can leave the extra description blank; the actual product
+        # name remains the mandatory item name, without inventing a fallback.
+        line.write({"product_id": self.product_a.id, "name": False})
+        self.assertFalse(line.name)
+        invoice.action_l10n_ae_validate()
+        named_xml = etree.fromstring(invoice.preview_l10n_ae_pint().encode())
+        self.assertEqual(
+            named_xml.findtext("cac:InvoiceLine/cac:Item/cbc:Name", namespaces=NS),
+            self.product_a.name,
+        )
         # A service line without a product is valid when its item name is present.
         line.write({"product_id": False, "label": "Synthetic described service"})
         invoice.action_l10n_ae_validate()

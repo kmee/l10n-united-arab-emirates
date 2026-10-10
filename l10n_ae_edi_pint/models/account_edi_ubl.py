@@ -61,12 +61,13 @@ class AccountEdiUblUae(models.AbstractModel):
 
     def _export_invoice(self, invoice):
         if any(
-            not (line.name or "").strip()
+            not ((line.product_id.name if line.product_id else line.name) or "").strip()
             for line in invoice.invoice_line_ids
             if line.display_type in (False, "product")
         ):
-            # IBT-153 is mandatory. The pinned public PINT constraint assumes
-            # cbc:Name exists; return its native error contract before generation.
+            # Match the native item's name: product name when present, otherwise
+            # the free-text line name. IBT-153 is mandatory; the pinned public
+            # PINT constraint assumes cbc:Name exists. Return its error contract.
             return b"", {
                 self.env._(
                     "IBT-153: each invoice line requires a nonblank item name. "
