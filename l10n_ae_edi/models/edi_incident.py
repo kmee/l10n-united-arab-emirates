@@ -364,24 +364,21 @@ class UaeEdiIncident(models.Model):
 
     def _registration_confirmation_anchor(self):
         self.ensure_one()
-        if not self.fta_confirmation_ids:
+        confirmation = self.fta_confirmation_ids
+        if not confirmation:
             raise ValidationError(
                 self.env._("Record the original FTA confirmation before opening.")
             )
-        anchor_at = self.fta_confirmation_received_at
-        if self.fta_confirmation_ids:
-            confirmation = self.fta_confirmation_ids
-            if (
-                anchor_at != confirmation.received_at
-                or self.fta_confirmation_reference != confirmation.external_reference
-            ):
-                raise ValidationError(
-                    self.env._(
-                        "The registration basis conflicts with the captured original."
-                    )
+        if (
+            self.fta_confirmation_received_at != confirmation.received_at
+            or self.fta_confirmation_reference != confirmation.external_reference
+        ):
+            raise ValidationError(
+                self.env._(
+                    "The registration basis conflicts with the captured original."
                 )
-            anchor_at = confirmation.received_at
-        return anchor_at
+            )
+        return confirmation.received_at
 
     def _reviewed_notification_due_date(self):
         self.ensure_one()
