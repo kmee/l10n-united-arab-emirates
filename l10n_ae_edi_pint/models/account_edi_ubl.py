@@ -60,6 +60,19 @@ class AccountEdiUblUae(models.AbstractModel):
         return invoice._get_invoice_report_filename(extension="xml")
 
     def _export_invoice(self, invoice):
+        if any(
+            not (line.name or "").strip()
+            for line in invoice.invoice_line_ids
+            if line.display_type in (False, "product")
+        ):
+            # IBT-153 is mandatory. The pinned public PINT constraint assumes
+            # cbc:Name exists; return its native error contract before generation.
+            return b"", {
+                self.env._(
+                    "IBT-153: each invoice line requires a nonblank item name. "
+                    "Review the line description before preparing the invoice."
+                )
+            }
         result = super()._export_invoice(invoice)
         if isinstance(result, dict):
             # OCB's pinned API returns export values instead of XML/errors.
