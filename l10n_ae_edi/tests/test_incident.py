@@ -2,6 +2,7 @@
 # License AGPL-3.0 or later (https://www.gnu.org/licenses/agpl).
 import base64
 import json
+from contextlib import contextmanager
 from datetime import date
 
 from freezegun import freeze_time
@@ -78,6 +79,13 @@ def open_recovery_fixture(incident):
 
 @tagged("post_install", "-at_install")
 class TestUaeIncident(AccountTestInvoicingCommon):
+    @contextmanager
+    def _assert_user_error(self, message):
+        """Require this business diagnostic, not an inherited ACL/state refusal."""
+        with self.assertRaisesRegex(UserError, message) as raised:
+            yield
+        self.assertIs(type(raised.exception), UserError)
+
     @classmethod
     @AccountTestInvoicingCommon.setup_country("ae")
     def setUpClass(cls):
@@ -608,7 +616,7 @@ class TestUaeIncident(AccountTestInvoicingCommon):
             with (
                 self.subTest(wrong_kind=elevated),
                 self.cr.savepoint(),
-                self.assertRaises(UserError),
+                self._assert_user_error("registration amendment incident"),
             ):
                 failure.sudo(elevated).record_fta_confirmation(evidence)
         self.assertFalse(case.fta_confirmation_ids)
@@ -651,13 +659,13 @@ class TestUaeIncident(AccountTestInvoicingCommon):
                 with (
                     self.subTest(neutralized_launch=elevated),
                     self.cr.savepoint(),
-                    self.assertRaises(UserError),
+                    self._assert_user_error("disabled on a neutralized copy"),
                 ):
                     case.sudo(elevated).action_record_fta_confirmation()
                 with (
                     self.subTest(neutralized_capture=elevated),
                     self.cr.savepoint(),
-                    self.assertRaises(UserError),
+                    self._assert_user_error("disabled on a neutralized copy"),
                 ):
                     wizard.sudo(elevated).action_confirm()
         finally:
@@ -687,7 +695,7 @@ class TestUaeIncident(AccountTestInvoicingCommon):
             with (
                 self.subTest(raw_orm_create=elevated),
                 self.cr.savepoint(),
-                self.assertRaises(UserError),
+                self._assert_user_error("incident FTA confirmation action"),
             ):
                 self.env[original._name].with_user(manager).sudo(elevated).create(
                     {"incident_id": case.id}
@@ -695,13 +703,13 @@ class TestUaeIncident(AccountTestInvoicingCommon):
             with (
                 self.subTest(reparent=elevated),
                 self.cr.savepoint(),
-                self.assertRaises(UserError),
+                self._assert_user_error("confirmation evidence is immutable"),
             ):
                 original.sudo(elevated).write({"incident_id": foreign.id})
         with self.cr.savepoint(), self.assertRaises(AccessError):
             original.with_user(reader).read(["document_content"])
         # Corrupt storage only as a fixture fault, then exercise the public binary read.
-        with self.cr.savepoint(), self.assertRaises(UserError):
+        with self.cr.savepoint(), self._assert_user_error("failed integrity review"):
             self.cr.execute(
                 "UPDATE l10n_ae_edi_incident_confirmation "
                 "SET document_content = %s WHERE id = %s",
