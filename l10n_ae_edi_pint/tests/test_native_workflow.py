@@ -20,6 +20,48 @@ from .common import NS, UaePintTestCommon
 
 @tagged("post_install", "-at_install")
 class TestUaeNativeWorkflow(UaePintTestCommon):
+    def test_native_post_reviews_a_blank_item_name_without_changing_accounting(self):
+        self.env.company.l10n_ae_edi_auto_prepare = True
+        binding = self._reviewed_binding(
+            {
+                "name": "Synthetic blank-description posting contract",
+                "fiscal_uuid_policy": "controlled_local",
+            },
+            capabilities=("submit", "lookup", "report", "billing_invoice"),
+            note="Synthetic outbound contract for blank item-name review.",
+        )
+        invoice = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a
+        ).with_user(self.simple_accountman)
+        invoice.l10n_ae_binding_id = binding
+        line = invoice.invoice_line_ids
+        # Replay the actual saved source facts from the failed browser journey.
+        # The Odoo 20 label inverse stores name=False when label is False.
+        line.write({"product_id": False, "label": False})
+        self.assertFalse(invoice.env.su)
+        self.assertFalse(line.product_id or line.label or line.name)
+        self.assertEqual((line.quantity, line.price_unit), (1, 100))
+        ledger_fields = ["account_id", "debit", "credit", "amount_currency", "tax_ids"]
+        ledger = invoice.line_ids.sorted("id").read(ledger_fields)
+
+        invoice.action_post()
+
+        self.assertEqual(invoice.state, "posted")
+        self.assertEqual(
+            (invoice.amount_untaxed, invoice.amount_tax, invoice.amount_total),
+            (100, 5, 105),
+        )
+        self.assertEqual(invoice.l10n_ae_preparation_state, "review")
+        self.assertIn("IBT-153", invoice.l10n_ae_preparation_error)
+        self.assertIn("nonblank item name", invoice.l10n_ae_preparation_error)
+        self.assertFalse(invoice.l10n_ae_fiscal_uuid)
+        self.assertFalse(invoice.l10n_ae_transmission_ids)
+        self.assertFalse(invoice.ubl_cii_xml_id or invoice.invoice_pdf_report_id)
+        self.assertEqual(invoice.line_ids.sorted("id").read(ledger_fields), ledger)
+        with self.assertRaisesRegex(UserError, "IBT-153:.*nonblank item name") as error:
+            invoice.action_l10n_ae_validate()
+        self.assertIs(type(error.exception), UserError)
+
     def test_native_partial_credit_freezes_selected_customer_payment_account(self):
         self.env.company.l10n_ae_edi_auto_prepare = False
         journal = self.company_data["default_journal_bank"]
