@@ -37,6 +37,18 @@ NS = {
 
 @tagged("post_install", "-at_install")
 class TestUaeInvoiceXml(AccountTestInvoicingCommon):
+    def setUp(self):
+        super().setUp()
+        cache = Path(__file__).resolve().parents[2] / ".runtime"
+        # Capture fixture locations before package-cycle tests patch production
+        # configuration. Explicit values, including invalid ones, are retained.
+        self.normative_directories = {
+            "1.0.4": os.environ.get("KMEE_UAE_NORMATIVE_DIR", str(cache / "normative")),
+            "1.0.3": os.environ.get(
+                "KMEE_UAE_TEST_NORMATIVE_1_0_3_DIR", str(cache / "normative-1.0.3")
+            ),
+        }
+
     def test_summary_native_partial_credit_preserves_reviewed_period_and_original(self):
         if not {"deferred_start_date", "deferred_end_date"}.issubset(
             self.env["account.move.line"]._fields
@@ -2638,8 +2650,8 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         )
         self.assertFalse(invoice.env.su)
         packages = [
-            ("kmee-pint-ae-1.0.3-ubl-2.1", "/opt/uae-addons/.runtime/normative-1.0.3"),
-            ("kmee-pint-ae-1.0.4-ubl-2.1", "/opt/uae-addons/.runtime/normative"),
+            ("kmee-pint-ae-1.0.3-ubl-2.1", self.normative_directories["1.0.3"]),
+            ("kmee-pint-ae-1.0.4-ubl-2.1", self.normative_directories["1.0.4"]),
         ]
         with patch.dict(
             os.environ,
