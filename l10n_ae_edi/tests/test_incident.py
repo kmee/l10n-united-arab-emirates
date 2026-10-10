@@ -990,8 +990,15 @@ class TestUaeIncident(AccountTestInvoicingCommon):
             self._assert_user_error("impact history is immutable"),
         ):
             batch.write({"review_note": "Rewritten review"})
-        with self.cr.savepoint(), self._assert_user_error("impacts cannot be deleted"):
+        with (
+            self.cr.savepoint(),
+            self.assertRaisesRegex(AccessError, "not allowed to delete"),
+        ):
             batch.unlink()
+        # Bypass only the native ACL to reach the public ORM deletion guard.
+        with self.cr.savepoint(), self._assert_user_error("impacts cannot be deleted"):
+            batch.sudo().unlink()
+        self.assertTrue(batch.exists())
 
     @freeze_time("2026-12-08 12:00:00")
     def test_reviewed_restoration_keeps_submission_and_confirmation_backlog_visible(
