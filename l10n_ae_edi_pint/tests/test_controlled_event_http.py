@@ -135,7 +135,7 @@ class TestUaeNativeControlledEventHttp(AccountTestInvoicingCommon, HttpCase):
         )
         cls.env.company.l10n_ae_edi_binding_id = cls.binding
 
-    def test_native_prepared_invoice_accepts_signed_public_http_event(self):
+    def _accepted_invoice(self):
         manager = self.simple_accountman
         company = self.env.company
         move = (
@@ -244,6 +244,61 @@ class TestUaeNativeControlledEventHttp(AccountTestInvoicingCommon, HttpCase):
         self.assertEqual(transmission.submission_state, "accepted")
         self.assertEqual(transmission.remote_id, "synthetic-native-http-accepted-1")
 
+        return (
+            move,
+            transmission,
+            ledger_fields,
+            posted_ledger,
+            frozen_fields,
+            frozen_identity,
+        )
+
+    def _assert_original_unchanged(self, fixture):
+        (
+            move,
+            transmission,
+            ledger_fields,
+            posted_ledger,
+            frozen_fields,
+            frozen_identity,
+        ) = fixture
+        move.invalidate_recordset()
+        transmission.invalidate_recordset()
+        self.env.flush_all()
+        move.line_ids.invalidate_recordset()
+        self.assertEqual(move.state, "posted")
+        self.assertEqual(
+            (move.amount_untaxed, move.amount_tax, move.amount_total), (100, 5, 105)
+        )
+        self.assertEqual(move.line_ids.read(ledger_fields, load=None), posted_ledger)
+        self.assertEqual(transmission.submission_state, "accepted")
+        self.assertEqual(
+            transmission.read(frozen_fields, load=None),
+            frozen_identity,
+        )
+
+    def _event_bytes(self, transmission, *, event_id, dimension, state):
+        transmission.invalidate_recordset()
+        return json.dumps(
+            {
+                "contract_version": "kmee-controlled-events-1",
+                "event_id": event_id,
+                "provider": transmission.provider,
+                "tin": "1000000001",
+                "request_key": transmission.idempotency_key,
+                "remote_id": transmission.remote_id,
+                "revision": transmission.revision,
+                "snapshot_sha256": transmission.payload_hash,
+                "xml_sha256": transmission.xml_hash,
+                "dimension": dimension,
+                "state": state,
+                "sequence": 1,
+                "occurred_at": "2026-10-10 00:00:00",
+            },
+            sort_keys=True,
+        ).encode("utf-8")
+
+    def _post_event(self, raw, expected_outcome):
         self.authenticate(None, None)
         prefix = f"KMEE_UAE_CONTROLLED_EVENTS_{self.binding.id}"
         env_keys = tuple(
@@ -254,29 +309,12 @@ class TestUaeNativeControlledEventHttp(AccountTestInvoicingCommon, HttpCase):
         secret = b"synthetic-native-event-secret-2026"
         credentials = {
             env_keys[0]: self.env.cr.dbname,
-            env_keys[1]: str(manager.id),
-            env_keys[2]: str(company.id),
+            env_keys[1]: str(self.simple_accountman.id),
+            env_keys[2]: str(self.env.company.id),
             env_keys[3]: secret.decode("ascii"),
         }
         try:
             os.environ.update(credentials)
-            transmission.invalidate_recordset()
-            event_body = {
-                "contract_version": "kmee-controlled-events-1",
-                "event_id": "native-http-validation-event-1",
-                "provider": transmission.provider,
-                "tin": json.loads(transmission.payload)["company"]["tin"],
-                "request_key": transmission.idempotency_key,
-                "remote_id": transmission.remote_id,
-                "revision": transmission.revision,
-                "snapshot_sha256": transmission.payload_hash,
-                "xml_sha256": transmission.xml_hash,
-                "dimension": "validation_c2_state",
-                "state": "passed",
-                "sequence": 1,
-                "occurred_at": "2026-10-10 00:00:00",
-            }
-            raw = json.dumps(event_body, sort_keys=True).encode("utf-8")
             signature = "sha256=" + hmac.new(secret, raw, hashlib.sha256).hexdigest()
             response = self.url_open(
                 f"/l10n_ae/controlled/events/{self.binding.id}",
@@ -288,7 +326,7 @@ class TestUaeNativeControlledEventHttp(AccountTestInvoicingCommon, HttpCase):
                 timeout=15,
             )
             self.assertEqual(response.status_code, 200)
-            self.assertEqual(response.json(), {"outcome": "applied"})
+            self.assertEqual(response.json(), {"outcome": expected_outcome})
             self.assertEqual(response.headers.get("Cache-Control"), "no-store")
         finally:
             for key, value in old_env.items():
@@ -297,24 +335,66 @@ class TestUaeNativeControlledEventHttp(AccountTestInvoicingCommon, HttpCase):
                 else:
                     os.environ[key] = value
 
-        move.invalidate_recordset()
-        transmission.invalidate_recordset()
-        self.env.flush_all()
-        move.line_ids.invalidate_recordset()
-        self.assertEqual(move.state, "posted")
-        self.assertEqual(
-            (move.amount_untaxed, move.amount_tax, move.amount_total), (100, 5, 105)
+    def test_native_prepared_invoice_accepts_signed_public_http_event(self):
+        fixture = self._accepted_invoice()
+        transmission = fixture[1]
+        raw = self._event_bytes(
+            transmission,
+            event_id="native-http-validation-event-1",
+            dimension="validation_c2_state",
+            state="passed",
         )
-        self.assertEqual(move.line_ids.read(ledger_fields, load=None), posted_ledger)
-        self.assertEqual(transmission.submission_state, "accepted")
+        self._post_event(raw, "applied")
+        self._assert_original_unchanged(fixture)
         self.assertEqual(transmission.validation_c2_state, "passed")
-        self.assertEqual(
-            transmission.read(frozen_fields, load=None),
-            frozen_identity,
-        )
         events = transmission.event_ids.sorted("id")
         self.assertEqual(len(events), 1)
         self.assertEqual(events.event_id, "native-http-validation-event-1")
         self.assertEqual(events.outcome, "applied")
         self.assertEqual(events.original_body, raw.decode("utf-8"))
         self.assertEqual(events.body_hash, hashlib.sha256(raw).hexdigest())
+
+    def test_public_http_deduplicates_replay_and_retains_divergent_original(self):
+        fixture = self._accepted_invoice()
+        transmission = fixture[1]
+        original = self._event_bytes(
+            transmission,
+            event_id="native-http-report-event-1",
+            dimension="reporting_c2_state",
+            state="confirmed",
+        )
+        self._post_event(original, "applied")
+        self._post_event(original, "duplicate")
+        self._assert_original_unchanged(fixture)
+        self.assertEqual(transmission.reporting_c2_state, "confirmed")
+        self.assertEqual(len(transmission.event_ids), 1)
+        self.assertFalse(transmission.event_review_required)
+
+        divergent = self._event_bytes(
+            transmission,
+            event_id="native-http-report-event-1",
+            dimension="reporting_c2_state",
+            state="rejected",
+        )
+        self.assertNotEqual(divergent, original)
+        self._post_event(divergent, "replay_conflict")
+        self._post_event(divergent, "duplicate")
+        self._assert_original_unchanged(fixture)
+        self.assertEqual(transmission.reporting_c2_state, "confirmed")
+        self.assertTrue(transmission.event_review_required)
+        events = transmission.event_ids.sorted("id")
+        self.assertEqual(len(events), 2)
+        self.assertEqual(events.mapped("event_id"), ["native-http-report-event-1"] * 2)
+        self.assertEqual(events.mapped("outcome"), ["applied", "replay_conflict"])
+        self.assertEqual(events.mapped("fact_state"), ["confirmed", "rejected"])
+        self.assertEqual(
+            events.mapped("original_body"), [original.decode(), divergent.decode()]
+        )
+        self.assertEqual(
+            events.mapped("body_hash"),
+            [
+                hashlib.sha256(original).hexdigest(),
+                hashlib.sha256(divergent).hexdigest(),
+            ],
+        )
+        self.assertEqual(len(transmission.attempt_ids), 1)
