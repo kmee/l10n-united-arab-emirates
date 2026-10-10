@@ -272,6 +272,8 @@ class TestUaeNativeControlledEventHttp(AccountTestInvoicingCommon, HttpCase):
         )
         self.assertEqual(move.line_ids.read(ledger_fields, load=None), posted_ledger)
         self.assertEqual(transmission.submission_state, "accepted")
+        self.assertEqual(transmission.remote_id, "synthetic-native-http-accepted-1")
+        self.assertEqual(len(transmission.attempt_ids), 1)
         self.assertEqual(
             transmission.read(frozen_fields, load=None),
             frozen_identity,
