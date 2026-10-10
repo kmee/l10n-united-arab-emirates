@@ -5,7 +5,7 @@ to a plain active internal user with only its permitted companies. The native Od
 JSON2 API provides scoped status, preserved PINT XML and paginated event facts without
 accounting or sending privileges. Preparing an existing posted sandbox invoice is a
 separate operation requiring native Invoice/write permissions. See
-[the billing API contract](https://github.com/kmee/l10n-uae/blob/20.0-add-uae-edi/docs/controlled-executor.md#billing-api)
+[the billing API contract](https://github.com/kmee/l10n-uae/blob/20.0/docs/controlled-executor.md#billing-api)
 and the PT/EN scenario manuals. Native API keys belong to Odoo; the addon adds no key
 store or credential fields. Full client creation/callback integration remains pending.
 
@@ -20,7 +20,7 @@ For a permitted export, select the issue and use native **Actions → Export**.
 Company and role revocation apply to subsequent reads, exports and downloads. Full
 archive/retention and customer security acceptance remain required. See scenario21
 in the PT/EN manuals and
-[the audit UI evidence](https://github.com/kmee/l10n-uae/blob/20.0-add-uae-edi/docs/evidence/fiscal-audit-ui-2026-10-05.md).
+[the audit UI evidence](https://github.com/kmee/l10n-uae/blob/20.0/docs/evidence/fiscal-audit-ui-2026-10-05.md).
 
 For an outbound self-billed purchase, use a native self-billing purchase journal and
 select a UAE Self-Billing Agreement in the invoice's UAE tab. Accounting managers open **Invoicing → Configuration → UAE Self-Billing Agreements**
@@ -80,8 +80,8 @@ Automatic correction/unblocking and complete operational recovery remain require
 
 For prerequisites, UI steps, expected results and error handling, read the repository
 scenario based user manual in
-[English](https://github.com/kmee/l10n-uae/blob/20.0-add-uae-edi/docs/user/scenarios-en.md)
-or [Português](https://github.com/kmee/l10n-uae/blob/20.0-add-uae-edi/docs/user/scenarios-pt_BR.md).
+[English](https://github.com/kmee/l10n-uae/blob/20.0/docs/user/scenarios-en.md)
+or [Português](https://github.com/kmee/l10n-uae/blob/20.0/docs/user/scenarios-pt_BR.md).
 
 For scheduled controlled sending, accounting managers open **UAE Provider Bindings**,
 select the reviewed **Sandbox** binding and enable **Automatic Controlled Dispatch**.

@@ -73,7 +73,7 @@ PINT XML and paginated event facts without accounting or sending
 privileges. Preparing an existing posted sandbox invoice is a separate
 operation requiring native Invoice/write permissions. See `the billing
 API
-contract <https://github.com/kmee/l10n-uae/blob/20.0-add-uae-edi/docs/controlled-executor.md#billing-api>`__
+contract <https://github.com/kmee/l10n-uae/blob/20.0/docs/controlled-executor.md#billing-api>`__
 and the PT/EN scenario manuals. Native API keys belong to Odoo; the
 addon adds no key store or credential fields. Full client
 creation/callback integration remains pending.
@@ -91,7 +91,7 @@ export, select the issue and use native **Actions → Export**. Company
 and role revocation apply to subsequent reads, exports and downloads.
 Full archive/retention and customer security acceptance remain required.
 See scenario21 in the PT/EN manuals and `the audit UI
-evidence <https://github.com/kmee/l10n-uae/blob/20.0-add-uae-edi/docs/evidence/fiscal-audit-ui-2026-10-05.md>`__.
+evidence <https://github.com/kmee/l10n-uae/blob/20.0/docs/evidence/fiscal-audit-ui-2026-10-05.md>`__.
 
 For an outbound self-billed purchase, use a native self-billing purchase
 journal and select a UAE Self-Billing Agreement in the invoice's UAE
@@ -166,9 +166,9 @@ required work.
 
 For prerequisites, UI steps, expected results and error handling, read
 the repository scenario based user manual in
-`English <https://github.com/kmee/l10n-uae/blob/20.0-add-uae-edi/docs/user/scenarios-en.md>`__
+`English <https://github.com/kmee/l10n-uae/blob/20.0/docs/user/scenarios-en.md>`__
 or
-`Português <https://github.com/kmee/l10n-uae/blob/20.0-add-uae-edi/docs/user/scenarios-pt_BR.md>`__.
+`Português <https://github.com/kmee/l10n-uae/blob/20.0/docs/user/scenarios-pt_BR.md>`__.
 
 For scheduled controlled sending, accounting managers open **UAE
 Provider Bindings**, select the reviewed **Sandbox** binding and enable
