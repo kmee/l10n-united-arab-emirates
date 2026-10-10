@@ -14,7 +14,6 @@ from odoo.tests import Form, tagged
 
 from odoo.addons.l10n_ae_edi.tests.common import (
     CONTROLLED_CAPABILITIES,
-    review_controlled_binding,
 )
 
 from ..tools.validation import OfflinePintValidator
@@ -36,19 +35,14 @@ class TestUaeInvoiceAmounts(UaePintTestCommon):
                 "generate_deferred_revenue_entries_method": "manual",
             }
         )
-        binding = review_controlled_binding(
-            self.env["l10n_ae.edi.binding"].create(
-                {
-                    "name": "Synthetic native Summary partial credit",
-                    "fiscal_uuid_policy": "controlled_local",
-                }
-            ),
-            self.simple_accountman,
+        binding = self._reviewed_binding(
+            {
+                "name": "Synthetic native Summary partial credit",
+                "fiscal_uuid_policy": "controlled_local",
+            },
             capabilities=CONTROLLED_CAPABILITIES,
-            note=(
-                "Synthetic controlled contract for test_summary_native_partial_credit"
-                "_preserves_reviewed_period_and_original."
-            ),
+            note="Synthetic controlled contract for test_summary_native_partial_credit"
+            "_preserves_reviewed_period_and_original.",
         )
         term = self.env["account.payment.term"].create(
             {
@@ -236,19 +230,14 @@ class TestUaeInvoiceAmounts(UaePintTestCommon):
                 ],
             }
         )
-        binding = review_controlled_binding(
-            self.env["l10n_ae.edi.binding"].create(
-                {
-                    "name": "Synthetic native Summary period",
-                    "fiscal_uuid_policy": "controlled_local",
-                }
-            ),
-            self.simple_accountman,
+        binding = self._reviewed_binding(
+            {
+                "name": "Synthetic native Summary period",
+                "fiscal_uuid_policy": "controlled_local",
+            },
             capabilities=CONTROLLED_CAPABILITIES,
-            note=(
-                "Synthetic controlled contract for test_summary_uses_native_deferred_"
-                "lines_without_inventing_due_dates."
-            ),
+            note="Synthetic controlled contract for test_summary_uses_native_deferred_"
+            "lines_without_inventing_due_dates.",
         )
         invoice = self.init_invoice(
             "out_invoice", amounts=[100, 200], taxes=self.tax_sale_a
@@ -383,19 +372,14 @@ class TestUaeInvoiceAmounts(UaePintTestCommon):
                 "allow_out_payment": True,
             }
         )
-        binding = review_controlled_binding(
-            self.env["l10n_ae.edi.binding"].create(
-                {
-                    "name": "Synthetic reviewed nine-code representation",
-                    "fiscal_uuid_policy": "controlled_local",
-                }
-            ),
-            self.simple_accountman,
+        binding = self._reviewed_binding(
+            {
+                "name": "Synthetic reviewed nine-code representation",
+                "fiscal_uuid_policy": "controlled_local",
+            },
             capabilities=CONTROLLED_CAPABILITIES,
-            note=(
-                "Synthetic controlled contract for test_reviewed_nine_codes_render_na"
-                "tive_aed_invoice_instructions."
-            ),
+            note="Synthetic controlled contract for test_reviewed_nine_codes_render_na"
+            "tive_aed_invoice_instructions.",
         )
         immutable = [
             "payload",
@@ -509,19 +493,14 @@ class TestUaeInvoiceAmounts(UaePintTestCommon):
 
     def test_no_selected_method_freezes_undefined_payment_instruction(self):
         self.env.company.l10n_ae_edi_auto_prepare = False
-        binding = review_controlled_binding(
-            self.env["l10n_ae.edi.binding"].create(
-                {
-                    "name": "Synthetic undefined payment instruction",
-                    "fiscal_uuid_policy": "controlled_local",
-                }
-            ),
-            self.simple_accountman,
+        binding = self._reviewed_binding(
+            {
+                "name": "Synthetic undefined payment instruction",
+                "fiscal_uuid_policy": "controlled_local",
+            },
             capabilities=CONTROLLED_CAPABILITIES,
-            note=(
-                "Synthetic controlled contract for test_no_selected_method_freezes_un"
-                "defined_payment_instruction."
-            ),
+            note="Synthetic controlled contract for test_no_selected_method_freezes_un"
+            "defined_payment_instruction.",
         )
         account = self.env["res.partner.bank"].create(
             {
@@ -612,16 +591,11 @@ class TestUaeInvoiceAmounts(UaePintTestCommon):
     def test_emitted_tax_credit_exposes_real_official_payment_rule_delta(self):
         # Independent worksheet, no reconciliation: original100+5=105;
         # partial consideration credit40+2=42. Both stay fully open.
-        binding = review_controlled_binding(
-            self.env["l10n_ae.edi.binding"].create(
-                {"name": "Synthetic emitted tax-credit corpus"}
-            ),
-            self.simple_accountman,
+        binding = self._reviewed_binding(
+            {"name": "Synthetic emitted tax-credit corpus"},
             capabilities=CONTROLLED_CAPABILITIES,
-            note=(
-                "Synthetic controlled contract for test_emitted_tax_credit_exposes_re"
-                "al_official_payment_rule_delta."
-            ),
+            note="Synthetic controlled contract for test_emitted_tax_credit_exposes_re"
+            "al_official_payment_rule_delta.",
         )
         packages = [
             ("kmee-pint-ae-1.0.3-ubl-2.1", self.normative_directories["1.0.3"]),
@@ -892,19 +866,14 @@ class TestUaeInvoiceAmounts(UaePintTestCommon):
                 "rate": 1 / 3.6725,
             }
         )
-        binding = review_controlled_binding(
-            self.env["l10n_ae.edi.binding"].create(
-                {
-                    "name": "Synthetic dated native FX",
-                    "fiscal_uuid_policy": "controlled_local",
-                }
-            ),
-            self.simple_accountman,
+        binding = self._reviewed_binding(
+            {
+                "name": "Synthetic dated native FX",
+                "fiscal_uuid_policy": "controlled_local",
+            },
             capabilities=CONTROLLED_CAPABILITIES,
-            note=(
-                "Synthetic controlled contract for test_usd_invoice_prepares_from_dat"
-                "ed_native_rates_without_manual_quote."
-            ),
+            note="Synthetic controlled contract for test_usd_invoice_prepares_from_dat"
+            "ed_native_rates_without_manual_quote.",
         )
         invoice = self.init_invoice(
             "out_invoice", amounts=[100], taxes=self.tax_sale_a, currency=usd
@@ -1096,14 +1065,11 @@ class TestUaeInvoiceAmounts(UaePintTestCommon):
                 "l10n_ae_tax_exchange_date": invoice.invoice_date,
                 "l10n_ae_tax_exchange_source": "SYNTH-WRONG-DIRECTION",
                 "l10n_ae_fiscal_uuid": "ddddddda-3333-4333-8333-333333333333",
-                "l10n_ae_binding_id": review_controlled_binding(
-                    self.env["l10n_ae.edi.binding"].create({"name": "FX mismatch"}),
-                    self.simple_accountman,
+                "l10n_ae_binding_id": self._reviewed_binding(
+                    {"name": "FX mismatch"},
                     capabilities=CONTROLLED_CAPABILITIES,
-                    note=(
-                        "Synthetic controlled contract for test_an_inverted_quote_can"
-                        "not_prepare_a_different_aed_accounting_obligation."
-                    ),
+                    note="Synthetic controlled contract for test_an_inverted_quote_can"
+                    "not_prepare_a_different_aed_accounting_obligation.",
                 ).id,
             }
         )
@@ -1245,19 +1211,14 @@ class TestUaeInvoiceAmounts(UaePintTestCommon):
                 "rate": 1 / 0.90,
             }
         )
-        binding = review_controlled_binding(
-            self.env["l10n_ae.edi.binding"].create(
-                {
-                    "name": "Synthetic EUR discount ledger binding",
-                    "company_id": company.id,
-                }
-            ),
-            self.simple_accountman,
+        binding = self._reviewed_binding(
+            {
+                "name": "Synthetic EUR discount ledger binding",
+                "company_id": company.id,
+            },
             capabilities=CONTROLLED_CAPABILITIES,
-            note=(
-                "Synthetic controlled contract for test_usd_line_discount_preserves_e"
-                "ur_ledger_and_reviewed_aed_quote."
-            ),
+            note="Synthetic controlled contract for test_usd_line_discount_preserves_e"
+            "ur_ledger_and_reviewed_aed_quote.",
         )
         manager_moves = (
             self.env["account.move"]
@@ -1537,16 +1498,11 @@ class TestUaeInvoiceAmounts(UaePintTestCommon):
                 "l10n_ae_tax_exchange_date": invoice.invoice_date,
                 "l10n_ae_tax_exchange_source": "SYNTH-FRACTIONAL-ROUNDING-REVIEW",
                 "l10n_ae_fiscal_uuid": "ddddddda-6666-4666-8666-666666666666",
-                "l10n_ae_binding_id": review_controlled_binding(
-                    self.env["l10n_ae.edi.binding"].create(
-                        {"name": "Fractional VAT review"}
-                    ),
-                    self.simple_accountman,
+                "l10n_ae_binding_id": self._reviewed_binding(
+                    {"name": "Fractional VAT review"},
                     capabilities=CONTROLLED_CAPABILITIES,
-                    note=(
-                        "Synthetic controlled contract for test_fractional_usd_vat_di"
-                        "vergence_requires_review_without_a_rounding_patch."
-                    ),
+                    note="Synthetic controlled contract for test_fractional_usd_vat_di"
+                    "vergence_requires_review_without_a_rounding_patch.",
                 ).id,
             }
         )
@@ -1733,16 +1689,11 @@ class TestUaeInvoiceAmounts(UaePintTestCommon):
             .with_context(allowed_company_ids=[self.env.company.id])
         )
         self.assertFalse(invoice.env.su)
-        binding = review_controlled_binding(
-            self.env["l10n_ae.edi.binding"].create(
-                {"name": "Synthetic Summary reversed-period review"}
-            ),
-            self.simple_accountman,
+        binding = self._reviewed_binding(
+            {"name": "Synthetic Summary reversed-period review"},
             capabilities=CONTROLLED_CAPABILITIES,
-            note=(
-                "Synthetic controlled contract for test_reversed_summary_period_is_re"
-                "fused_before_an_issue_is_frozen."
-            ),
+            note="Synthetic controlled contract for test_reversed_summary_period_is_re"
+            "fused_before_an_issue_is_frozen.",
         )
         invoice.write(
             {
@@ -1799,16 +1750,11 @@ class TestUaeInvoiceAmounts(UaePintTestCommon):
             .with_context(allowed_company_ids=[self.env.company.id])
         )
         self.assertFalse(invoice.env.su)
-        binding = review_controlled_binding(
-            self.env["l10n_ae.edi.binding"].create(
-                {"name": "Synthetic Summary missing-period review"}
-            ),
-            self.simple_accountman,
+        binding = self._reviewed_binding(
+            {"name": "Synthetic Summary missing-period review"},
             capabilities=CONTROLLED_CAPABILITIES,
-            note=(
-                "Synthetic controlled contract for test_summary_without_period_is_ref"
-                "used_before_an_issue_is_frozen."
-            ),
+            note="Synthetic controlled contract for test_summary_without_period_is_ref"
+            "used_before_an_issue_is_frozen.",
         )
         invoice.write(
             {
@@ -1873,19 +1819,14 @@ class TestUaeInvoiceAmounts(UaePintTestCommon):
                 "rate": 1 / 3.6725,
             }
         )
-        binding = review_controlled_binding(
-            self.env["l10n_ae.edi.binding"].create(
-                {
-                    "name": "Synthetic automatic USD billing",
-                    "fiscal_uuid_policy": "controlled_local",
-                }
-            ),
-            self.simple_accountman,
+        binding = self._reviewed_binding(
+            {
+                "name": "Synthetic automatic USD billing",
+                "fiscal_uuid_policy": "controlled_local",
+            },
             capabilities=CONTROLLED_CAPABILITIES,
-            note=(
-                "Synthetic controlled contract for test_usd_billing_batch_preserves_"
-                "native_fx_and_refuses_unreviewed_tax_date."
-            ),
+            note="Synthetic controlled contract for test_usd_billing_batch_preserves_"
+            "native_fx_and_refuses_unreviewed_tax_date.",
         )
         billing = (
             self.env["l10n_ae.edi.billing"]
@@ -2023,19 +1964,14 @@ class TestUaeInvoiceAmounts(UaePintTestCommon):
         journal = self.env["account.journal"].search(
             [("company_id", "=", company.id), ("type", "=", "sale")], limit=1
         )
-        binding = review_controlled_binding(
-            self.env["l10n_ae.edi.binding"].create(
-                {
-                    "name": "Synthetic Summary billing sandbox",
-                    "fiscal_uuid_policy": "controlled_local",
-                }
-            ),
-            self.simple_accountman,
+        binding = self._reviewed_binding(
+            {
+                "name": "Synthetic Summary billing sandbox",
+                "fiscal_uuid_policy": "controlled_local",
+            },
             capabilities=CONTROLLED_CAPABILITIES,
-            note=(
-                "Synthetic controlled contract for "
-                "test_billing_summary_period_survives_submission_replay_and_conflict."
-            ),
+            note="Synthetic controlled contract for "
+            "test_billing_summary_period_survives_submission_replay_and_conflict.",
         )
         billing = (
             self.env["l10n_ae.edi.billing"]
@@ -2194,16 +2130,11 @@ class TestUaeInvoiceAmounts(UaePintTestCommon):
         journal = self.env["account.journal"].search(
             [("company_id", "=", company.id), ("type", "=", "sale")], limit=1
         )
-        binding = review_controlled_binding(
-            self.env["l10n_ae.edi.binding"].create(
-                {"name": "Synthetic summary invoice period"}
-            ),
-            self.simple_accountman,
+        binding = self._reviewed_binding(
+            {"name": "Synthetic summary invoice period"},
             capabilities=CONTROLLED_CAPABILITIES,
-            note=(
-                "Synthetic controlled contract for test_summary_tax_invoice_serialize"
-                "s_reviewed_invoice_period."
-            ),
+            note="Synthetic controlled contract for test_summary_tax_invoice_serialize"
+            "s_reviewed_invoice_period.",
         )
         invoice = manager_moves.create(
             {
@@ -2392,16 +2323,11 @@ class TestUaeInvoiceAmounts(UaePintTestCommon):
             (("2019-01-01", False), (False, "2019-01-31")), start=1
         ):
             with self.subTest(start=start, end=end):
-                binding = review_controlled_binding(
-                    self.env["l10n_ae.edi.binding"].create(
-                        {"name": f"Synthetic one-ended summary period {index}"}
-                    ),
-                    self.simple_accountman,
+                binding = self._reviewed_binding(
+                    {"name": f"Synthetic one-ended summary period {index}"},
                     capabilities=CONTROLLED_CAPABILITIES,
-                    note=(
-                        "Synthetic controlled contract for test_summary_tax_invoice_s"
-                        "erializes_single_reviewed_period_endpoint."
-                    ),
+                    note="Synthetic controlled contract for test_summary_tax_invoice_s"
+                    "erializes_single_reviewed_period_endpoint.",
                 )
                 invoice = manager_moves.create(
                     {

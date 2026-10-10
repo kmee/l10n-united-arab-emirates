@@ -77,12 +77,8 @@ class TestUaeReceivedXml(UaePintTestCommon):
             Decimal(0),
         )
 
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {"name": "Incoming commercial credit package retention"}
-        )
-        binding = review_controlled_binding(
-            binding,
-            self.simple_accountman,
+        binding = self._reviewed_binding(
+            {"name": "Incoming commercial credit package retention"},
             capabilities=("receive",),
             note="Synthetic reviewed receive-only contract for this inbound fixture.",
         )
@@ -283,12 +279,8 @@ class TestUaeReceivedXml(UaePintTestCommon):
         )
         source.l10n_ae_fiscal_uuid = "18181818-1818-4818-8818-181818181818"
         content = etree.tostring(self._received_test_xml(source))
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {"name": "Pending incoming normative package review"}
-        )
-        binding = review_controlled_binding(
-            binding,
-            self.simple_accountman,
+        binding = self._reviewed_binding(
+            {"name": "Pending incoming normative package review"},
             capabilities=("receive",),
             note="Synthetic reviewed receive-only contract for this inbound fixture.",
         )
@@ -413,12 +405,8 @@ class TestUaeReceivedXml(UaePintTestCommon):
         )
         source.l10n_ae_fiscal_uuid = "19191919-1919-4919-8919-191919191919"
         content = etree.tostring(self._received_test_xml(source))
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {"name": "Synthetic technical-review package pin"}
-        )
-        binding = review_controlled_binding(
-            binding,
-            self.simple_accountman,
+        binding = self._reviewed_binding(
+            {"name": "Synthetic technical-review package pin"},
             capabilities=("receive",),
             note="Synthetic reviewed receive-only contract for this inbound fixture.",
         )
@@ -612,12 +600,8 @@ class TestUaeReceivedXml(UaePintTestCommon):
         )
         source.l10n_ae_fiscal_uuid = "17171717-1717-4717-8717-171717171717"
         content = etree.tostring(self._received_test_xml(source))
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {"name": "Historical received package review"}
-        )
-        binding = review_controlled_binding(
-            binding,
-            self.simple_accountman,
+        binding = self._reviewed_binding(
+            {"name": "Historical received package review"},
             capabilities=("receive",),
             note="Synthetic reviewed receive-only contract for this inbound fixture.",
         )
@@ -702,10 +686,8 @@ class TestUaeReceivedXml(UaePintTestCommon):
                 "l10n_ae_fiscal_uuid": "aaaaaaaf-3333-4333-8333-333333333333",
             }
         )
-        binding = self.env["l10n_ae.edi.binding"].create({"name": "Received agent"})
-        binding = review_controlled_binding(
-            binding,
-            self.simple_accountman,
+        binding = self._reviewed_binding(
+            {"name": "Received agent"},
             capabilities=("receive",),
             note="Synthetic reviewed receive-only contract for this inbound fixture.",
         )
@@ -787,12 +769,8 @@ class TestUaeReceivedXml(UaePintTestCommon):
                 "l10n_ae_fiscal_uuid": "aaaaaaaf-5555-4555-8555-555555555555",
             }
         )
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {"name": "Agent principal defects"}
-        )
-        binding = review_controlled_binding(
-            binding,
-            self.simple_accountman,
+        binding = self._reviewed_binding(
+            {"name": "Agent principal defects"},
             capabilities=("receive",),
             note="Synthetic reviewed receive-only contract for this inbound fixture.",
         )
@@ -826,12 +804,8 @@ class TestUaeReceivedXml(UaePintTestCommon):
                 self.assertEqual(inbox.original_xml.content, content)
 
     def test_received_package_preserves_every_identity_selection_and_original(self):
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {"name": "Portable identity review"}
-        )
-        binding = review_controlled_binding(
-            binding,
-            self.simple_accountman,
+        binding = self._reviewed_binding(
+            {"name": "Portable identity review"},
             capabilities=("receive",),
             note="Synthetic reviewed receive-only contract for this inbound fixture.",
         )
@@ -920,12 +894,8 @@ class TestUaeReceivedXml(UaePintTestCommon):
         self.assertFalse((first | selected).processing_history_ids)
 
     def test_received_identity_conflict_includes_an_unreadable_original(self):
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {"name": "Restricted original identity"}
-        )
-        binding = review_controlled_binding(
-            binding,
-            self.simple_accountman,
+        binding = self._reviewed_binding(
+            {"name": "Restricted original identity"},
             capabilities=("receive",),
             note="Synthetic reviewed receive-only contract for this inbound fixture.",
         )
@@ -972,12 +942,8 @@ class TestUaeReceivedXml(UaePintTestCommon):
         self,
     ):
         tree, _rate, source = self._foreign_received_fixture()
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {"name": "Incoming USD credit"}
-        )
-        binding = review_controlled_binding(
-            binding,
-            self.simple_accountman,
+        binding = self._reviewed_binding(
+            {"name": "Incoming USD credit"},
             capabilities=("receive",),
             note="Synthetic reviewed receive-only contract for this inbound fixture.",
         )
@@ -1031,10 +997,8 @@ class TestUaeReceivedXml(UaePintTestCommon):
         tree.find("cac:TaxExchangeRate/cbc:SourceCurrencyCode", NS).text = "CHF"
         for node in tree.xpath("//*[@currencyID='USD']"):
             node.set("currencyID", "CHF")
-        binding = self.env["l10n_ae.edi.binding"].create({"name": "Inactive CHF"})
-        binding = review_controlled_binding(
-            binding,
-            self.simple_accountman,
+        binding = self._reviewed_binding(
+            {"name": "Inactive CHF"},
             capabilities=("receive",),
             note="Synthetic reviewed receive-only contract for this inbound fixture.",
         )
@@ -1058,12 +1022,8 @@ class TestUaeReceivedXml(UaePintTestCommon):
     ):
         tree, rate, _source = self._foreign_received_fixture()
         content = etree.tostring(tree)
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {"name": "Incoming USD evidence"}
-        )
-        binding = review_controlled_binding(
-            binding,
-            self.simple_accountman,
+        binding = self._reviewed_binding(
+            {"name": "Incoming USD evidence"},
             capabilities=("receive",),
             note="Synthetic reviewed receive-only contract for this inbound fixture.",
         )
@@ -1174,12 +1134,8 @@ class TestUaeReceivedXml(UaePintTestCommon):
             country, etree.QName(NS["cbc"], "IdentificationCode")
         ).text = "AE"
         content = etree.tostring(tree, encoding="UTF-8", xml_declaration=True)
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {"name": "Received e-commerce delivery"}
-        )
-        binding = review_controlled_binding(
-            binding,
-            self.simple_accountman,
+        binding = self._reviewed_binding(
+            {"name": "Received e-commerce delivery"},
             capabilities=("receive",),
             note="Synthetic reviewed receive-only contract for this inbound fixture.",
         )
@@ -1358,12 +1314,8 @@ class TestUaeReceivedXml(UaePintTestCommon):
             ),
             5,
         )
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {"name": "Received combined Free Zone e-commerce"}
-        )
-        binding = review_controlled_binding(
-            binding,
-            self.simple_accountman,
+        binding = self._reviewed_binding(
+            {"name": "Received combined Free Zone e-commerce"},
             capabilities=("receive",),
             note="Synthetic reviewed receive-only contract for this inbound fixture.",
         )
@@ -1436,9 +1388,8 @@ class TestUaeReceivedXml(UaePintTestCommon):
         self.assertFalse(bill.l10n_ae_transmission_id)
 
     def test_received_forms_open_when_evidence_export_refuses_integrity(self):
-        binding = review_controlled_binding(
-            self.env["l10n_ae.edi.binding"].create({"name": "Received form integrity"}),
-            self.simple_accountman,
+        binding = self._reviewed_binding(
+            {"name": "Received form integrity"},
             capabilities=("receive",),
             note="Synthetic reviewed receiving contract for form/export isolation.",
         )
@@ -1554,12 +1505,8 @@ class TestUaeReceivedXml(UaePintTestCommon):
             self.assertIsNotNone(node)
             node.text = value
         content = etree.tostring(tree, encoding="UTF-8", xml_declaration=True)
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {"name": "Received e-commerce delivery integrity"}
-        )
-        binding = review_controlled_binding(
-            binding,
-            self.simple_accountman,
+        binding = self._reviewed_binding(
+            {"name": "Received e-commerce delivery integrity"},
             capabilities=("receive",),
             note="Synthetic reviewed receive-only contract for this inbound fixture.",
         )
@@ -1684,12 +1631,8 @@ class TestUaeReceivedXml(UaePintTestCommon):
         )
 
     def test_received_ecommerce_missing_required_delivery_stays_in_review(self):
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {"name": "Incomplete received e-commerce delivery"}
-        )
-        binding = review_controlled_binding(
-            binding,
-            self.simple_accountman,
+        binding = self._reviewed_binding(
+            {"name": "Incomplete received e-commerce delivery"},
             capabilities=("receive",),
             note="Synthetic reviewed receive-only contract for this inbound fixture.",
         )
@@ -1756,12 +1699,8 @@ class TestUaeReceivedXml(UaePintTestCommon):
         self.assertIsNotNone(delivery)
         delivery.addnext(etree.fromstring(etree.tostring(delivery)))
         content = etree.tostring(tree, encoding="UTF-8", xml_declaration=True)
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {"name": "Ambiguous received e-commerce delivery"}
-        )
-        binding = review_controlled_binding(
-            binding,
-            self.simple_accountman,
+        binding = self._reviewed_binding(
+            {"name": "Ambiguous received e-commerce delivery"},
             capabilities=("receive",),
             note="Synthetic reviewed receive-only contract for this inbound fixture.",
         )
@@ -1810,12 +1749,8 @@ class TestUaeReceivedXml(UaePintTestCommon):
             country, etree.QName(NS["cbc"], "IdentificationCode")
         ).text = "AE"
         content = etree.tostring(tree, encoding="UTF-8", xml_declaration=True)
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {"name": "Received native e-commerce review"}
-        )
-        binding = review_controlled_binding(
-            binding,
-            self.simple_accountman,
+        binding = self._reviewed_binding(
+            {"name": "Received native e-commerce review"},
             capabilities=("receive",),
             note="Synthetic reviewed receive-only contract for this inbound fixture.",
         )
@@ -1838,12 +1773,8 @@ class TestUaeReceivedXml(UaePintTestCommon):
 
     def test_received_delivery_emirate_requires_review_and_preserves_original(self):
         original = self._received_test_xml()
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {"name": "Synthetic received delivery emirate"}
-        )
-        binding = review_controlled_binding(
-            binding,
-            self.simple_accountman,
+        binding = self._reviewed_binding(
+            {"name": "Synthetic received delivery emirate"},
             capabilities=("receive",),
             note="Synthetic reviewed receive-only contract for this inbound fixture.",
         )
@@ -1911,10 +1842,8 @@ class TestUaeReceivedXml(UaePintTestCommon):
                         history.write({"validation_report": "{}"})
 
     def test_received_event_package_retains_every_conflicting_association(self):
-        binding = self.env["l10n_ae.edi.binding"].create({"name": "Portable events"})
-        binding = review_controlled_binding(
-            binding,
-            self.simple_accountman,
+        binding = self._reviewed_binding(
+            {"name": "Portable events"},
             capabilities=("receive",),
             note="Synthetic reviewed receive-only contract for this inbound fixture.",
         )
@@ -1988,10 +1917,8 @@ class TestUaeReceivedXml(UaePintTestCommon):
             self.assertEqual(audit.evidence_archive.content, after)
 
     def test_received_events_replay_without_duplicate_original_or_bill(self):
-        binding = self.env["l10n_ae.edi.binding"].create({"name": "Event identity"})
-        binding = review_controlled_binding(
-            binding,
-            self.simple_accountman,
+        binding = self._reviewed_binding(
+            {"name": "Event identity"},
             capabilities=("receive",),
             note="Synthetic reviewed receive-only contract for this inbound fixture.",
         )
@@ -2043,12 +1970,8 @@ class TestUaeReceivedXml(UaePintTestCommon):
         )
         content = etree.tostring(self._received_test_xml(source))
         original_hash = hashlib.sha256(content).hexdigest()
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {"name": "Synthetic received Summary period"}
-        )
-        binding = review_controlled_binding(
-            binding,
-            self.simple_accountman,
+        binding = self._reviewed_binding(
+            {"name": "Synthetic received Summary period"},
             capabilities=("receive",),
             note="Synthetic reviewed receive-only contract for this inbound fixture.",
         )
@@ -2178,12 +2101,8 @@ class TestUaeReceivedXml(UaePintTestCommon):
         ).validate(content)
         self.assertTrue(formal["valid"], formal)
         original_hash = hashlib.sha256(content).hexdigest()
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {"name": "Synthetic received Free Zone Summary period"}
-        )
-        binding = review_controlled_binding(
-            binding,
-            self.simple_accountman,
+        binding = self._reviewed_binding(
+            {"name": "Synthetic received Free Zone Summary period"},
             capabilities=("receive",),
             note="Synthetic reviewed receive-only contract for this inbound fixture.",
         )
@@ -2322,12 +2241,8 @@ class TestUaeReceivedXml(UaePintTestCommon):
             .with_context(allowed_company_ids=[company.id])
         )
         self.assertFalse(receiver.env.su)
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {"name": "Synthetic invalid received Summary periods"}
-        )
-        binding = review_controlled_binding(
-            binding,
-            self.simple_accountman,
+        binding = self._reviewed_binding(
+            {"name": "Synthetic invalid received Summary periods"},
             capabilities=("receive",),
             note="Synthetic reviewed receive-only contract for this inbound fixture.",
         )
@@ -2449,10 +2364,8 @@ class TestUaeReceivedXml(UaePintTestCommon):
             }
         )
         content = etree.tostring(self._received_test_xml(source))
-        binding = self.env["l10n_ae.edi.binding"].create({"name": "Received Free Zone"})
-        binding = review_controlled_binding(
-            binding,
-            self.simple_accountman,
+        binding = self._reviewed_binding(
+            {"name": "Received Free Zone"},
             capabilities=("receive",),
             note="Synthetic reviewed receive-only contract for this inbound fixture.",
         )
@@ -2523,9 +2436,8 @@ class TestUaeReceivedXml(UaePintTestCommon):
         ledger_fields = ["debit", "credit", "amount_currency", "write_date"]
         ledger = source.line_ids.read(ledger_fields)
         content = etree.tostring(self._received_test_xml(source))
-        binding = review_controlled_binding(
-            self.env["l10n_ae.edi.binding"].create({"name": "Incoming AED comparison"}),
-            self.simple_accountman,
+        binding = self._reviewed_binding(
+            {"name": "Incoming AED comparison"},
             capabilities=("receive",),
             note="Synthetic receive-only contract for native multiline declarations.",
         )
@@ -2585,11 +2497,8 @@ class TestUaeReceivedXml(UaePintTestCommon):
 
     def test_received_unequal_aed_headers_preserve_declarations_for_draft_review(self):
         original, rate, _source = self._foreign_received_fixture()
-        binding = review_controlled_binding(
-            self.env["l10n_ae.edi.binding"].create(
-                {"name": "Incoming declared headers"}
-            ),
-            self.simple_accountman,
+        binding = self._reviewed_binding(
+            {"name": "Incoming declared headers"},
             capabilities=("receive",),
             note="Synthetic receive-only contract for unequal header declarations.",
         )
@@ -2653,12 +2562,8 @@ class TestUaeReceivedXml(UaePintTestCommon):
 
     def test_received_malformed_fx_headers_stay_in_review_without_a_draft(self):
         original, _rate, _source = self._foreign_received_fixture()
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {"name": "Incoming FX arithmetic"}
-        )
-        binding = review_controlled_binding(
-            binding,
-            self.simple_accountman,
+        binding = self._reviewed_binding(
+            {"name": "Incoming FX arithmetic"},
             capabilities=("receive",),
             note="Synthetic reviewed receive-only contract for this inbound fixture.",
         )
@@ -2699,12 +2604,8 @@ class TestUaeReceivedXml(UaePintTestCommon):
 
     def test_received_fx_line_currency_and_conversion_require_review(self):
         original, _rate, _source = self._foreign_received_fixture()
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {"name": "Incoming FX line arithmetic"}
-        )
-        binding = review_controlled_binding(
-            binding,
-            self.simple_accountman,
+        binding = self._reviewed_binding(
+            {"name": "Incoming FX line arithmetic"},
             capabilities=("receive",),
             note="Synthetic reviewed receive-only contract for this inbound fixture.",
         )
@@ -2813,12 +2714,8 @@ class TestUaeReceivedXml(UaePintTestCommon):
         }
         for xpath, value in values.items():
             tree.find(xpath, NS).text = value
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {"name": "Incoming fractional quantity"}
-        )
-        binding = review_controlled_binding(
-            binding,
-            self.simple_accountman,
+        binding = self._reviewed_binding(
+            {"name": "Incoming fractional quantity"},
             capabilities=("receive",),
             note="Synthetic reviewed receive-only contract for this inbound fixture.",
         )
@@ -2892,12 +2789,8 @@ class TestUaeReceivedXml(UaePintTestCommon):
                 node.set("currencyID", currency)
         line.find("cbc:LineExtensionAmount", NS).addnext(allowance)
         content = etree.tostring(tree)
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {"name": "Synthetic received fractional discount"}
-        )
-        binding = review_controlled_binding(
-            binding,
-            self.simple_accountman,
+        binding = self._reviewed_binding(
+            {"name": "Synthetic received fractional discount"},
             capabilities=("receive",),
             note="Synthetic reviewed receive-only contract for this inbound fixture.",
         )
@@ -2938,9 +2831,8 @@ class TestUaeReceivedXml(UaePintTestCommon):
             "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
         )
         source.l10n_ae_fiscal_uuid = "cccccccd-1111-4111-8111-111111111111"
-        binding = review_controlled_binding(
-            self.env["l10n_ae.edi.binding"].create({"name": "Received code review"}),
-            self.simple_accountman,
+        binding = self._reviewed_binding(
+            {"name": "Received code review"},
             capabilities=("receive",),
             note="Synthetic reviewed receiving contract for code normalization.",
         )
@@ -3010,12 +2902,8 @@ class TestUaeReceivedXml(UaePintTestCommon):
             "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
         )
         original.l10n_ae_fiscal_uuid = "aaaaaaab-1111-4111-8111-111111111111"
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {"name": "Incoming supplier adjustment"}
-        )
-        binding = review_controlled_binding(
-            binding,
-            self.simple_accountman,
+        binding = self._reviewed_binding(
+            {"name": "Incoming supplier adjustment"},
             capabilities=("receive",),
             note="Synthetic reviewed receive-only contract for this inbound fixture.",
         )
@@ -3272,12 +3160,8 @@ class TestUaeReceivedXml(UaePintTestCommon):
         tree.find(
             "cac:AccountingSupplierParty/cac:Party/cbc:EndpointID", NS
         ).text = "1000000009"
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {"name": "Incoming endpoint check"}
-        )
-        binding = review_controlled_binding(
-            binding,
-            self.simple_accountman,
+        binding = self._reviewed_binding(
+            {"name": "Incoming endpoint check"},
             capabilities=("receive",),
             note="Synthetic reviewed receive-only contract for this inbound fixture.",
         )
@@ -3296,12 +3180,8 @@ class TestUaeReceivedXml(UaePintTestCommon):
     def test_received_declared_amounts_keep_the_xml_currency_during_accounting_review(
         self,
     ):
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {"name": "Received currency evidence"}
-        )
-        binding = review_controlled_binding(
-            binding,
-            self.simple_accountman,
+        binding = self._reviewed_binding(
+            {"name": "Received currency evidence"},
             capabilities=("receive",),
             note="Synthetic reviewed receive-only contract for this inbound fixture.",
         )
@@ -3331,12 +3211,8 @@ class TestUaeReceivedXml(UaePintTestCommon):
             tree.find("cac:AccountingSupplierParty/cac:Party/cac:PartyTaxScheme", NS)
         )
         content = etree.tostring(tree)
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {"name": "Incoming commercial document"}
-        )
-        binding = review_controlled_binding(
-            binding,
-            self.simple_accountman,
+        binding = self._reviewed_binding(
+            {"name": "Incoming commercial document"},
             capabilities=("receive",),
             note="Synthetic reviewed receive-only contract for this inbound fixture.",
         )
@@ -3365,12 +3241,8 @@ class TestUaeReceivedXml(UaePintTestCommon):
         self,
     ):
         source, purchase_tax, tree = self._commercial_received_fixture()
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {"name": "Incoming commercial adjustment"}
-        )
-        binding = review_controlled_binding(
-            binding,
-            self.simple_accountman,
+        binding = self._reviewed_binding(
+            {"name": "Incoming commercial adjustment"},
             capabilities=("receive",),
             note="Synthetic reviewed receive-only contract for this inbound fixture.",
         )
@@ -3421,12 +3293,8 @@ class TestUaeReceivedXml(UaePintTestCommon):
             "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
         )
         original.l10n_ae_fiscal_uuid = "bbbbbbba-1111-4111-8111-111111111111"
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {"name": "Incoming credit reference review"}
-        )
-        binding = review_controlled_binding(
-            binding,
-            self.simple_accountman,
+        binding = self._reviewed_binding(
+            {"name": "Incoming credit reference review"},
             capabilities=("receive",),
             note="Synthetic reviewed receive-only contract for this inbound fixture.",
         )
@@ -3463,12 +3331,8 @@ class TestUaeReceivedXml(UaePintTestCommon):
 
     def test_received_identical_xml_with_another_remote_id_reuses_the_bill(self):
         content = etree.tostring(self._received_test_xml())
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {"name": "Incoming duplicate check"}
-        )
-        binding = review_controlled_binding(
-            binding,
-            self.simple_accountman,
+        binding = self._reviewed_binding(
+            {"name": "Incoming duplicate check"},
             capabilities=("receive",),
             note="Synthetic reviewed receive-only contract for this inbound fixture.",
         )
@@ -3530,10 +3394,8 @@ class TestUaeReceivedXml(UaePintTestCommon):
             ).read(["original_xml"])
 
     def test_received_identity_with_changed_bytes_preserves_both_for_review(self):
-        binding = self.env["l10n_ae.edi.binding"].create({"name": "Inbound replay ASP"})
-        binding = review_controlled_binding(
-            binding,
-            self.simple_accountman,
+        binding = self._reviewed_binding(
+            {"name": "Inbound replay ASP"},
             capabilities=("receive",),
             note="Synthetic reviewed receive-only contract for this inbound fixture.",
         )
@@ -3659,10 +3521,8 @@ class TestUaeReceivedXml(UaePintTestCommon):
         supplier.append(customer_party)
         customer.append(supplier_party)
         content = etree.tostring(tree)
-        binding = self.env["l10n_ae.edi.binding"].create({"name": "Inbound test ASP"})
-        binding = review_controlled_binding(
-            binding,
-            self.simple_accountman,
+        binding = self._reviewed_binding(
+            {"name": "Inbound test ASP"},
             capabilities=("receive",),
             note="Synthetic reviewed receive-only contract for this inbound fixture.",
         )

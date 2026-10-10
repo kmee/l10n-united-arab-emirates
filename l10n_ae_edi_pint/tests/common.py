@@ -98,12 +98,8 @@ class UaePintTestCommon(AccountTestInvoicingCommon):
             "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
         )
         original.write({"l10n_ae_fiscal_uuid": "aaaaaaab-3333-4333-8333-333333333333"})
-        binding = self.env["l10n_ae.edi.binding"].create(
-            {"name": "Incoming Summary supplier credit"}
-        )
-        binding = review_controlled_binding(
-            binding,
-            self.simple_accountman,
+        binding = self._reviewed_binding(
+            {"name": "Incoming Summary supplier credit"},
             capabilities=("receive",),
             note="Synthetic reviewed receive-only contract for this inbound fixture.",
         )
@@ -426,19 +422,14 @@ class UaePintTestCommon(AccountTestInvoicingCommon):
             }
         )
         original = self.init_invoice("out_invoice", amounts=[100], taxes=outside_scope)
-        binding = review_controlled_binding(
-            self.env["l10n_ae.edi.binding"].create(
-                {
-                    "name": "Commercial credit local simulation",
-                    "fiscal_uuid_policy": "controlled_local",
-                }
-            ),
-            self.simple_accountman,
+        binding = self._reviewed_binding(
+            {
+                "name": "Commercial credit local simulation",
+                "fiscal_uuid_policy": "controlled_local",
+            },
             capabilities=CONTROLLED_CAPABILITIES,
-            note=(
-                "Synthetic controlled contract for _assert_native_partial_commercial_"
-                "credit."
-            ),
+            note="Synthetic controlled contract for _assert_native_partial_commercial_"
+            "credit.",
         )
         original.write(
             {
@@ -534,16 +525,11 @@ class UaePintTestCommon(AccountTestInvoicingCommon):
             {
                 "l10n_ae_selfbilling_agreement_id": agreement.id,
                 "l10n_ae_fiscal_uuid": "ddddddda-3333-4333-8333-333333333333",
-                "l10n_ae_binding_id": review_controlled_binding(
-                    self.env["l10n_ae.edi.binding"].create(
-                        {"name": "Synthetic self-billing sandbox"}
-                    ),
-                    self.simple_accountman,
+                "l10n_ae_binding_id": self._reviewed_binding(
+                    {"name": "Synthetic self-billing sandbox"},
                     capabilities=CONTROLLED_CAPABILITIES,
-                    note=(
-                        "Synthetic controlled contract for _selfbilling_bill_with_agr"
-                        "eement."
-                    ),
+                    note="Synthetic controlled contract for _selfbilling_bill_with_agr"
+                    "eement.",
                 ).id,
             }
         )
