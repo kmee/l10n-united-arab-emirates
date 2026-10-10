@@ -18,8 +18,19 @@ class ControlledAspError(Exception):
         super().__init__("Controlled ASP result: " + kind)
 
 
+class ControlledAspResponseLimit(ControlledAspError):
+    """Only the bounded HTTP byte observation, never a partial original."""
+
+    def __init__(self, limit_bytes, observed_bytes):
+        self.limit_bytes = limit_bytes
+        self.observed_bytes = observed_bytes
+        super().__init__("unknown")
+
+
 class ControlledAspClient:
     """Transport-only SDK. Call outside accounting/database transactions."""
+
+    RESPONSE_LIMIT_BYTES = 2 * 1024 * 1024
 
     def __init__(self, base_url, token, provider, timeout=5):
         parsed = urlsplit(base_url)
@@ -70,9 +81,9 @@ class ControlledAspClient:
                     ),
                     response.status,
                 )
-            raw = response.read(2 * 1024 * 1024 + 1)
-            if len(raw) > 2 * 1024 * 1024:
-                raise ControlledAspError("unknown")
+            raw = response.read(self.RESPONSE_LIMIT_BYTES + 1)
+            if len(raw) > self.RESPONSE_LIMIT_BYTES:
+                raise ControlledAspResponseLimit(self.RESPONSE_LIMIT_BYTES, len(raw))
             result = json.loads(raw)
             if (
                 result.get("contract_version") != "kmee-controlled-1"
