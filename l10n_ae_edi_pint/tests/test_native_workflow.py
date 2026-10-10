@@ -35,6 +35,14 @@ class TestUaeNativeWorkflow(UaePintTestCommon):
         ).with_user(self.simple_accountman)
         invoice.l10n_ae_binding_id = binding
         line = invoice.invoice_line_ids
+        # A service line without a product is valid when its item name is present.
+        line.write({"product_id": False, "label": "Synthetic described service"})
+        invoice.action_l10n_ae_validate()
+        self.assertFalse(line.product_id)
+        self.assertEqual(line.name, "Synthetic described service")
+        self.assertFalse(
+            invoice.l10n_ae_fiscal_uuid or invoice.l10n_ae_transmission_ids
+        )
         # Replay the actual saved source facts from the failed browser journey.
         # The Odoo 20 label inverse stores name=False when label is False.
         line.write({"product_id": False, "label": False})
