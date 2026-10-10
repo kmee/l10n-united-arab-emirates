@@ -24,6 +24,15 @@ NS = {
 
 
 class UaePintTestCommon(AccountTestInvoicingCommon):
+    def _reviewed_binding(self, values, *, capabilities, note):
+        """Create the exact fixture and review it through an ordinary manager."""
+        return review_controlled_binding(
+            self.env["l10n_ae.edi.binding"].create(values),
+            self.simple_accountman,
+            capabilities=capabilities,
+            note=note,
+        )
+
     def setUp(self):
         super().setUp()
         cache = Path(__file__).resolve().parents[2] / ".runtime"

@@ -1045,16 +1045,11 @@ class TestUaeInvoiceXml(UaePintTestCommon):
                 "ubl_cii_tax_category_code": "O",
             }
         )
-        binding = review_controlled_binding(
-            self.env["l10n_ae.edi.binding"].create(
-                {"name": "Synthetic emitted corpus sandbox"}
-            ),
-            self.simple_accountman,
+        binding = self._reviewed_binding(
+            {"name": "Synthetic emitted corpus sandbox"},
             capabilities=CONTROLLED_CAPABILITIES,
-            note=(
-                "Synthetic controlled contract for test_emitted_commercial_invoice_pr"
-                "eserves_package_across_official_cycle."
-            ),
+            note="Synthetic controlled contract for test_emitted_commercial_invoice_pr"
+            "eserves_package_across_official_cycle.",
         )
         invoice = self.init_invoice("out_invoice", amounts=[100], taxes=tax)
         invoice.write(
