@@ -673,12 +673,15 @@ class AccountMove(models.Model):
                     "changed."
                 )
             )
-        manual_quote_fields = {
+        invoice_metadata_fields = {
             "l10n_ae_tax_exchange_rate",
             "l10n_ae_tax_exchange_date",
             "l10n_ae_tax_exchange_source",
+            "sending_data",
+            "is_move_sent",
+            "message_main_attachment_id",
         }
-        if vals and set(vals).issubset(manual_quote_fields):
+        if vals and set(vals).issubset(invoice_metadata_fields):
             posted_invoices = self.filtered(
                 lambda move: (
                     move.state == "posted"
@@ -687,8 +690,8 @@ class AccountMove(models.Model):
                 )
             )
             if posted_invoices:
-                # Quote review changes no accounting input. Native invoice sync
-                # otherwise recomputes stored debit/credit and rewrites line audits.
+                # Quote review and native Send metadata change no accounting input.
+                # Native sync otherwise rewrites stored debit/credit line audits.
                 result = super(
                     AccountMove,
                     posted_invoices.with_context(skip_invoice_sync=True),
