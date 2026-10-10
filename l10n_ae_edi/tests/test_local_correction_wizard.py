@@ -2,6 +2,7 @@
 # License AGPL-3.0 or later (https://www.gnu.org/licenses/agpl).
 """Native public action and Form coverage for correction before sending."""
 
+from odoo.exceptions import AccessError
 from odoo.tests import Form, tagged
 from odoo.tests.common import new_test_user
 
@@ -216,3 +217,117 @@ class TestUaeLocalCorrectionWizard(AccountTestInvoicingCommon):
         self.assertTrue(correction.completed_at)
         self.assertEqual(self._source_facts(source), original_source)
         self.assertEqual(source.local_correction_id, correction)
+
+    def test_readonly_and_foreign_company_cannot_start_or_confirm_correction(self):
+        from_company = self.env.company
+        other_company = self.env["res.company"].create(
+            {"name": "Synthetic foreign correction company"}
+        )
+        readonly = new_test_user(
+            self.env,
+            login="uae-local-correction-readonly",
+            groups="account.group_account_readonly",
+            company_id=from_company.id,
+            company_ids=from_company.ids,
+        )
+        foreign_editor = new_test_user(
+            self.env,
+            login="uae-local-correction-foreign-editor",
+            groups="account.group_account_invoice",
+            company_id=other_company.id,
+            company_ids=other_company.ids,
+        )
+
+        move, source = self._queue_issued_invoice()
+        ledger_fields = [
+            "date",
+            "account_id",
+            "partner_id",
+            "name",
+            "debit",
+            "credit",
+            "balance",
+            "amount_currency",
+            "currency_id",
+            "tax_ids",
+            "tax_tag_ids",
+            "display_type",
+            "quantity",
+            "price_unit",
+            "product_id",
+            "analytic_distribution",
+            "write_uid",
+            "write_date",
+        ]
+
+        def snapshot():
+            return {
+                "move": move.read(
+                    [
+                        "company_id",
+                        "state",
+                        "write_date",
+                        "amount_untaxed",
+                        "amount_tax",
+                        "amount_total",
+                        "l10n_ae_transmission_id",
+                        "l10n_ae_correction_id",
+                    ]
+                ),
+                "ledger": move.line_ids.sorted("id").read(ledger_fields, load=None),
+                "source": self._source_facts(source),
+                "source_correction": source.local_correction_id.id,
+                "history_count": self.env["l10n_ae.edi.correction"].search_count(
+                    [("move_id", "=", move.id)]
+                ),
+            }
+
+        before = snapshot()
+        self.assertEqual(
+            (move.amount_untaxed, move.amount_tax, move.amount_total), (100, 5, 105)
+        )
+        self.assertFalse(source.local_correction_id)
+        self.assertEqual(before["history_count"], 0)
+
+        readonly_move = move.with_user(readonly).with_context(
+            allowed_company_ids=from_company.ids
+        )
+        self.assertFalse(readonly_move.env.su)
+        with self.assertRaises(AccessError):
+            readonly_move.action_l10n_ae_start_local_correction()
+        self.assertEqual(snapshot(), before)
+
+        foreign_move = move.with_user(foreign_editor).with_context(
+            allowed_company_ids=other_company.ids
+        )
+        self.assertFalse(foreign_move.env.su)
+        with self.assertRaises(AccessError):
+            foreign_move.action_l10n_ae_start_local_correction()
+        self.assertEqual(snapshot(), before)
+
+        # Create through the public transient ORM as the foreign actor, with forged
+        # foreign-actor defaults and explicit IDs. This makes the transient belong to
+        # that actor, so confirm cannot fail merely because someone else owns it.
+        foreign_wizard_model = (
+            self.env["l10n_ae.edi.correction.wizard"]
+            .with_user(foreign_editor)
+            .with_context(
+                allowed_company_ids=other_company.ids,
+                default_move_id=move.id,
+                default_source_transmission_id=source.id,
+            )
+        )
+        foreign_wizard = foreign_wizard_model.create(
+            {
+                "move_id": move.id,
+                "source_transmission_id": source.id,
+                "reason": "Synthetic forged cross-company correction attempt.",
+            }
+        )
+        self.assertFalse(foreign_wizard.env.su)
+        self.assertEqual(foreign_wizard.create_uid, foreign_editor)
+        self.assertEqual(foreign_wizard.move_id.id, move.id)
+        self.assertEqual(foreign_wizard.source_transmission_id.id, source.id)
+        with self.assertRaises(AccessError):
+            foreign_wizard.action_confirm()
+        self.assertEqual(snapshot(), before)
