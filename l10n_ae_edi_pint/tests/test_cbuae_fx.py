@@ -16,11 +16,11 @@ from odoo.addons.l10n_ae_edi.tests.common import (
     review_controlled_binding,
 )
 
-from .test_invoice_xml import TestUaeInvoiceXml
+from .common import UaePintTestCommon
 
 
 @tagged("post_install", "-at_install")
-class TestUaeCbuaeFx(TestUaeInvoiceXml):
+class TestUaeCbuaeFx(UaePintTestCommon):
     def test_renamed_imported_currency_requires_review_and_keeps_frozen_invoice(self):
         usd, _anchor, review = self._reviewed_cbuae_usd()
         company = self.env.company
