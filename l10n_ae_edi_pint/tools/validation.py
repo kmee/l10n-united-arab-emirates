@@ -4,6 +4,7 @@
 
 import hashlib
 import json
+import math
 import os
 import subprocess
 import sys
@@ -90,7 +91,7 @@ class OfflinePintValidator:
         self.resource_directory = Path(resource_directory).resolve()
         _manifest_path(ruleset)
         self.ruleset = ruleset
-        if timeout <= 0 or timeout > 60:
+        if not math.isfinite(timeout) or timeout <= 0 or timeout > 60:
             raise ValueError("Validation deadline must be between zero and 60 seconds.")
         self.timeout = timeout
 
