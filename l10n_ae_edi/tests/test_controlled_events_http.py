@@ -58,3 +58,20 @@ class TestControlledEventBadSignatureHttp(HttpCase):
                     os.environ.pop(key, None)
                 else:
                     os.environ[key] = value
+
+    def test_public_http_route_rejects_body_over_application_limit(self):
+        # Select this HttpCase database through Odoo's native public session.
+        self.authenticate(None, None)
+        binding_id = 2147483000
+        body = b"x" * 65537
+        self.assertEqual(len(body), 65537)
+
+        response = self.url_open(
+            f"/l10n_ae/controlled/events/{binding_id}",
+            data=body,
+            headers={"Content-Type": "application/json"},
+            timeout=15,
+        )
+        self.assertEqual(response.status_code, 413)
+        self.assertEqual(json.loads(response.text), {"error": "body_too_large"})
+        self.assertEqual(response.headers.get("Cache-Control"), "no-store")
