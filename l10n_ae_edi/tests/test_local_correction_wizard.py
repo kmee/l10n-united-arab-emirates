@@ -145,7 +145,9 @@ class TestUaeLocalCorrectionWizard(AccountTestInvoicingCommon):
         return wizard
 
     def _source_facts(self, source):
-        return source.read(FROZEN_SOURCE_FIELDS)
+        # Compare stored relation IDs: native reset-to-draft changes the move's
+        # display name, which is not part of the frozen transmission evidence.
+        return source.read(FROZEN_SOURCE_FIELDS, load=None)
 
     def test_invoice_user_corrects_through_native_action_and_form_wizard(self):
         actor, source = self._queue_issued_invoice()
