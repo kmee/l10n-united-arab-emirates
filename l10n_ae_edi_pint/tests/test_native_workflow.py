@@ -37,7 +37,7 @@ class TestUaeNativeWorkflow(UaePintTestCommon):
         line = invoice.invoice_line_ids
         # Native Sales can leave the extra description blank; the actual product
         # name remains the mandatory item name, without inventing a fallback.
-        line.write({"product_id": self.product_a.id, "name": False})
+        line.write({"product_id": self.product_a.id, "name": False, "price_unit": 100})
         self.assertFalse(line.name)
         invoice.action_l10n_ae_validate()
         named_xml = etree.fromstring(invoice.preview_l10n_ae_pint().encode())
@@ -46,7 +46,13 @@ class TestUaeNativeWorkflow(UaePintTestCommon):
             self.product_a.name,
         )
         # A service line without a product is valid when its item name is present.
-        line.write({"product_id": False, "label": "Synthetic described service"})
+        line.write(
+            {
+                "product_id": False,
+                "label": "Synthetic described service",
+                "price_unit": 100,
+            }
+        )
         invoice.action_l10n_ae_validate()
         self.assertFalse(line.product_id)
         self.assertEqual(line.name, "Synthetic described service")
