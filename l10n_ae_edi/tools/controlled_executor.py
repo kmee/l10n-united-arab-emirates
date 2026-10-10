@@ -111,6 +111,13 @@ class ControlledExecutor:
                     if record.local_correction_id:
                         return "local_correction"
                     return record.submission_state
+                # Invalid system policy rolls back the tentative reservation.
+                # Sample only after a claim, before durable state or remote I/O.
+                jitter = self.retry_jitter()
+                if type(jitter) is not int or not 0 <= jitter <= 15:
+                    raise ValueError(
+                        "Controlled retry jitter must be between 0 and 15 seconds."
+                    )
                 cursor.commit()
         except SerializationFailure:
             return "busy"
@@ -146,11 +153,7 @@ class ControlledExecutor:
         except ControlledAspError as error:
             error_kind = error.kind
         # Unknown/not-found is never permission to POST again.
-        jitter = 0 if receipt else self.retry_jitter()
-        if type(jitter) is not int or not 0 <= jitter <= 15:
-            raise ValueError(
-                "Controlled retry jitter must be between 0 and 15 seconds."
-            )
+        jitter = 0 if receipt else jitter
         with self.registry.cursor() as cursor:
             record = self._record(cursor, transmission_id).sudo()
             result = record._finish_controlled(
