@@ -264,6 +264,8 @@ class TestUaeLocalCorrectionWizard(AccountTestInvoicingCommon):
             # Observe completed native accounting writes before comparing audit
             # fields across a refused operation; keep every ledger assertion.
             self.env.flush_all()
+            move.invalidate_recordset(["write_uid", "write_date"])
+            move.line_ids.invalidate_recordset(["write_uid", "write_date"])
             return {
                 "move": move.read(
                     [
