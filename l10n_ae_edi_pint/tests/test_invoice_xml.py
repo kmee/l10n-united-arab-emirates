@@ -2821,8 +2821,8 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
             ),
         )
         packages = [
-            ("kmee-pint-ae-1.0.3-ubl-2.1", "/opt/uae-addons/.runtime/normative-1.0.3"),
-            ("kmee-pint-ae-1.0.4-ubl-2.1", "/opt/uae-addons/.runtime/normative"),
+            ("kmee-pint-ae-1.0.3-ubl-2.1", self.normative_directories["1.0.3"]),
+            ("kmee-pint-ae-1.0.4-ubl-2.1", self.normative_directories["1.0.4"]),
         ]
         originals = []
         cycle = []
@@ -3024,8 +3024,8 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
             ),
         )
         packages = [
-            ("kmee-pint-ae-1.0.3-ubl-2.1", "/opt/uae-addons/.runtime/normative-1.0.3"),
-            ("kmee-pint-ae-1.0.4-ubl-2.1", "/opt/uae-addons/.runtime/normative"),
+            ("kmee-pint-ae-1.0.3-ubl-2.1", self.normative_directories["1.0.3"]),
+            ("kmee-pint-ae-1.0.4-ubl-2.1", self.normative_directories["1.0.4"]),
         ]
         original = self.init_invoice(
             "out_invoice", amounts=[100], taxes=self.tax_sale_a
@@ -3351,7 +3351,7 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
             os.environ,
             {
                 "KMEE_UAE_NORMATIVE_RULESET": "kmee-pint-ae-1.0.3-ubl-2.1",
-                "KMEE_UAE_NORMATIVE_DIR": "/opt/uae-addons/.runtime/normative-1.0.3",
+                "KMEE_UAE_NORMATIVE_DIR": self.normative_directories["1.0.3"],
             },
         ):
             self.assertFalse(inbox.action_process())
@@ -3429,7 +3429,7 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
             os.environ,
             {
                 "KMEE_UAE_NORMATIVE_RULESET": "kmee-pint-ae-1.0.4-ubl-2.1",
-                "KMEE_UAE_NORMATIVE_DIR": "/opt/uae-addons/.runtime/normative",
+                "KMEE_UAE_NORMATIVE_DIR": self.normative_directories["1.0.4"],
             },
         ):
             self.assertFalse(inbox.action_process())
@@ -3449,7 +3449,7 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
             os.environ,
             {
                 "KMEE_UAE_NORMATIVE_RULESET": "kmee-pint-ae-1.0.3-ubl-2.1",
-                "KMEE_UAE_NORMATIVE_DIR": "/opt/uae-addons/.runtime/normative-1.0.3",
+                "KMEE_UAE_NORMATIVE_DIR": self.normative_directories["1.0.3"],
             },
         ):
             self.assertTrue(inbox.action_process(), inbox.diagnostic)
@@ -3558,7 +3558,7 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
             os.environ,
             {
                 "KMEE_UAE_NORMATIVE_RULESET": "kmee-pint-ae-1.0.3-ubl-2.1",
-                "KMEE_UAE_NORMATIVE_DIR": "/opt/uae-addons/.runtime/normative-1.0.3",
+                "KMEE_UAE_NORMATIVE_DIR": self.normative_directories["1.0.3"],
             },
         ):
             self.partner_a.active = False
@@ -3588,7 +3588,7 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
             os.environ,
             {
                 "KMEE_UAE_NORMATIVE_RULESET": "kmee-pint-ae-1.0.4-ubl-2.1",
-                "KMEE_UAE_NORMATIVE_DIR": "/opt/uae-addons/.runtime/normative",
+                "KMEE_UAE_NORMATIVE_DIR": self.normative_directories["1.0.4"],
             },
         ):
             self.assertFalse(inbox.action_process())
@@ -3619,7 +3619,7 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
             os.environ,
             {
                 "KMEE_UAE_NORMATIVE_RULESET": "kmee-pint-ae-1.0.3-ubl-2.1",
-                "KMEE_UAE_NORMATIVE_DIR": "/opt/uae-addons/.runtime/normative-1.0.3",
+                "KMEE_UAE_NORMATIVE_DIR": self.normative_directories["1.0.3"],
             },
         ):
             self.assertTrue(inbox.action_process(), inbox.diagnostic)
@@ -3746,7 +3746,7 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
             os.environ,
             {
                 "KMEE_UAE_NORMATIVE_RULESET": "kmee-pint-ae-1.0.4-ubl-2.1",
-                "KMEE_UAE_NORMATIVE_DIR": "/opt/uae-addons/.runtime/normative",
+                "KMEE_UAE_NORMATIVE_DIR": self.normative_directories["1.0.4"],
             },
         ):
             self.assertFalse(inbox.action_process())
@@ -3769,7 +3769,7 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
             os.environ,
             {
                 "KMEE_UAE_NORMATIVE_RULESET": "kmee-pint-ae-1.0.3-ubl-2.1",
-                "KMEE_UAE_NORMATIVE_DIR": "/opt/uae-addons/.runtime/normative-1.0.3",
+                "KMEE_UAE_NORMATIVE_DIR": self.normative_directories["1.0.3"],
             },
         ):
             self.assertTrue(inbox.action_process(), inbox.diagnostic)
@@ -3825,7 +3825,7 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
             os.environ,
             {
                 "KMEE_UAE_NORMATIVE_RULESET": "kmee-pint-ae-1.0.4-ubl-2.1",
-                "KMEE_UAE_NORMATIVE_DIR": "/opt/uae-addons/.runtime/normative",
+                "KMEE_UAE_NORMATIVE_DIR": self.normative_directories["1.0.4"],
             },
         ):
             self.assertTrue(inbox.action_process(), inbox.diagnostic)
@@ -3885,7 +3885,7 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
             os.environ,
             {
                 "KMEE_UAE_NORMATIVE_RULESET": "kmee-pint-ae-1.0.3-ubl-2.1",
-                "KMEE_UAE_NORMATIVE_DIR": "/opt/uae-addons/.runtime/normative-1.0.3",
+                "KMEE_UAE_NORMATIVE_DIR": self.normative_directories["1.0.3"],
             },
         ):
             self.assertTrue(inbox.action_process(), inbox.diagnostic)
@@ -4050,7 +4050,7 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
             os.environ,
             {
                 "KMEE_UAE_NORMATIVE_RULESET": "kmee-pint-ae-1.0.3-ubl-2.1",
-                "KMEE_UAE_NORMATIVE_DIR": "/opt/uae-addons/.runtime/normative-1.0.3",
+                "KMEE_UAE_NORMATIVE_DIR": self.normative_directories["1.0.3"],
             },
         ):
             with self.assertRaisesRegex(UserError, "(?i)pinned.*package"):
@@ -7577,7 +7577,7 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         )
         source_timestamps = source.read(["create_date", "write_date"])
         formal = OfflinePintValidator(
-            "/opt/uae-addons/.runtime/normative",
+            self.normative_directories["1.0.4"],
             ruleset="kmee-pint-ae-1.0.4-ubl-2.1",
         ).validate(content)
         self.assertTrue(formal["valid"], formal)
@@ -7700,7 +7700,7 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         self.assertTrue(valid_report["valid"], valid_report)
         control = self._received_test_xml(source)
         control_report = OfflinePintValidator(
-            "/opt/uae-addons/.runtime/normative",
+            self.normative_directories["1.0.4"],
             ruleset="kmee-pint-ae-1.0.4-ubl-2.1",
         ).validate(etree.tostring(control))
         self.assertTrue(control_report["valid"], control_report)
@@ -8636,7 +8636,7 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
         credit.action_post()
         content = etree.tostring(self._received_test_xml(credit))
         report = OfflinePintValidator(
-            "/opt/uae-addons/.runtime/normative",
+            self.normative_directories["1.0.4"],
             ruleset="kmee-pint-ae-1.0.4-ubl-2.1",
         ).validate(content)
         self.assertTrue(report["valid"], report)
@@ -8888,7 +8888,7 @@ class TestUaeInvoiceXml(AccountTestInvoicingCommon):
             .read(["create_date", "write_date"])
         )
         validator = OfflinePintValidator(
-            "/opt/uae-addons/.runtime/normative",
+            self.normative_directories["1.0.4"],
             ruleset="kmee-pint-ae-1.0.4-ubl-2.1",
         )
         for document_type, valid_content in content_by_type.items():
