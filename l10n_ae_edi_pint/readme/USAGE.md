@@ -87,7 +87,7 @@ When the sender declares a prepaid amount, the accounting history identifies it 
 remote declaration for review. Receiving does not create a local payment. Confirm any
 local settlement through the usual accounting review and posting process.
 
-The repository [scenario based user manual](https://github.com/kmee/l10n-uae/blob/20.0-add-uae-edi/docs/user/scenarios-pt_BR.md)
+The repository [scenario based user manual](https://github.com/kmee/l10n-uae/blob/20.0/docs/user/scenarios-pt_BR.md)
 distinguishes tested user journeys from workflows still to implement.
 
 For foreign-currency emission, the default is Odoo's dated native currency conversion
