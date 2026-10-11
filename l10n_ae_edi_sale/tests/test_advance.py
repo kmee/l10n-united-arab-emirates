@@ -92,6 +92,214 @@ class TestUaeSalesAdvance(AccountTestInvoicingCommon):
         invoice.l10n_ae_binding_id = self.binding
         return invoice
 
+    def _create_fiscal_country_sales_orders(self):
+        # Set both countries before creating business documents. US accepts the
+        # synthetic 15-digit UAE registration without bypassing native VAT checks.
+        self.env.company.write(
+            {
+                "country_id": self.env.ref("base.us").id,
+                "account_fiscal_country_id": self.env.ref("base.ae").id,
+                "l10n_ae_edi_auto_prepare": False,
+            }
+        )
+        self.env.company.partner_id.write(
+            {
+                "state_id": self.env.ref("base.state_us_5").id,
+                "city": "San Francisco",
+                "zip": "94105",
+            }
+        )
+        other_data = self.setup_other_company(name="Synthetic non-UAE fiscal seller")
+        other = other_data["company"]
+        other.write(
+            {
+                "country_id": self.env.ref("base.ae").id,
+                "account_fiscal_country_id": self.env.ref("base.fr").id,
+                "l10n_ae_edi_auto_prepare": False,
+            }
+        )
+        # Native tax country is configured independently of the address and
+        # cached chart defaults; keep the counterpart's accounting coherent.
+        other_group = (
+            self.env["account.tax.group"]
+            .with_company(other)
+            .create(
+                {
+                    "name": "Synthetic counterpart VAT",
+                    "country_id": self.env.ref("base.fr").id,
+                }
+            )
+        )
+        other_data["default_tax_sale"].write(
+            {
+                "country_id": self.env.ref("base.fr").id,
+                "tax_group_id": other_group.id,
+            }
+        )
+        other.partner_id.write(
+            {
+                "street": "Synthetic counterpart street",
+                "city": "Dubai",
+                "state_id": self.env.ref("base.state_ae_du").id,
+            }
+        )
+        other.downpayment_account_id = (
+            self.env["account.account"]
+            .with_company(other)
+            .create(
+                {
+                    "name": "Synthetic counterpart advances",
+                    "code": "ADVANCE002",
+                    "account_type": "liability_current",
+                }
+            )
+        )
+        self.product_a.with_company(other).property_account_income_id = other_data[
+            "default_account_revenue"
+        ]
+        self.simple_accountman.write(
+            {
+                "company_ids": [Command.link(other.id)],
+                "group_ids": [
+                    Command.link(
+                        self.env.ref("sales_team.group_sale_salesman_all_leads").id
+                    )
+                ],
+            }
+        )
+        cases = []
+        for label, data, address, fiscal in (
+            ("US/AE", self.company_data, "US", "AE"),
+            ("AE/FR", other_data, "AE", "FR"),
+        ):
+            company = data["company"]
+            operator = (
+                self.env["sale.order"]
+                .with_user(self.simple_accountman)
+                .with_company(company)
+                .with_context(allowed_company_ids=[company.id])
+            )
+            self.assertFalse(operator.env.su)
+            self.assertFalse(operator.env.user.has_group("base.group_system"))
+            self.assertEqual(company.country_code, address)
+            self.assertEqual(company.account_fiscal_country_id.code, fiscal)
+            self.assertEqual(data["default_tax_sale"].amount, 5)
+            self.assertEqual(data["default_tax_sale"].country_id.code, fiscal)
+            order = operator.create(
+                {
+                    "partner_id": self.partner_a.id,
+                    "order_line": [
+                        Command.create(
+                            {
+                                "product_id": self.product_a.id,
+                                "product_uom_qty": 1,
+                                "price_unit": 10000,
+                                "tax_ids": [Command.set(data["default_tax_sale"].ids)],
+                            }
+                        )
+                    ],
+                }
+            )
+            order.action_confirm()
+            cases.append((label, order))
+        return cases
+
+    def test_final_advance_reference_follows_fiscal_country_not_address(self):
+        # Independent balance: net10000/VAT500 less advance1000/VAT50.
+        for label, order in self._create_fiscal_country_sales_orders():
+            with self.subTest(country_pair=label):
+                operator_env = order.env
+                operator_env["sale.advance.payment.inv"].create(
+                    {
+                        "sale_order_ids": [Command.set(order.ids)],
+                        "advance_payment_method": "percentage",
+                        "amount": 10,
+                    }
+                ).create_invoices()
+                advance = order.invoice_ids
+                self.assertEqual(len(advance), 1)
+                advance.invoice_date = "2019-01-01"
+                advance.action_post()
+                self.assertEqual(
+                    (advance.amount_untaxed, advance.amount_tax, advance.amount_total),
+                    (1000, 50, 1050),
+                )
+                if label == "US/AE":
+                    advance.l10n_ae_binding_id = self.binding
+                    advance.action_l10n_ae_prepare()
+                    report = advance.validate_l10n_ae_pint()
+                    self.assertTrue(report["valid"], report)
+                    original_xml = advance.preview_l10n_ae_pint()
+                    original_payload = advance.l10n_ae_transmission_id.payload
+                    original_uuid = advance.l10n_ae_fiscal_uuid
+                operator_env["sale.advance.payment.inv"].create(
+                    {
+                        "sale_order_ids": [Command.set(order.ids)],
+                        "advance_payment_method": "delivered",
+                        "deduct_down_payments": True,
+                    }
+                ).create_invoices()
+                final = order.invoice_ids - advance
+                self.assertEqual(len(final), 1)
+                final.invoice_date = "2019-01-02"
+                final.action_post()
+                self.assertEqual(
+                    (final.amount_untaxed, final.amount_tax, final.amount_total),
+                    (9000, 450, 9450),
+                )
+                self.assertEqual(
+                    final.invoice_line_ids.filtered("is_downpayment").sale_line_ids,
+                    advance.invoice_line_ids.sale_line_ids,
+                )
+                if label == "AE/FR":
+                    self.assertFalse(final.l10n_ae_advance_reference_summary)
+                    self.assertFalse(advance.l10n_ae_transmission_id)
+                    self.assertFalse(advance.l10n_ae_fiscal_uuid)
+                    self.assertFalse(final.l10n_ae_transmission_id)
+                    self.assertFalse(final.l10n_ae_fiscal_uuid)
+                    continue
+                self.assertEqual(
+                    final.l10n_ae_advance_reference_summary,
+                    f"{advance.name} | 2019-01-01 | Net: 1000.00 | VAT: 50.00 AED",
+                )
+                final.l10n_ae_binding_id = self.binding
+                final.action_l10n_ae_prepare()
+                xml = etree.fromstring(final.preview_l10n_ae_pint().encode())
+                self.assertEqual(
+                    xml.xpath(
+                        "//cac:BillingReference/cac:InvoiceDocumentReference/cbc:ID/text()",
+                        namespaces=NS,
+                    ),
+                    [advance.name],
+                )
+                self.assertEqual(
+                    xml.xpath(
+                        "//cac:AccountingSupplierParty//cac:Country/cbc:IdentificationCode/text()",
+                        namespaces=NS,
+                    ),
+                    ["US"],
+                )
+                self.assertEqual(
+                    json.loads(final.l10n_ae_transmission_id.payload)["taxed_advances"],
+                    [
+                        {
+                            "source_move_id": advance.id,
+                            "number": advance.name,
+                            "issue_date": "2019-01-01",
+                            "consumed_net": "1000.00",
+                            "consumed_vat": "50.00",
+                        }
+                    ],
+                )
+                self.assertEqual(advance.preview_l10n_ae_pint(), original_xml)
+                self.assertEqual(
+                    advance.l10n_ae_transmission_id.payload, original_payload
+                )
+                self.assertEqual(advance.l10n_ae_fiscal_uuid, original_uuid)
+                for invoice in (advance, final):
+                    report = invoice.validate_l10n_ae_pint()
+                    self.assertTrue(report["valid"], report)
+
     def test_taxed_advance_receipt_and_final_balance_keep_original_reference(self):
         # Independently worked MoF balance example: 10000/500 less 1000/50.
         order = self.env["sale.order"].create(

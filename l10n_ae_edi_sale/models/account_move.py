@@ -164,7 +164,7 @@ class AccountMove(models.Model):
                 "taxed_advances", []
             )
         if (
-            self.company_id.country_code != "AE"
+            self.country_code != "AE"
             or self.move_type != "out_invoice"
             or self.l10n_ae_received_document
         ):
