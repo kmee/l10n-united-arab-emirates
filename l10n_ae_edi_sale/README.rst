@@ -22,35 +22,25 @@ UAE Electronic Invoicing Sales
 
 |badge1| |badge2| |badge3|
 
-Optional Sales integration for the UAE PINT-AE localization. Preserve
-native Sales down payment calculations and add the original taxed
-advance's number, date and consumed net/VAT to the frozen final invoice
-evidence and XML references. The base accounting localization remains
-installable without Sales.
+Optional Sales integration for the UAE PINT-AE localization. It carries
+references to taxed down payments from native Sales invoices into the
+final invoice's frozen fiscal evidence and PINT XML, while preserving
+Odoo's native down-payment accounting. The generic accounting
+localization remains installable without Sales.
 
-The current checkpoint includes the native AED
-advance/receipt/final/partial-credit browser journey. Checks refuse an
-unposted source, another legal company or commercial customer, a
-different document currency/category and an excessive deduction.
-Sequential consumption counts frozen evidence and already-posted native
-deductions; partial400/20 and600/30 can consume exactly an
-advance1000/50. It never creates another payment or changes the
-accounting calculator. Shared-source posting/preparation uses the native
-request retry boundary; committed proofs cover stale posting, exact
-partial preparations and rollback while retaining original fiscal bytes.
-Posted negative deduction quantity, price and discount edits coordinate
-the source before preparation rechecks consumption. Native Sales link
-replacement coordinates both the old and new advance sources before
-mutation, so preparation rechecks consumed capacity on each. Identical
-pricing preserves source metadata; native posted tax restrictions
-remain. Native down-payment classification changes also coordinate the
-source before mutation, including a line that becomes a deduction. Stale
-preparation rechecks released or added consumption; posted balances and
-original fiscal bytes remain unchanged. Frozen advance/final fiscal line
-changes and Sales link changes are refused; identical writes remain
-native. Shared-source capacity coordination for every mutable line
-field, multiple advances, full process/FX/adjustment combinations and
-fiscal ratification remain under development.
+During fiscal preparation, the integration checks that each linked
+advance is posted and belongs to the same legal company, commercial
+customer, document currency, and document category. When automatic
+preparation is enabled, posting validates eligible moves as well. It
+prevents deductions from exceeding the advance's remaining net and VAT
+amounts, accounting for previously frozen UAE deductions and qualifying
+posted native deductions.
+
+The final invoice shows the original advance number and date together
+with the consumed net and VAT. Its PINT XML references the original
+advance. A payment settles the advance invoice; the final invoice keeps
+the balance calculated by the native Sales down-payment flow, without
+subtracting that payment again or creating another payment.
 
 .. IMPORTANT::
    This is an alpha version, the data model and design can change at any time without warning.
@@ -86,9 +76,9 @@ historical final invoice with missing advance references separately.
 Usage
 =====
 
-Use only an isolated Odoo20 development database with synthetic data and
-a controlled sandbox binding. Configure a reviewed advance account in
-Sales, create and confirm an order, and use the native Create Invoice
+Use only an isolated Odoo 20 development database with synthetic data
+and a controlled sandbox binding. Configure a reviewed advance account
+in Sales, create and confirm an order, and use the native Create Invoice
 wizard for a percentage down payment. Post and prepare that invoice,
 then register its receipt through native Accounting. Use the regular
 invoice wizard with down payment deduction for the balance.
@@ -116,7 +106,10 @@ Complete the browser advance/receipt/final/partial-credit journey,
 compatibility guards, cumulative and concurrent consumption, multiple
 advances, external references and currency combinations. Verify real
 provider contracts separately from controlled local transport. The
-complete ADVANCE-001 catalog case remains pending.
+complete ADVANCE-001 catalog case remains pending. Shared-source
+coordination does not yet cover every mutable invoice-line field.
+Complete multiple- advance, process, foreign-currency, and adjustment
+combinations, together with fiscal ratification, remain pending.
 
 Bug Tracker
 ===========

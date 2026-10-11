@@ -303,7 +303,7 @@ class TestUaeSalesAdvance(AccountTestInvoicingCommon):
                     self.assertFalse(move.l10n_ae_fiscal_uuid)
 
     def test_final_advance_reference_follows_fiscal_country_not_address(self):
-        # Independent balance: net10000/VAT500 less advance1000/VAT50.
+        # Independent balance: net 10000/VAT 500 less advance 1000/VAT 50.
         for label, order in self._create_fiscal_country_sales_orders():
             with self.subTest(country_pair=label):
                 operator_env = order.env
@@ -399,7 +399,7 @@ class TestUaeSalesAdvance(AccountTestInvoicingCommon):
                     self.assertTrue(report["valid"], report)
 
     def test_consumed_advance_reset_follows_fiscal_country_not_address(self):
-        # A posted final consumes1000/VAT50 even before any fiscal preparation.
+        # A posted final consumes 1000/VAT 50 even before any fiscal preparation.
         for label, order in self._create_fiscal_country_sales_orders():
             with self.subTest(country_pair=label):
                 operator_env = order.env
@@ -577,9 +577,9 @@ class TestUaeSalesAdvance(AccountTestInvoicingCommon):
     def test_fixed_advance_and_final_keep_native_allocations_and_frozen_references(
         self,
     ):
-        # Independently worked fixed gross33.34 against net100/VAT5/gross105:
-        # VAT5*(33.34/105) rounds1.59; net33.34-1.59=31.75. The final
-        # deducts those allocated amounts: net68.25/VAT3.41/gross71.66.
+        # Independently worked fixed gross 33.34 against net 100/VAT 5/gross 105:
+        # VAT 5 * (33.34 / 105) rounds 1.59; net 33.34 - 1.59 = 31.75. The final
+        # deducts those allocated amounts: net 68.25/VAT 3.41/gross 71.66.
         # Raw line VAT follows the precise native proportional price, not the
         # rounded header allocation; original XML must pass unchanged rules.
         self.simple_accountman.group_ids |= self.env.ref(
@@ -1196,8 +1196,8 @@ class TestUaeSalesAdvance(AccountTestInvoicingCommon):
         self.assertFalse(first.l10n_ae_transmission_id)
 
     def test_replaced_final_without_deduction_releases_advance_reset(self):
-        # Independent amounts: 10000 + VAT500, advance1000 + VAT50,
-        # deducted final9000 + VAT450. Removing the deduction restores10500.
+        # Independent amounts: 10000 + VAT 500, advance 1000 + VAT 50,
+        # deducted final 9000 + VAT 450. Removing the deduction restores 10500.
         self.env.company.l10n_ae_edi_auto_prepare = False
         order = self.env["sale.order"].create(
             {
