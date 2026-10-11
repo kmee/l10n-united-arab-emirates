@@ -116,6 +116,18 @@ class AccountMove(models.Model):
                     [
                         ("company_id", "=", source.company_id.id),
                         ("l10n_ae_advance_source_ids", "in", source.ids),
+                        # Match prior consumption: a replaced issue remains
+                        # immutable history, not an effective deduction. An
+                        # editing correction still reserves its frozen amount.
+                        "|",
+                        ("local_correction_id", "=", False),
+                        "&",
+                        (
+                            "local_correction_id.replacement_transmission_id",
+                            "=",
+                            False,
+                        ),
+                        ("move_id.state", "=", "draft"),
                     ],
                     limit=1,
                 )

@@ -818,3 +818,106 @@ class TestUaeSalesAdvance(AccountTestInvoicingCommon):
         self.assertFalse(duplicate.l10n_ae_transmission_id)
         self.assertEqual((first.state, first.amount_total), ("posted", 9450))
         self.assertFalse(first.l10n_ae_transmission_id)
+
+    def test_replaced_final_without_deduction_releases_advance_reset(self):
+        # Independent amounts: 10000 + VAT500, advance1000 + VAT50,
+        # deducted final9000 + VAT450. Removing the deduction restores10500.
+        self.env.company.l10n_ae_edi_auto_prepare = False
+        order = self.env["sale.order"].create(
+            {
+                "partner_id": self.partner_a.id,
+                "order_line": [
+                    Command.create(
+                        {
+                            "product_id": self.product_a.id,
+                            "product_uom_qty": 1,
+                            "price_unit": 10000,
+                            "tax_ids": [Command.set(self.tax_sale_a.ids)],
+                        }
+                    )
+                ],
+            }
+        )
+        order.action_confirm()
+        advance = self._create_invoice(order, "percentage", 10).with_user(
+            self.simple_accountman
+        )
+        final = self.env["account.move"]
+        self.assertFalse(advance.env.su)
+        advance.action_post()
+        advance.action_l10n_ae_prepare()
+        final = self._create_invoice(order, "delivered").with_user(
+            self.simple_accountman
+        )
+        self.assertFalse(final.env.su)
+        final.action_post()
+        final.action_l10n_ae_prepare()
+        original = final.l10n_ae_transmission_id
+        retained_fields = [
+            "payload",
+            "payload_hash",
+            "xml_content",
+            "xml_hash",
+            "idempotency_key",
+            "l10n_ae_advance_source_ids",
+        ]
+        original_frozen = original.read(retained_fields)
+        advance_issue = advance.l10n_ae_transmission_id
+        advance_frozen = advance_issue.read(retained_fields)
+        self.assertEqual((advance.amount_total, final.amount_total), (1050, 9450))
+        self.assertEqual(original.l10n_ae_advance_source_ids, advance)
+        with self.assertRaisesRegex(UserError, "advance has already been deducted"):
+            advance.button_draft()
+        self.assertEqual(advance.state, "posted")
+        self.assertFalse(advance.l10n_ae_correction_id)
+
+        # An editing correction still reserves its original frozen deduction.
+        final.button_draft()
+        first_correction = final.l10n_ae_correction_id
+        self.assertEqual(first_correction.state, "editing")
+        with self.assertRaisesRegex(UserError, "advance has already been deducted"):
+            advance.button_draft()
+        final.action_post()
+        final.action_l10n_ae_prepare()
+        retained = final.l10n_ae_transmission_id
+        self.assertEqual(first_correction.replacement_transmission_id, retained)
+        self.assertEqual(retained.l10n_ae_advance_source_ids, advance)
+        self.assertEqual(final.amount_total, 9450)
+        with self.assertRaisesRegex(UserError, "advance has already been deducted"):
+            advance.button_draft()
+
+        # Only the effective replacement removes the consumption. Historical
+        # references must remain immutable instead of being deleted to unlock.
+        retained_frozen = retained.read(retained_fields)
+        final.button_draft()
+        second_correction = final.l10n_ae_correction_id
+        final.invoice_line_ids.filtered(
+            lambda line: line.is_downpayment and line.quantity < 0
+        ).unlink()
+        final.action_post()
+        final.action_l10n_ae_prepare()
+        replacement = final.l10n_ae_transmission_id
+        self.assertEqual(second_correction.replacement_transmission_id, replacement)
+        self.assertEqual(second_correction.state, "completed")
+        self.assertFalse(replacement.l10n_ae_advance_source_ids)
+        self.assertEqual(json.loads(replacement.payload)["taxed_advances"], [])
+        self.assertEqual(
+            (final.amount_untaxed, final.amount_tax, final.amount_total),
+            (10000, 500, 10500),
+        )
+        final_ledger = final.line_ids.sorted("id").read(
+            ["account_id", "debit", "credit", "balance", "write_date"]
+        )
+        advance.button_draft()
+        self.assertEqual(advance.state, "draft")
+        self.assertTrue(advance.l10n_ae_correction_id)
+        self.assertEqual(final.state, "posted")
+        self.assertEqual(
+            final.line_ids.sorted("id").read(
+                ["account_id", "debit", "credit", "balance", "write_date"]
+            ),
+            final_ledger,
+        )
+        self.assertEqual(original.read(retained_fields), original_frozen)
+        self.assertEqual(retained.read(retained_fields), retained_frozen)
+        self.assertEqual(advance_issue.read(retained_fields), advance_frozen)
