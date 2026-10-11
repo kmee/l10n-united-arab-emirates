@@ -1446,7 +1446,7 @@ class AccountMove(models.Model):
             )
             return origin.get("source") == "native_deferred_lines"
         return (
-            self.company_id.country_code == "AE"
+            self.country_code == "AE"
             and self.l10n_ae_summary
             and not self.l10n_ae_received_document
             and not (
