@@ -204,6 +204,104 @@ class TestUaeSalesAdvance(AccountTestInvoicingCommon):
             cases.append((label, order))
         return cases
 
+    def test_consumption_link_edit_follows_fiscal_country_not_address(self):
+        documents = {}
+        for label, order in self._create_fiscal_country_sales_orders():
+            operator = order.env
+            operator["sale.advance.payment.inv"].create(
+                {
+                    "sale_order_ids": [Command.set(order.ids)],
+                    "advance_payment_method": "percentage",
+                    "amount": 10,
+                }
+            ).create_invoices()
+            advance = order.invoice_ids
+            self.assertEqual(len(advance), 1)
+            advance.invoice_date = "2019-01-01"
+            advance.action_post()
+            operator["sale.advance.payment.inv"].create(
+                {
+                    "sale_order_ids": [Command.set(order.ids)],
+                    "advance_payment_method": "delivered",
+                    "deduct_down_payments": True,
+                }
+            ).create_invoices()
+            final = order.invoice_ids - advance
+            self.assertEqual(len(final), 1)
+            final.invoice_date = "2019-01-01"
+            final.action_post()
+            source_line = advance.invoice_line_ids.filtered("is_downpayment")
+            deduction = final.invoice_line_ids.filtered(
+                lambda line: line.is_downpayment and line.quantity < 0
+            )
+            self.assertEqual(len(source_line), 1)
+            self.assertEqual(len(deduction), 1)
+            self.assertEqual(deduction.sale_line_ids, source_line.sale_line_ids)
+            documents[label] = (advance, final, source_line, deduction)
+
+        balance_fields = ["account_id", "debit", "credit", "balance", "amount_currency"]
+        audit_fields = balance_fields + ["write_uid", "write_date"]
+        self.env.flush_all()
+        # Read persisted audit values after flushing the shared transaction;
+        # another environment's cached write_uid is not a database baseline.
+        for advance, final, _, _ in documents.values():
+            advance.line_ids.invalidate_recordset()
+            final.line_ids.invalidate_recordset()
+        for label, peer_label, must_refuse in (
+            ("US/AE", "AE/FR", True),
+            ("AE/FR", "US/AE", False),
+        ):
+            with self.subTest(country_pair=label):
+                advance, final, source_line, deduction = documents[label]
+                peer_advance, _, peer_source, _ = documents[peer_label]
+                # Both companies are authorized, so a refusal must concern the
+                # fiscal link rather than a foreign-company record-rule failure.
+                deduction = deduction.with_context(
+                    allowed_company_ids=[
+                        final.company_id.id,
+                        peer_advance.company_id.id,
+                    ]
+                )
+                self.assertFalse(deduction.env.su)
+                self.assertFalse(deduction.env.user.has_group("base.group_system"))
+                self.assertEqual(deduction.env.user, self.simple_accountman)
+                original_links = deduction.sale_line_ids.ids
+                peer_links = peer_source.sale_line_ids.ids
+                final_audit = final.line_ids.sorted("id").read(audit_fields)
+                source_audit = advance.line_ids.sorted("id").read(audit_fields)
+                final_balance = final.line_ids.sorted("id").read(balance_fields)
+                if must_refuse:
+                    with self.assertRaisesRegex(UserError, "same legal company"):
+                        deduction.write({"sale_line_ids": [Command.set(peer_links)]})
+                    self.assertEqual(deduction.sale_line_ids.ids, original_links)
+                    self.assertEqual(
+                        final.line_ids.sorted("id").read(audit_fields), final_audit
+                    )
+                    self.assertEqual(
+                        advance.line_ids.sorted("id").read(audit_fields), source_audit
+                    )
+                else:
+                    # This is the native foreign-fiscal ORM control, not fiscal
+                    # approval of cross-company advance consumption.
+                    deduction.write({"sale_line_ids": [Command.set(peer_links)]})
+                    self.assertEqual(deduction.sale_line_ids.ids, peer_links)
+                    self.assertEqual(
+                        final.line_ids.sorted("id").read(balance_fields), final_balance
+                    )
+                    deduction.write({"sale_line_ids": [Command.set(original_links)]})
+                    self.assertEqual(deduction.sale_line_ids.ids, original_links)
+                for move, totals in (
+                    (advance, (1000, 50, 1050)),
+                    (final, (9000, 450, 9450)),
+                ):
+                    self.assertEqual(move.state, "posted")
+                    self.assertEqual(
+                        (move.amount_untaxed, move.amount_tax, move.amount_total),
+                        totals,
+                    )
+                    self.assertFalse(move.l10n_ae_transmission_ids)
+                    self.assertFalse(move.l10n_ae_fiscal_uuid)
+
     def test_final_advance_reference_follows_fiscal_country_not_address(self):
         # Independent balance: net10000/VAT500 less advance1000/VAT50.
         for label, order in self._create_fiscal_country_sales_orders():

@@ -26,7 +26,7 @@ class AccountMoveLine(models.Model):
             moves = self.filtered(
                 lambda line: (
                     line.move_id.state == "posted"
-                    and line.company_id.country_code == "AE"
+                    and line.move_id.country_code == "AE"
                     and line.move_id.move_type == "out_invoice"
                     and (line.is_downpayment or vals.get("is_downpayment"))
                     and line.quantity < 0
