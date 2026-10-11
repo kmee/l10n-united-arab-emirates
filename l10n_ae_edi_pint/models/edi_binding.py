@@ -11,6 +11,7 @@ from odoo.addons.l10n_ae_edi.tools.controlled_client import (
 )
 
 from ..tools.controlled_inbox import ControlledInboxWorker
+from ..tools.validation import validation_batch
 
 _logger = logging.getLogger(__name__)
 
@@ -24,6 +25,10 @@ INBOUND_CHECKPOINT_FIELDS = {
 
 class UaeEdiBinding(models.Model):
     _inherit = "l10n_ae.edi.binding"
+
+    def _controlled_validation_scope(self):
+        self.ensure_one()
+        return validation_batch()
 
     controlled_inbound_cursor = fields.Char(
         string="Controlled Receiving Cursor", readonly=True, copy=False
