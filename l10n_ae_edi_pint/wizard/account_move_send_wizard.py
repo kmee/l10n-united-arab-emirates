@@ -24,7 +24,8 @@ class AccountMoveSendWizard(models.TransientModel):
     )
 
     @api.depends(
-        "move_id.company_id.country_id",
+        "move_id.country_code",
+        "move_id.company_id.account_fiscal_country_id",
         "move_id.move_type",
         "move_id.is_self_billing",
         "move_id.l10n_ae_received_document",
@@ -34,7 +35,7 @@ class AccountMoveSendWizard(models.TransientModel):
         for wizard in self:
             move = wizard.move_id
             wizard.l10n_ae_can_choose_send_format = bool(
-                move.company_id.country_id.code == "AE"
+                move.country_code == "AE"
                 and not move.l10n_ae_transmission_id
                 and not move.l10n_ae_received_document
                 and (
