@@ -95,7 +95,7 @@ class AccountMove(models.Model):
     def button_draft(self):
         sources = self.filtered(
             lambda move: (
-                move.company_id.country_code == "AE"
+                move.country_code == "AE"
                 and move.move_type == "out_invoice"
                 and move.state == "posted"
                 and move.invoice_line_ids.filtered(

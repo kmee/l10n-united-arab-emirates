@@ -300,6 +300,76 @@ class TestUaeSalesAdvance(AccountTestInvoicingCommon):
                     report = invoice.validate_l10n_ae_pint()
                     self.assertTrue(report["valid"], report)
 
+    def test_consumed_advance_reset_follows_fiscal_country_not_address(self):
+        # A posted final consumes1000/VAT50 even before any fiscal preparation.
+        for label, order in self._create_fiscal_country_sales_orders():
+            with self.subTest(country_pair=label):
+                operator_env = order.env
+                operator_env["sale.advance.payment.inv"].create(
+                    {
+                        "sale_order_ids": [Command.set(order.ids)],
+                        "advance_payment_method": "percentage",
+                        "amount": 10,
+                    }
+                ).create_invoices()
+                advance = order.invoice_ids
+                advance.invoice_date = "2019-01-01"
+                advance.action_post()
+                operator_env["sale.advance.payment.inv"].create(
+                    {
+                        "sale_order_ids": [Command.set(order.ids)],
+                        "advance_payment_method": "delivered",
+                        "deduct_down_payments": True,
+                    }
+                ).create_invoices()
+                final = order.invoice_ids - advance
+                final.invoice_date = "2019-01-02"
+                final.action_post()
+                self.assertEqual(
+                    (
+                        advance.state,
+                        advance.amount_total,
+                        final.state,
+                        final.amount_total,
+                    ),
+                    ("posted", 1050, "posted", 9450),
+                )
+                self.assertFalse(advance.l10n_ae_fiscal_uuid)
+                self.assertFalse(advance.l10n_ae_transmission_id)
+                self.assertFalse(final.l10n_ae_fiscal_uuid)
+                self.assertFalse(final.l10n_ae_transmission_id)
+                # Compare persisted native accounting after posting, before the
+                # exception harness opens its automatically flushing savepoint.
+                operator_env.flush_all()
+                ledger_fields = [
+                    "account_id",
+                    "debit",
+                    "credit",
+                    "balance",
+                    "write_uid",
+                    "write_date",
+                ]
+                advance_ledger = advance.line_ids.sorted("id").read(ledger_fields)
+                final_ledger = final.line_ids.sorted("id").read(ledger_fields)
+                if label == "US/AE":
+                    with self.assertRaisesRegex(
+                        UserError, "advance has already been deducted"
+                    ):
+                        advance.button_draft()
+                    self.assertEqual(advance.state, "posted")
+                    self.assertEqual(
+                        advance.line_ids.sorted("id").read(ledger_fields),
+                        advance_ledger,
+                    )
+                else:
+                    advance.button_draft()
+                    self.assertEqual(advance.state, "draft")
+                self.assertEqual((final.state, final.amount_total), ("posted", 9450))
+                self.assertEqual(
+                    final.line_ids.sorted("id").read(ledger_fields), final_ledger
+                )
+                self.assertFalse(advance.l10n_ae_correction_id)
+
     def test_taxed_advance_receipt_and_final_balance_keep_original_reference(self):
         # Independently worked MoF balance example: 10000/500 less 1000/50.
         order = self.env["sale.order"].create(
