@@ -269,7 +269,7 @@ class AccountMove(models.Model):
             for move, vals in zip(moves, vals_list, strict=True):
                 if (
                     frequency not in vals
-                    and move.company_id.country_id.code == "AE"
+                    and move.country_code == "AE"
                     and move.is_invoice(include_receipts=False)
                     and not (
                         move.l10n_ae_transmission_id or move.l10n_ae_received_document
@@ -501,7 +501,7 @@ class AccountMove(models.Model):
     def _post(self, soft=True):
         candidates = self.filtered(
             lambda move: (
-                move.company_id.country_id.code == "AE"
+                move.country_code == "AE"
                 and not move.l10n_ae_received_document
                 and move.company_id.l10n_ae_edi_auto_prepare
                 and (

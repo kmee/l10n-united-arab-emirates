@@ -181,6 +181,186 @@ class TestUaeInvoicePreparation(AccountTestInvoicingCommon):
         )
         self.assertEqual(inherited.l10n_ae_billing_frequency_code, "MTH")
 
+    def test_payment_term_frequency_follows_fiscal_country_not_address(self):
+        ae = self.env.ref("base.ae")
+        fr = self.env.ref("base.fr")
+        company_a = self.env.company
+        company_a.write(
+            {"country_id": fr.id, "account_fiscal_country_id": ae.id, "state_id": False}
+        )
+        data_b = self.setup_other_company(name="Synthetic foreign fiscal jurisdiction")
+        company_b = data_b["company"]
+        company_b.write({"country_id": ae.id, "account_fiscal_country_id": fr.id})
+        self.simple_accountman.company_ids = [Command.set([company_a.id, company_b.id])]
+        for data, address, fiscal, expected in (
+            (self.company_data, "FR", "AE", "MTH"),
+            (data_b, "AE", "FR", False),
+        ):
+            with self.subTest(address=address, fiscal=fiscal):
+                company = data["company"]
+                self.assertEqual(company.country_code, address)
+                self.assertEqual(company.account_fiscal_country_id.code, fiscal)
+                term = (
+                    self.env["account.payment.term"]
+                    .with_company(company)
+                    .create(
+                        {
+                            "name": "Synthetic fiscal-country monthly term",
+                            "company_id": company.id,
+                            "l10n_ae_billing_frequency_code": "MTH",
+                            "line_ids": [
+                                Command.create(
+                                    {"value": "percent", "value_amount": 100}
+                                )
+                            ],
+                        }
+                    )
+                )
+                moves = (
+                    self.env["account.move"]
+                    .with_user(self.simple_accountman)
+                    .with_company(company)
+                    .with_context(allowed_company_ids=[company.id])
+                )
+                self.assertFalse(moves.env.su)
+                values = {
+                    "company_id": company.id,
+                    "move_type": "out_invoice",
+                    "partner_id": self.partner_a.id,
+                    "journal_id": data["default_journal_sale"].id,
+                    "invoice_payment_term_id": term.id,
+                }
+                batch = moves.create(
+                    [
+                        values,
+                        {**values, "l10n_ae_billing_frequency_code": "WKY"},
+                        {**values, "l10n_ae_billing_frequency_code": False},
+                    ]
+                )
+                self.assertEqual(batch.mapped("country_code"), [fiscal] * 3)
+                self.assertEqual(
+                    [move.l10n_ae_billing_frequency_code for move in batch],
+                    [expected, "WKY", False],
+                )
+                cleared = moves.with_context(
+                    default_l10n_ae_billing_frequency_code=False
+                ).create(values)
+                self.assertFalse(cleared.l10n_ae_billing_frequency_code)
+                self.assertFalse(batch.mapped("l10n_ae_transmission_ids"))
+
+    def test_automatic_preparation_follows_fiscal_country_preserving_party_address(
+        self,
+    ):
+        ae = self.env.ref("base.ae")
+        fr = self.env.ref("base.fr")
+        company_a = self.env.company
+        company_a.write(
+            {"country_id": fr.id, "account_fiscal_country_id": ae.id, "state_id": False}
+        )
+        data_b = self.setup_other_company(name="Synthetic foreign fiscal posting")
+        company_b = data_b["company"]
+        company_b.write(
+            {
+                "country_id": ae.id,
+                "account_fiscal_country_id": fr.id,
+                "state_id": self.env.ref("base.state_ae_du").id,
+            }
+        )
+        self.simple_accountman.company_ids = [Command.set([company_a.id, company_b.id])]
+        for data, address, fiscal, prepares in (
+            (self.company_data, "FR", "AE", True),
+            (data_b, "AE", "FR", False),
+        ):
+            with self.subTest(address=address, fiscal=fiscal):
+                company = data["company"]
+                company.write(
+                    {
+                        "l10n_ae_tin": "1000000001" if prepares else "1000000003",
+                        "l10n_ae_tin_confirmed": True,
+                        "l10n_ae_edi_auto_prepare": True,
+                    }
+                )
+                binding = (
+                    self.env["l10n_ae.edi.binding"]
+                    .with_user(self.simple_accountman)
+                    .with_company(company)
+                    .with_context(allowed_company_ids=[company.id])
+                    .create(
+                        {
+                            "name": "Synthetic fiscal-country posting contract",
+                            "company_id": company.id,
+                            "fiscal_uuid_policy": "controlled_local",
+                        }
+                    )
+                )
+                review_controlled_binding(
+                    binding,
+                    self.simple_accountman,
+                    capabilities=CONTROLLED_CAPABILITIES,
+                    note="Synthetic paired fiscal-country posting contract.",
+                )
+                actor = binding.env["account.move"].create(
+                    {
+                        "company_id": company.id,
+                        "move_type": "out_invoice",
+                        "partner_id": self.partner_a.id,
+                        "invoice_date": "2019-01-01",
+                        "journal_id": data["default_journal_sale"].id,
+                        "l10n_ae_binding_id": binding.id,
+                        "l10n_ae_document_category": "commercial",
+                        "invoice_line_ids": [
+                            Command.create(
+                                {
+                                    "name": "Synthetic untaxed service",
+                                    "quantity": 1,
+                                    "price_unit": 100,
+                                    "account_id": data["default_account_revenue"].id,
+                                    "tax_ids": [Command.clear()],
+                                }
+                            )
+                        ],
+                    }
+                )
+                self.assertFalse(actor.env.su)
+                self.assertEqual(actor.company_id.country_code, address)
+                self.assertEqual(
+                    actor.company_id.account_fiscal_country_id.code, fiscal
+                )
+                self.assertEqual(actor.country_code, fiscal)
+                self.assertEqual(actor.partner_id.country_id.code, "AE")
+                actor.action_post()
+                self.assertEqual(actor.state, "posted")
+                self.assertEqual(actor.amount_total, 100)
+                self.assertEqual(actor.amount_tax, 0)
+                self.assertFalse(actor.l10n_ae_preparation_error)
+                self.assertEqual(len(actor.l10n_ae_transmission_ids), int(prepares))
+                self.assertEqual(
+                    actor.l10n_ae_preparation_state, "ready" if prepares else "pending"
+                )
+                if prepares:
+                    issue = actor.l10n_ae_transmission_id
+                    self.assertEqual(issue.submission_state, "queued")
+                    self.assertEqual(issue.company_id, company)
+                    self.assertEqual(issue.binding_id, binding)
+                    payload = json.loads(issue.payload)
+                    self.assertEqual(payload["supplier"]["country"], "FR")
+                    self.assertEqual(payload["buyer"]["country"], "AE")
+                    actor.env.flush_all()
+                    ledger = actor.line_ids.read(
+                        ["balance", "amount_currency", "account_id", "write_date"]
+                    )
+                    actor.action_l10n_ae_prepare()
+                    self.assertEqual(actor.l10n_ae_transmission_id, issue)
+                    self.assertEqual(len(actor.l10n_ae_transmission_ids), 1)
+                    self.assertEqual(
+                        actor.line_ids.read(
+                            ["balance", "amount_currency", "account_id", "write_date"]
+                        ),
+                        ledger,
+                    )
+                else:
+                    self.assertFalse(actor.l10n_ae_fiscal_uuid)
+
     def test_frozen_issue_preserves_contract_review_after_binding_changes(self):
         binding = self.binding.with_user(self.simple_accountman)
         binding.fiscal_uuid_policy = "controlled_local"
