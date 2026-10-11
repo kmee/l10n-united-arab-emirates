@@ -500,6 +500,130 @@ class TestUaeInvoicePreparation(AccountTestInvoicingCommon):
         self.assertEqual(sum(entry.line_ids.mapped("balance")), 0)
         self.assertFalse(entry.l10n_ae_transmission_id)
 
+    def test_frozen_line_protection_follows_fiscal_country_not_address(self):
+        company_a = self.env.company
+        company_a.write(
+            {
+                "country_id": self.env.ref("base.fr").id,
+                "account_fiscal_country_id": self.env.ref("base.ae").id,
+                "state_id": False,
+            }
+        )
+        data_b = self.setup_other_company(name="Synthetic foreign fiscal lines")
+        company_b = data_b["company"]
+        company_b.write(
+            {
+                "country_id": self.env.ref("base.ae").id,
+                "account_fiscal_country_id": self.env.ref("base.fr").id,
+                "state_id": self.env.ref("base.state_ae_du").id,
+            }
+        )
+        self.simple_accountman.company_ids = [Command.set([company_a.id, company_b.id])]
+        for company, data, address, fiscal, frozen in (
+            (company_a, self.company_data, "FR", "AE", True),
+            (company_b, data_b, "AE", "FR", False),
+        ):
+            with self.subTest(address=address, fiscal=fiscal):
+                moves = (
+                    self.env["account.move"]
+                    .with_user(self.simple_accountman)
+                    .with_company(company)
+                    .with_context(allowed_company_ids=[company.id])
+                )
+                self.assertFalse(moves.env.su)
+                zero_values = {
+                    "name": "Synthetic zero-value fiscal line",
+                    "quantity": 1,
+                    "price_unit": 0,
+                    "account_id": data["default_account_revenue"].id,
+                    "tax_ids": [Command.clear()],
+                }
+                invoice_values = {
+                    "company_id": company.id,
+                    "move_type": "out_invoice",
+                    "partner_id": self.partner_a.id,
+                    "invoice_date": "2019-01-01",
+                    "journal_id": data["default_journal_sale"].id,
+                    "l10n_ae_document_category": "commercial",
+                    "invoice_line_ids": [
+                        Command.create({**zero_values, "price_unit": 100}),
+                        Command.create(zero_values),
+                    ],
+                }
+                invoice = moves.create(invoice_values)
+                other = moves.create(invoice_values)
+                self.assertEqual(invoice.company_id.country_code, address)
+                self.assertEqual(invoice.country_code, fiscal)
+                zero = invoice.invoice_line_ids.filtered(
+                    lambda line: not line.price_unit
+                )
+                other_zero = other.invoice_line_ids.filtered(
+                    lambda line: not line.price_unit
+                )
+                if not frozen:
+                    self.assertTrue(zero.write({"l10n_ae_edi_rcm_standard_id": "TEST"}))
+                    extra = moves.env["account.move.line"].create(
+                        {**zero_values, "move_id": invoice.id}
+                    )
+                    self.assertTrue(extra.unlink())
+                    self.assertEqual(invoice.amount_total, 100)
+                    self.assertFalse(invoice.l10n_ae_transmission_ids)
+                    continue
+                invoice.l10n_ae_binding_id = self.binding
+                invoice.action_post()
+                invoice.action_l10n_ae_prepare()
+                issue = invoice.l10n_ae_transmission_id
+                self.assertEqual(json.loads(issue.payload)["supplier"]["country"], "FR")
+                invoice.env.flush_all()
+                ledger_fields = [
+                    "balance",
+                    "amount_currency",
+                    "account_id",
+                    "price_unit",
+                    "quantity",
+                    "name",
+                    "l10n_ae_edi_rcm_nature_code",
+                    "write_date",
+                ]
+                ledger = invoice.line_ids.read(ledger_fields)
+                evidence_fields = ["payload", "payload_hash", "idempotency_key"]
+                evidence = issue.read(evidence_fields)
+                for operation, record, method, args in (
+                    ("quantity", zero, "write", ({"quantity": 2},)),
+                    (
+                        "classification",
+                        zero,
+                        "write",
+                        ({"l10n_ae_edi_rcm_nature_code": "DL8.48.8.2"},),
+                    ),
+                    (
+                        "add",
+                        moves.env["account.move.line"],
+                        "create",
+                        ({**zero_values, "move_id": invoice.id},),
+                    ),
+                    ("remove", zero, "unlink", ()),
+                    ("move_from_frozen", zero, "write", ({"move_id": other.id},)),
+                    (
+                        "move_into_frozen",
+                        other_zero,
+                        "write",
+                        ({"move_id": invoice.id},),
+                    ),
+                ):
+                    with (
+                        self.subTest(operation=operation),
+                        self.cr.savepoint(),
+                        self.assertRaisesRegex(UserError, "frozen UAE.*line"),
+                    ):
+                        getattr(record, method)(*args)
+                self.assertEqual(invoice.line_ids.read(ledger_fields), ledger)
+                self.assertEqual(issue.read(evidence_fields), evidence)
+                self.assertEqual((invoice.amount_total, other.amount_total), (100, 100))
+                self.assertEqual(invoice.state, "posted")
+                self.assertEqual(zero.move_id, invoice)
+                self.assertEqual(other_zero.move_id, other)
+
     def test_frozen_invoice_line_price_cannot_be_rewritten(self):
         invoice = self.init_invoice(
             "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True

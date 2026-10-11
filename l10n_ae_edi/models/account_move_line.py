@@ -53,8 +53,7 @@ class AccountMoveLine(models.Model):
     def _l10n_ae_check_fiscal_line_edit(self, moves):
         moves = moves.filtered(
             lambda move: (
-                move.company_id.country_code == "AE"
-                and move.is_invoice(include_receipts=True)
+                move.country_code == "AE" and move.is_invoice(include_receipts=True)
             )
         )
         if not moves:
