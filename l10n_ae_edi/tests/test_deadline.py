@@ -4,7 +4,7 @@ from datetime import date
 
 from freezegun import freeze_time
 
-from odoo import fields
+from odoo import Command, fields
 from odoo.exceptions import AccessError, UserError, ValidationError
 from odoo.tests import Form, tagged
 from odoo.tests.common import new_test_user
@@ -39,6 +39,108 @@ class TestUaeDeadline(AccountTestInvoicingCommon):
                 **extra,
             }
         )
+
+    def test_deadline_review_uses_fiscal_country_not_company_address(self):
+        ae = self.env.ref("base.ae")
+        fr = self.env.ref("base.fr")
+        company_a = self.env.company
+        company_a.write(
+            {"country_id": fr.id, "account_fiscal_country_id": ae.id, "state_id": False}
+        )
+        data_b = self.setup_other_company(name="Synthetic foreign fiscal deadline")
+        company_b = data_b["company"]
+        company_b.write({"country_id": ae.id, "account_fiscal_country_id": fr.id})
+        self.simple_accountman.company_ids = [Command.set([company_a.id, company_b.id])]
+        for data, address, fiscal, eligible in (
+            (self.company_data, "FR", "AE", True),
+            (data_b, "AE", "FR", False),
+        ):
+            with self.subTest(address=address, fiscal=fiscal):
+                company = data["company"]
+                moves = (
+                    self.env["account.move"]
+                    .with_user(self.simple_accountman)
+                    .with_company(company)
+                    .with_context(allowed_company_ids=[company.id])
+                )
+                invoice = moves.create(
+                    {
+                        "company_id": company.id,
+                        "move_type": "out_invoice",
+                        "partner_id": self.partner_a.id,
+                        "invoice_date": "2026-10-01",
+                        "journal_id": data["default_journal_sale"].id,
+                        "invoice_line_ids": [
+                            Command.create(
+                                {
+                                    "name": "Synthetic untaxed deadline service",
+                                    "price_unit": 100,
+                                    "account_id": data["default_account_revenue"].id,
+                                    "tax_ids": [Command.clear()],
+                                }
+                            )
+                        ],
+                    }
+                )
+                self.assertFalse(invoice.env.su)
+                self.assertEqual(company.country_code, address)
+                self.assertEqual(company.account_fiscal_country_id.code, fiscal)
+                self.assertEqual(invoice.country_code, fiscal)
+                invoice.action_post()
+                invoice.env.flush_all()
+                ledger = invoice.line_ids.read(
+                    ["balance", "amount_currency", "account_id", "write_date"]
+                )
+                deadlines = invoice.env["l10n_ae.edi.deadline"]
+                values = {
+                    "name": "Synthetic fiscal-country reviewed deadline",
+                    "move_id": invoice.id,
+                    "registration_status": "vat_registered",
+                    "rule_basis": "vat",
+                    "anchor_kind": "supply",
+                    "anchor_date": "2026-09-02",
+                    "due_date": "2026-09-16",
+                    "reminder_date": "2026-09-13",
+                    "calendar_basis": "Synthetic explicit calendar dates",
+                    "source_reference": "Synthetic fixture, not a legal policy",
+                    "policy_version": "synthetic-fiscal-country-1",
+                    "review_note": "Supply date remains independent of invoice date",
+                    "responsible_id": self.simple_accountman.id,
+                    "requested_fact": "confirmations",
+                }
+                if eligible:
+                    deadline = deadlines.create(values)
+                    self.assertEqual(deadline.state, "draft")
+                    self.assertEqual(deadline.company_id, company)
+                    self.assertEqual(deadline.move_id, invoice)
+                    self.assertTrue(deadline.action_approve())
+                    self.assertEqual(deadline.approved_by_id, self.simple_accountman)
+                    status = deadline.get_deadline_status("2026-09-17")
+                    self.assertEqual(status["state"], "overdue")
+                    self.assertEqual(status["due_date"], "2026-09-16")
+                    self.assertFalse(status["observed"])
+                    action = deadline.action_assess_deadline("2026-09-17")
+                    self.assertEqual(action["tag"], "display_notification")
+                    self.assertFalse(deadline.activity_ids)
+                else:
+                    with (
+                        self.cr.savepoint(),
+                        self.assertRaisesRegex(
+                            ValidationError, "Select a UAE accounting invoice"
+                        ),
+                    ):
+                        deadlines.create(values)
+                    self.assertFalse(
+                        deadlines.search_count([("move_id", "=", invoice.id)])
+                    )
+                self.assertEqual((invoice.state, invoice.amount_total), ("posted", 100))
+                self.assertEqual(
+                    invoice.line_ids.read(
+                        ["balance", "amount_currency", "account_id", "write_date"]
+                    ),
+                    ledger,
+                )
+                self.assertFalse(invoice.l10n_ae_transmission_ids)
 
     def test_readonly_and_inactive_actors_cannot_elevate_deadline_mutations(self):
         invoice = self.init_invoice("out_invoice", amounts=[100], taxes=self.tax_sale_a)

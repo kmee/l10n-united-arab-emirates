@@ -120,7 +120,7 @@ class UaeEdiDeadline(models.Model):
                 self.env._("The current user cannot access this deadline company.")
             )
         document.with_user(self.env.uid).check_access("read")
-        if document.company_id.country_id.code != "AE" or not document.is_invoice():
+        if document.country_code != "AE" or not document.is_invoice():
             raise ValidationError(
                 self.env._("Select a UAE accounting invoice or credit note.")
             )
