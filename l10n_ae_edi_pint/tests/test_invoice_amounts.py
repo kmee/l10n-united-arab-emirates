@@ -24,6 +24,143 @@ _logger = logging.getLogger(__name__)
 
 @tagged("post_install", "-at_install")
 class TestUaeInvoiceAmounts(UaePintTestCommon):
+    def test_native_summary_period_follows_fiscal_country_not_address(self):
+        if not {"deferred_start_date", "deferred_end_date"}.issubset(
+            self.env["account.move.line"]._fields
+        ):
+            self.skipTest("Native deferred-date fields are not installed.")
+        ae = self.env.ref("base.ae")
+        fr = self.env.ref("base.fr")
+        company_a = self.env.company
+        company_a.partner_id.vat = False
+        company_a.write(
+            {
+                "country_id": fr.id,
+                "account_fiscal_country_id": ae.id,
+                "state_id": False,
+                "generate_deferred_revenue_entries_method": "manual",
+            }
+        )
+        data_b = self.setup_other_company(name="Synthetic foreign fiscal Summary")
+        data_b["company"].write(
+            {
+                "country_id": ae.id,
+                "account_fiscal_country_id": fr.id,
+                "state_id": self.env.ref("base.state_ae_du").id,
+                "street": "Synthetic fiscal Summary street",
+                "city": "Dubai",
+                "l10n_ae_tin": "1000000003",
+                "l10n_ae_tin_confirmed": True,
+                "generate_deferred_revenue_entries_method": "manual",
+            }
+        )
+        data_b["company"].partner_id.write(
+            {
+                "routing_scheme": "0235",
+                "routing_endpoint": "1000000003",
+                "l10n_ae_registration_type": "TL",
+                "l10n_ae_registration_authority": "Synthetic Summary Authority",
+                "additional_identifiers": {"AE_TL": "SYNTH-TRADE-FISCAL-0003"},
+            }
+        )
+        self.simple_accountman.company_ids = [
+            (6, 0, (company_a | data_b["company"]).ids)
+        ]
+        for data, address, fiscal, native_period in (
+            (self.company_data, "FR", "AE", True),
+            (data_b, "AE", "FR", False),
+        ):
+            with self.subTest(address=address, fiscal=fiscal):
+                company = data["company"]
+                invoice = (
+                    self.env["account.move"]
+                    .with_user(self.simple_accountman)
+                    .with_company(company)
+                    .with_context(allowed_company_ids=[company.id])
+                    .create(
+                        {
+                            "company_id": company.id,
+                            "move_type": "out_invoice",
+                            "partner_id": self.partner_a.id,
+                            "invoice_date": "2019-01-31",
+                            "journal_id": data["default_journal_sale"].id,
+                            "l10n_ae_document_category": "commercial",
+                            "l10n_ae_summary": True,
+                            "l10n_ae_billing_frequency_code": "MTH",
+                            "invoice_line_ids": [
+                                (
+                                    0,
+                                    0,
+                                    {
+                                        "name": "Synthetic January Summary service",
+                                        "quantity": 1,
+                                        "price_unit": 100,
+                                        "account_id": data[
+                                            "default_account_revenue"
+                                        ].id,
+                                        "tax_ids": [(5, 0, 0)],
+                                        "deferred_start_date": "2019-01-01",
+                                        "deferred_end_date": "2019-01-31",
+                                    },
+                                )
+                            ],
+                        }
+                    )
+                )
+                self.assertFalse(invoice.env.su)
+                self.assertEqual(invoice.company_id.country_code, address)
+                self.assertEqual(invoice.country_code, fiscal)
+                invoice.action_post()
+                self.assertFalse(invoice.deferred_move_ids)
+                self.assertFalse(invoice.l10n_ae_invoicing_period_start)
+                self.assertFalse(invoice.l10n_ae_invoicing_period_end)
+                if not native_period:
+                    with self.assertRaisesRegex(UserError, "IBR-138-AE"):
+                        invoice.action_l10n_ae_validate()
+                    invoice.write(
+                        {
+                            "l10n_ae_invoicing_period_start": "2019-01-05",
+                            "l10n_ae_invoicing_period_end": "2019-01-20",
+                        }
+                    )
+                ledger_fields = [
+                    "account_id",
+                    "debit",
+                    "credit",
+                    "balance",
+                    "amount_currency",
+                    "write_uid",
+                    "write_date",
+                ]
+                invoice.env.flush_all()
+                invoice.line_ids.invalidate_recordset()
+                ledger = invoice.line_ids.read(ledger_fields)
+                invoice.action_l10n_ae_validate()
+                xml = etree.fromstring(invoice.preview_l10n_ae_pint().encode())
+                period = xml.find("cac:InvoicePeriod", NS)
+                self.assertIsNotNone(period)
+                start, end = (
+                    ("2019-01-01", "2019-01-31")
+                    if native_period
+                    else ("2019-01-05", "2019-01-20")
+                )
+                self.assertEqual(period.findtext("cbc:StartDate", namespaces=NS), start)
+                self.assertEqual(period.findtext("cbc:EndDate", namespaces=NS), end)
+                self.assertEqual(
+                    xml.findtext(
+                        "cac:AccountingSupplierParty/cac:Party/cac:PostalAddress/"
+                        "cac:Country/cbc:IdentificationCode",
+                        namespaces=NS,
+                    ),
+                    address,
+                )
+                self.assertEqual(invoice.state, "posted")
+                self.assertEqual(invoice.amount_total, 100)
+                self.assertEqual(invoice.line_ids.read(ledger_fields), ledger)
+                self.assertFalse(invoice.l10n_ae_transmission_ids)
+                self.assertFalse(invoice.l10n_ae_fiscal_uuid)
+                self.assertFalse(invoice.ubl_cii_xml_id)
+
     @requires_normative_resources("1.0.4")
     def test_summary_native_partial_credit_preserves_reviewed_period_and_original(self):
         if not {"deferred_start_date", "deferred_end_date"}.issubset(
