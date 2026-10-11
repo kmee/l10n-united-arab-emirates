@@ -7,7 +7,7 @@ from unittest.mock import patch
 from lxml import etree
 
 from odoo import Command
-from odoo.exceptions import UserError
+from odoo.exceptions import AccessError, UserError
 from odoo.tests import Form, tagged
 from odoo.tests.common import new_test_user
 
@@ -1086,12 +1086,23 @@ class TestUaeNativeWorkflow(UaePintTestCommon):
                     "write_date",
                 ]
                 ledger = invoice.line_ids.read(ledger_fields)
-                action = invoice.action_send_and_print()
-                wizard = (
-                    invoice.env[action["res_model"]]
-                    .with_context(**action["context"])
-                    .create({"move_id": invoice.id})
-                )
+                if not can_choose and "peppol_verification_state" in self.partner_a:
+                    # The optional native Peppol action still needs contact-write
+                    # access outside UAE fiscal scope. Keep that refusal and the
+                    # configured participant; test format choice through the
+                    # public wizard without changing contact permissions.
+                    with self.assertRaises(AccessError):
+                        invoice.action_send_and_print()
+                    wizard = invoice.env["account.move.send.wizard"].create(
+                        {"move_id": invoice.id}
+                    )
+                else:
+                    action = invoice.action_send_and_print()
+                    wizard = (
+                        invoice.env[action["res_model"]]
+                        .with_context(**action["context"])
+                        .create({"move_id": invoice.id})
+                    )
                 self.assertFalse(wizard.env.su)
                 self.assertEqual(invoice.company_id.country_code, address)
                 self.assertEqual(invoice.country_code, fiscal)
