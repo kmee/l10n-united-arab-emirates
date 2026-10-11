@@ -973,6 +973,60 @@ class TestUaeInvoiceXmlSource(UaePintTestCommon):
             self.env.invalidate_all()
         self.assertEqual(inbox.original_xml.content, content)
 
+    def test_incoming_reviewer_assignment_follows_fiscal_country_not_address(self):
+        ae = self.env.ref("base.ae")
+        fr = self.env.ref("base.fr")
+        company_a = self.env.company
+        company_a.partner_id.vat = False
+        company_a.write(
+            {"country_id": fr.id, "account_fiscal_country_id": ae.id, "state_id": False}
+        )
+        company_b = self.setup_other_company(
+            name="Synthetic foreign fiscal incoming review"
+        )["company"]
+        company_b.write({"country_id": ae.id, "account_fiscal_country_id": fr.id})
+        reviewer = new_test_user(
+            self.env,
+            login="synthetic-fiscal-incoming-reviewer",
+            groups="account.group_account_manager",
+            company_id=company_a.id,
+            company_ids=[(6, 0, (company_a | company_b).ids)],
+        )
+        configurator = new_test_user(
+            self.env,
+            login="synthetic-fiscal-review-configurator",
+            groups="account.group_account_manager,base.group_erp_manager",
+            company_id=company_a.id,
+            company_ids=[(6, 0, (company_a | company_b).ids)],
+        )
+        for company, address, fiscal, allowed in (
+            (company_a, "FR", "AE", True),
+            (company_b, "AE", "FR", False),
+        ):
+            with self.subTest(address=address, fiscal=fiscal):
+                target = company.with_user(configurator).with_context(
+                    allowed_company_ids=[company.id]
+                )
+                self.assertFalse(target.env.su)
+                self.assertFalse(configurator.has_group("base.group_system"))
+                self.assertEqual(target.country_code, address)
+                self.assertEqual(target.account_fiscal_country_id.code, fiscal)
+                self.assertFalse(target.l10n_ae_inbox_reviewer_id)
+                if allowed:
+                    target.write({"l10n_ae_inbox_reviewer_id": reviewer.id})
+                    self.assertEqual(target.l10n_ae_inbox_reviewer_id.id, reviewer.id)
+                else:
+                    with (
+                        self.assertRaisesRegex(
+                            ValidationError, "incoming document reviewer"
+                        ),
+                        self.cr.savepoint(),
+                    ):
+                        target.write({"l10n_ae_inbox_reviewer_id": reviewer.id})
+                    self.assertFalse(target.l10n_ae_inbox_reviewer_id)
+                self.assertEqual(target.country_code, address)
+                self.assertEqual(target.account_fiscal_country_id.code, fiscal)
+
     def test_revoked_assigned_reviewer_requires_attention_without_reassignment(self):
         reviewer = new_test_user(
             self.env,

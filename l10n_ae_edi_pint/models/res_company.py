@@ -20,7 +20,7 @@ class ResCompany(models.Model):
         for company in self:
             owner = company.l10n_ae_inbox_reviewer_id
             if owner and (
-                company.country_code != "AE"
+                company.account_fiscal_country_id.code != "AE"
                 or not owner.active
                 or owner.share
                 or company not in owner.company_ids
