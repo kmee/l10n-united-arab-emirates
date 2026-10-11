@@ -5,8 +5,15 @@
         <field name="model">res.company</field>
         <field name="inherit_id" ref="base.view_company_form" />
         <field name="arch" type="xml">
+            <xpath expr="//notebook" position="before">
+                <field name="l10n_ae_fiscal_country_code" invisible="1" />
+            </xpath>
             <xpath expr="//notebook" position="inside">
-                <page string="UAE E-Invoicing" name="uae_edi">
+                <page
+                    string="UAE E-Invoicing"
+                    name="uae_edi"
+                    invisible="l10n_ae_fiscal_country_code != 'AE'"
+                >
                     <group>
                         <field name="l10n_ae_tin" />
                         <field name="l10n_ae_tin_confirmed" />

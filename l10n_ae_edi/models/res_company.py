@@ -6,6 +6,9 @@ from odoo import api, fields, models
 class ResCompany(models.Model):
     _inherit = "res.company"
 
+    l10n_ae_fiscal_country_code = fields.Char(
+        related="account_fiscal_country_id.code", string="Fiscal Country Code"
+    )
     l10n_ae_tin = fields.Char(
         string="UAE Taxpayer Identification Number",
         help=(
