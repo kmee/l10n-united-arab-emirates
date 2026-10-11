@@ -166,3 +166,145 @@ class TestUaeInvoiceIdentity(AccountTestInvoicingCommon):
         self.assertEqual(fr_company.read(fields_to_read), before)
         self.assertEqual(fr_company.country_code, "AE")
         self.assertEqual(fr_company.account_fiscal_country_id.code, "FR")
+
+    def test_document_form_limits_issuance_controls_to_supported_processes(self):
+        ae = self.env.ref("base.ae")
+        fr = self.env.ref("base.fr")
+        company = self.env.company
+        company.write(
+            {
+                "country_id": self.env.ref("base.us").id,
+                "account_fiscal_country_id": ae.id,
+                "state_id": self.env.ref("base.state_us_5").id,
+            }
+        )
+        foreign = self.setup_other_company(
+            name="Synthetic AE address and France fiscal document forms"
+        )["company"]
+        foreign.write({"country_id": ae.id, "account_fiscal_country_id": fr.id})
+        manager = new_test_user(
+            self.env,
+            login="uae-document-form-accounting-manager",
+            groups="account.group_account_manager",
+            company_id=company.id,
+            company_ids=[Command.set((company | foreign).ids)],
+        )
+        self.assertFalse(manager.has_group("base.group_erp_manager"))
+        self.assertFalse(manager.has_group("base.group_system"))
+        selfbilling_journal = self.company_data["default_journal_purchase"].copy(
+            {
+                "name": "Synthetic self-billing document forms",
+                "code": "USBF",
+                "is_self_billing": True,
+            }
+        )
+        journal_entry = self.env["account.move"].create(
+            {
+                "company_id": company.id,
+                "journal_id": self.company_data["default_journal_misc"].id,
+                "move_type": "entry",
+            }
+        )
+        negative_moves = [journal_entry]
+        for move_type in ("in_invoice", "in_refund"):
+            negative_moves.append(
+                self.init_invoice(move_type, amounts=[100], taxes=self.tax_purchase_a)
+            )
+        negative_moves.append(
+            self.init_invoice(
+                "out_invoice",
+                amounts=[100],
+                taxes=self.env["account.tax"],
+                company=foreign,
+            )
+        )
+        attempted_fields = {
+            "l10n_ae_binding_id": self.env["l10n_ae.edi.binding"].with_user(manager),
+            "l10n_ae_document_category": "commercial",
+            "l10n_ae_free_zone": True,
+            "l10n_ae_buyer_not_implemented": True,
+            "l10n_ae_tax_exchange_rate": "1",
+        }
+        observed_fields = [
+            "move_type",
+            "state",
+            "company_id",
+            "country_code",
+            "amount_untaxed",
+            "amount_tax",
+            "amount_total",
+            "currency_id",
+            "write_uid",
+            "write_date",
+            "l10n_ae_received_document",
+            "l10n_ae_transmission_id",
+            "l10n_ae_fiscal_uuid",
+            *attempted_fields,
+        ]
+        for move in negative_moves:
+            actor_move = move.with_user(manager).with_context(
+                allowed_company_ids=[move.company_id.id]
+            )
+            self.assertFalse(actor_move.env.su)
+            self.env.flush_all()
+            actor_move.invalidate_recordset()
+            before = actor_move.read(observed_fields)
+            native_form = Form(actor_move)
+            for field_name, value in attempted_fields.items():
+                with (
+                    self.subTest(
+                        move_type=move.move_type,
+                        field=field_name,
+                        fiscal_country=move.country_code,
+                    ),
+                    self.assertRaisesRegex(
+                        AssertionError, f"can't write on invisible field '{field_name}'"
+                    ),
+                ):
+                    setattr(native_form, field_name, value)
+            self.env.flush_all()
+            actor_move.invalidate_recordset()
+            self.assertEqual(actor_move.read(observed_fields), before)
+
+        for move_type in ("out_invoice", "out_refund", "in_invoice", "in_refund"):
+            move = self.init_invoice(
+                move_type,
+                amounts=[100],
+                taxes=self.tax_sale_a
+                if move_type.startswith("out_")
+                else self.tax_purchase_a,
+                journal=selfbilling_journal if move_type.startswith("in_") else None,
+            )
+            actor_move = move.with_user(manager).with_context(
+                allowed_company_ids=[company.id]
+            )
+            self.assertFalse(actor_move.env.su)
+            monetary_before = actor_move.read(
+                ["amount_untaxed", "amount_tax", "amount_total", "currency_id", "state"]
+            )
+            native_form = Form(actor_move)
+            # These are valid editable draft facts, not authorization to issue.
+            native_form.l10n_ae_free_zone = True
+            native_form.l10n_ae_beneficiary_id = "1000000044"
+            native_form.save()
+            self.env.flush_all()
+            actor_move.invalidate_recordset()
+            self.assertTrue(actor_move.l10n_ae_free_zone)
+            self.assertEqual(actor_move.l10n_ae_beneficiary_id, "1000000044")
+            self.assertEqual(actor_move.write_uid, manager)
+            self.assertEqual(
+                actor_move.read(
+                    [
+                        "amount_untaxed",
+                        "amount_tax",
+                        "amount_total",
+                        "currency_id",
+                        "state",
+                    ]
+                ),
+                monetary_before,
+            )
+            self.assertEqual(actor_move.country_code, "AE")
+            self.assertEqual(actor_move.company_id.country_code, "US")
+            self.assertFalse(actor_move.l10n_ae_transmission_id)
+            self.assertFalse(actor_move.l10n_ae_fiscal_uuid)

@@ -33,14 +33,14 @@
                     type="object"
                     string="Check UAE Data"
                     groups="account.group_account_invoice"
-                    invisible="country_code != 'AE' or move_type == 'entry' or l10n_ae_received_document"
+                    invisible="country_code != 'AE' or move_type == 'entry' or l10n_ae_received_document or (move_type not in ('out_invoice', 'out_refund') and not (move_type in ('in_invoice', 'in_refund') and is_self_billing))"
                 />
             </xpath>
             <xpath expr="//notebook" position="inside">
                 <page
                     string="UAE E-Invoicing"
                     name="uae_edi"
-                    invisible="country_code != 'AE'"
+                    invisible="country_code != 'AE' or move_type == 'entry' or (not l10n_ae_received_document and (move_type not in ('out_invoice', 'out_refund') and not (move_type in ('in_invoice', 'in_refund') and is_self_billing)))"
                 >
                     <group>
                         <button
@@ -55,6 +55,7 @@
                             name="l10n_ae_binding_id"
                             domain="[('company_id', '=', company_id), ('environment', '=', 'sandbox')]"
                             readonly="l10n_ae_transmission_id"
+                            invisible="l10n_ae_received_document"
                         />
                         <field name="l10n_ae_preparation_state" readonly="True" />
                         <field
