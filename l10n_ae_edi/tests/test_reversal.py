@@ -1,5 +1,6 @@
 # Copyright 2026 KMEE
 # License AGPL-3.0 or later (https://www.gnu.org/licenses/agpl).
+from odoo import Command
 from odoo.exceptions import UserError
 from odoo.tests import tagged
 
@@ -72,3 +73,102 @@ class TestUaeCreditNoteWizard(AccountTestInvoicingCommon):
             credit.action_l10n_ae_prepare()
         self.assertEqual((original.state, original.amount_total), ("posted", 105))
         self.assertFalse(credit.l10n_ae_transmission_id)
+
+    def test_official_credit_metadata_follows_fiscal_country_not_address(self):
+        ae = self.env.ref("base.ae")
+        fr = self.env.ref("base.fr")
+        company_a = self.env.company
+        company_a.write(
+            {"country_id": fr.id, "account_fiscal_country_id": ae.id, "state_id": False}
+        )
+        data_b = self.setup_other_company(name="Synthetic foreign fiscal reversal")
+        company_b = data_b["company"]
+        company_b.write({"country_id": ae.id, "account_fiscal_country_id": fr.id})
+        self.simple_accountman.company_ids = [Command.set([company_a.id, company_b.id])]
+        source_flags = {
+            "l10n_ae_free_zone": True,
+            "l10n_ae_deemed_supply": False,
+            "l10n_ae_margin_scheme": False,
+            "l10n_ae_summary": False,
+            "l10n_ae_continuous_supply": False,
+            "l10n_ae_disclosed_agent": True,
+            "l10n_ae_ecommerce": True,
+            "l10n_ae_exports": False,
+        }
+        for data, address, fiscal, applies in (
+            (self.company_data, "FR", "AE", True),
+            (data_b, "AE", "FR", False),
+        ):
+            with self.subTest(address=address, fiscal=fiscal):
+                company = data["company"]
+                moves = (
+                    self.env["account.move"]
+                    .with_user(self.simple_accountman)
+                    .with_company(company)
+                    .with_context(allowed_company_ids=[company.id])
+                )
+                original = moves.create(
+                    {
+                        "company_id": company.id,
+                        "move_type": "out_invoice",
+                        "partner_id": self.partner_a.id,
+                        "invoice_date": "2019-01-01",
+                        "journal_id": data["default_journal_sale"].id,
+                        **source_flags,
+                        "l10n_ae_beneficiary_id": "1000000009",
+                        "l10n_ae_principal_id": "100000000000003",
+                        "invoice_line_ids": [
+                            Command.create(
+                                {
+                                    "name": "Synthetic untaxed reversal service",
+                                    "price_unit": 100,
+                                    "account_id": data["default_account_revenue"].id,
+                                    "tax_ids": [Command.clear()],
+                                }
+                            )
+                        ],
+                    }
+                )
+                self.assertFalse(original.env.su)
+                self.assertEqual(original.company_id.country_code, address)
+                self.assertEqual(original.country_code, fiscal)
+                original.action_post()
+                wizard = (
+                    original.env["account.move.reversal"]
+                    .with_context(active_model="account.move", active_ids=original.ids)
+                    .create(
+                        {
+                            "reason": "Synthetic reduction in consideration",
+                            "l10n_ae_credit_reason": "DL8.61.1.C",
+                            "journal_id": original.journal_id.id,
+                        }
+                    )
+                )
+                self.assertFalse(wizard.env.su)
+                self.assertEqual(wizard.l10n_ae_credit_reason_applicable, applies)
+                action = wizard.refund_moves()
+                credit = wizard.new_move_ids
+                self.assertEqual(action["res_id"], credit.id)
+                self.assertEqual(
+                    (credit.state, credit.move_type), ("draft", "out_refund")
+                )
+                self.assertEqual(credit.reversed_entry_id, original)
+                self.assertEqual(credit.company_id, company)
+                self.assertEqual(credit.country_code, fiscal)
+                self.assertEqual(credit.amount_total, 100)
+                self.assertEqual(
+                    credit.l10n_ae_credit_reason, "DL8.61.1.C" if applies else False
+                )
+                for name, value in source_flags.items():
+                    self.assertEqual(credit[name], value if applies else False, name)
+                    self.assertEqual(original[name], value, name)
+                self.assertEqual(
+                    credit.l10n_ae_beneficiary_id, "1000000009" if applies else False
+                )
+                self.assertEqual(
+                    credit.l10n_ae_principal_id, "100000000000003" if applies else False
+                )
+                self.assertEqual(
+                    (original.state, original.amount_total), ("posted", 100)
+                )
+                self.assertFalse(original.l10n_ae_credit_reason)

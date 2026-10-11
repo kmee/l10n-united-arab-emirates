@@ -21,7 +21,7 @@ class AccountMoveReversal(models.TransientModel):
 
     def _l10n_ae_credit_reason_applies(self, move):
         return (
-            move.company_id.country_id.code == "AE"
+            move.country_code == "AE"
             and not move.l10n_ae_received_document
             and (
                 move.move_type == "out_invoice"
@@ -32,7 +32,7 @@ class AccountMoveReversal(models.TransientModel):
 
     @api.depends(
         "move_ids.move_type",
-        "move_ids.company_id.country_id",
+        "move_ids.company_id.account_fiscal_country_id",
         "move_ids.is_self_billing",
         "move_ids.l10n_ae_received_document",
     )
