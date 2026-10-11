@@ -3583,6 +3583,50 @@ class TestUaeReceivedXml(UaePintTestCommon):
         self.assertEqual(bill.amount_total, 105)
         self.assertEqual(bill.ref, source.name)
         self.assertTrue(bill.l10n_ae_received_document)
+        self.assertFalse(bill.env.su)
+        self.assertFalse(bill.env.user.has_group("base.group_erp_manager"))
+        self.env.flush_all()
+        bill.invalidate_recordset()
+        observed_fields = [
+            "state",
+            "move_type",
+            "partner_id",
+            "company_id",
+            "amount_untaxed",
+            "amount_tax",
+            "amount_total",
+            "currency_id",
+            "write_uid",
+            "write_date",
+            "l10n_ae_received_document",
+            "l10n_ae_received_process",
+            "l10n_ae_document_category",
+            "l10n_ae_fiscal_uuid",
+            "l10n_ae_binding_id",
+            "l10n_ae_free_zone",
+            "l10n_ae_received_payable_amount",
+        ]
+        before_form = bill.read(observed_fields)
+        received_form = Form(bill)
+        with self.assertRaisesRegex(
+            AssertionError, "can't write on invisible field 'l10n_ae_binding_id'"
+        ):
+            received_form.l10n_ae_binding_id = bill.env["l10n_ae.edi.binding"]
+        for name, value in (
+            ("l10n_ae_document_category", "commercial"),
+            ("l10n_ae_free_zone", True),
+            ("l10n_ae_received_payable_amount", 106),
+        ):
+            with (
+                self.subTest(received_field=name),
+                self.assertRaisesRegex(
+                    AssertionError, f"can't write on readonly field '{name}'"
+                ),
+            ):
+                setattr(received_form, name, value)
+        self.env.flush_all()
+        bill.invalidate_recordset()
+        self.assertEqual(bill.read(observed_fields), before_form)
         with self.assertRaisesRegex(UserError, "received"):
             bill.write({"l10n_ae_fiscal_uuid": "ffffffff-ffff-4fff-8fff-ffffffffffff"})
         inbox.action_process()
