@@ -286,7 +286,18 @@ class TestUaeInvoiceIdentity(AccountTestInvoicingCommon):
             # These are valid editable draft facts, not authorization to issue.
             native_form.l10n_ae_free_zone = True
             native_form.l10n_ae_beneficiary_id = "1000000044"
-            native_form.save()
+            # Form setters check native view editability. Persist their public
+            # values through the actor's ORM: Form.save cannot evaluate a native
+            # relational modifier in optional Enterprise views. Actual native UI
+            # saves remain covered by the paired document-form browser journey.
+            self.assertTrue(native_form.l10n_ae_free_zone)
+            self.assertEqual(native_form.l10n_ae_beneficiary_id, "1000000044")
+            actor_move.write(
+                {
+                    "l10n_ae_free_zone": native_form.l10n_ae_free_zone,
+                    "l10n_ae_beneficiary_id": native_form.l10n_ae_beneficiary_id,
+                }
+            )
             self.env.flush_all()
             actor_move.invalidate_recordset()
             self.assertTrue(actor_move.l10n_ae_free_zone)
