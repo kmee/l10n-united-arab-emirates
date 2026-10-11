@@ -5,6 +5,7 @@ import json
 from odoo import Command
 from odoo.exceptions import UserError, ValidationError
 from odoo.tests import Form, tagged
+from odoo.tests.common import new_test_user
 
 from odoo.addons.account.tests.common import AccountTestInvoicingCommon
 from odoo.addons.l10n_ae_edi.tests.common import (
@@ -360,6 +361,109 @@ class TestUaeInvoicePreparation(AccountTestInvoicingCommon):
                     )
                 else:
                     self.assertFalse(actor.l10n_ae_fiscal_uuid)
+
+    def test_posted_send_metadata_preserves_fiscal_uae_ledger_audits(self):
+        ae = self.env.ref("base.ae")
+        fr = self.env.ref("base.fr")
+        company_a = self.env.company
+        company_a.write(
+            {"country_id": fr.id, "account_fiscal_country_id": ae.id, "state_id": False}
+        )
+        data_b = self.setup_other_company(name="Synthetic foreign fiscal metadata")
+        data_c = self.setup_other_company(name="Synthetic native metadata control")
+        data_b["company"].write(
+            {"country_id": ae.id, "account_fiscal_country_id": fr.id}
+        )
+        data_c["company"].write(
+            {"country_id": fr.id, "account_fiscal_country_id": fr.id, "state_id": False}
+        )
+        companies = company_a | data_b["company"] | data_c["company"]
+        self.simple_accountman.company_ids = [Command.set(companies.ids)]
+        sender = new_test_user(
+            self.env,
+            login="synthetic-metadata-manager",
+            groups="account.group_account_manager",
+            company_ids=companies.ids,
+        )
+        self.assertNotEqual(sender, self.simple_accountman)
+        ledger_fields = [
+            "debit",
+            "credit",
+            "balance",
+            "amount_currency",
+            "account_id",
+            "tax_ids",
+            "write_uid",
+            "write_date",
+        ]
+        observed_authors = {}
+        for data, address, fiscal in (
+            (self.company_data, "FR", "AE"),
+            (data_b, "AE", "FR"),
+            (data_c, "FR", "FR"),
+        ):
+            with self.subTest(address=address, fiscal=fiscal):
+                company = data["company"]
+                invoices = (
+                    self.env["account.move"]
+                    .with_user(self.simple_accountman)
+                    .with_company(company)
+                    .with_context(allowed_company_ids=[company.id])
+                )
+                self.assertFalse(invoices.env.su)
+                invoice = invoices.create(
+                    {
+                        "company_id": company.id,
+                        "move_type": "out_invoice",
+                        "partner_id": self.partner_a.id,
+                        "invoice_date": "2019-01-01",
+                        "journal_id": data["default_journal_sale"].id,
+                        "invoice_line_ids": [
+                            Command.create(
+                                {
+                                    "name": "Synthetic service for metadata audit",
+                                    "quantity": 1,
+                                    "price_unit": 100,
+                                    "account_id": data["default_account_revenue"].id,
+                                    "tax_ids": [Command.clear()],
+                                }
+                            )
+                        ],
+                    }
+                )
+                invoice.action_post()
+                invoice.env.flush_all()
+                invoice.line_ids.invalidate_recordset()
+                ledger = invoice.line_ids.sorted("id").read(ledger_fields)
+                self.assertEqual(invoice.company_id.country_code, address)
+                self.assertEqual(invoice.country_code, fiscal)
+                self.assertEqual(invoice.amount_total, 100)
+                self.assertEqual(
+                    invoice.line_ids.mapped("write_uid"), self.simple_accountman
+                )
+                actor = invoice.with_user(sender)
+                self.assertFalse(actor.env.su)
+                self.assertTrue(actor.write({"is_move_sent": True}))
+                actor.env.flush_all()
+                actor.line_ids.invalidate_recordset()
+                after = actor.line_ids.sorted("id").read(ledger_fields)
+                observed_authors[(address, fiscal)] = {
+                    row["write_uid"][0] for row in after
+                }
+                self.assertTrue(actor.is_move_sent)
+                self.assertEqual(actor.state, "posted")
+                self.assertEqual(actor.amount_total, 100)
+                self.assertFalse(actor.l10n_ae_transmission_ids)
+                if fiscal == "AE":
+                    self.assertEqual(after, ledger)
+                else:
+                    monetary_fields = set(ledger_fields) - {"write_uid", "write_date"}
+                    self.assertEqual(
+                        [{k: row[k] for k in monetary_fields} for row in after],
+                        [{k: row[k] for k in monetary_fields} for row in ledger],
+                    )
+        self.assertEqual(observed_authors[("FR", "FR")], {sender.id})
+        self.assertEqual(observed_authors[("AE", "FR")], observed_authors[("FR", "FR")])
 
     def test_frozen_issue_preserves_contract_review_after_binding_changes(self):
         binding = self.binding.with_user(self.simple_accountman)

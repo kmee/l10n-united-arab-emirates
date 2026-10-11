@@ -685,7 +685,7 @@ class AccountMove(models.Model):
             posted_invoices = self.filtered(
                 lambda move: (
                     move.state == "posted"
-                    and move.company_id.country_code == "AE"
+                    and move.country_code == "AE"
                     and move.is_invoice(include_receipts=False)
                 )
             )
