@@ -18,7 +18,7 @@ class AccountMove(models.Model):
     def _l10n_ae_lock_advance_sources(self, additional_sources=None):
         moves = self.filtered(
             lambda move: (
-                move.company_id.country_code == "AE"
+                move.country_code == "AE"
                 and move.move_type == "out_invoice"
                 and not move.l10n_ae_received_document
                 and not move.l10n_ae_transmission_id
