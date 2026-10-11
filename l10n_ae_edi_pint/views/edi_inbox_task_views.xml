@@ -91,7 +91,7 @@
     <menuitem
         id="edi_inbox_task_menu"
         name="UAE Incoming Reviews"
-        parent="account.menu_finance"
+        parent="account.menu_finance_payables"
         action="edi_inbox_task_action"
         sequence="31"
         groups="account.group_account_manager,account.group_account_readonly"

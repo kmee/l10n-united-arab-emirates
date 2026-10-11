@@ -83,7 +83,7 @@
     <menuitem
         id="edi_inbox_rejection_menu"
         name="Rejected Retrieved UAE Artifacts"
-        parent="account.menu_finance"
+        parent="account.menu_finance_payables"
         action="edi_inbox_rejection_action"
         sequence="31"
         groups="account.group_account_invoice,account.group_account_readonly"
@@ -365,7 +365,7 @@
     <menuitem
         id="edi_inbox_menu"
         name="Received UAE Documents"
-        parent="account.menu_finance"
+        parent="account.menu_finance_payables"
         action="edi_inbox_action"
         sequence="30"
         groups="account.group_account_invoice,account.group_account_readonly"
