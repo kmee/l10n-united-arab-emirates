@@ -382,7 +382,10 @@ class AccountEdiUblUae(models.AbstractModel):
         result = super()._ubl_add_party_legal_entity_nodes(vals)
         partner = vals["party_vals"]["partner"].commercial_partner_id
         if partner.country_code == "AE" or (
-            partner.routing_scheme == "0235" and partner.l10n_ae_registration_type
+            partner.routing_scheme == "0235"
+            and partner.routing_endpoint
+            and partner.l10n_ae_registration_type
+            and partner._l10n_ae_legal_registration_number()
         ):
             for node in vals["party_node"]["cac:PartyLegalEntity"]:
                 # VAT/endpoint identity is not a trade-license identifier.
