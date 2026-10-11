@@ -1114,6 +1114,125 @@ class TestUaeNativeWorkflow(UaePintTestCommon):
             self.partner_a.read(["write_date", "invoice_edi_format"]), customer
         )
 
+    def test_send_review_alerts_follow_fiscal_country_preserving_core_warnings(self):
+        ae = self.env.ref("base.ae")
+        fr = self.env.ref("base.fr")
+        company_a = self.env.company
+        company_a.partner_id.vat = False
+        company_a.write(
+            {"country_id": fr.id, "account_fiscal_country_id": ae.id, "state_id": False}
+        )
+        data_b = self.setup_other_company(name="Synthetic foreign fiscal Send alerts")
+        data_b["company"].write(
+            {
+                "country_id": ae.id,
+                "account_fiscal_country_id": fr.id,
+                "l10n_ae_tin": "1000000003",
+                "l10n_ae_tin_confirmed": True,
+            }
+        )
+        self.simple_accountman.company_ids = [
+            Command.set([company_a.id, data_b["company"].id])
+        ]
+        for data, address, fiscal, reviewed in (
+            (self.company_data, "FR", "AE", True),
+            (data_b, "AE", "FR", False),
+        ):
+            with self.subTest(address=address, fiscal=fiscal):
+                company = data["company"]
+                self.partner_a.with_company(company).write(
+                    {
+                        "invoice_edi_format": "kmee_ae_pint",
+                        "invoice_sending_method": "email",
+                        "email": False,
+                    }
+                )
+                moves = (
+                    self.env["account.move"]
+                    .with_user(self.simple_accountman)
+                    .with_company(company)
+                    .with_context(allowed_company_ids=[company.id])
+                )
+                invoice = moves.create(
+                    {
+                        "company_id": company.id,
+                        "move_type": "out_invoice",
+                        "partner_id": self.partner_a.id,
+                        "invoice_date": "2019-01-01",
+                        "journal_id": data["default_journal_sale"].id,
+                        "l10n_ae_document_category": "commercial",
+                        "l10n_ae_free_zone": True,
+                        "invoice_line_ids": [
+                            Command.create(
+                                {
+                                    "name": "Synthetic beneficiary review service",
+                                    "quantity": 1,
+                                    "price_unit": 100,
+                                    "account_id": data["default_account_revenue"].id,
+                                    "tax_ids": [Command.clear()],
+                                }
+                            )
+                        ],
+                    }
+                )
+                invoice.action_post()
+                invoice.env.flush_all()
+                invoice.line_ids.invalidate_recordset()
+                ledger_fields = [
+                    "account_id",
+                    "debit",
+                    "credit",
+                    "balance",
+                    "amount_currency",
+                    "write_uid",
+                    "write_date",
+                ]
+                ledger = invoice.line_ids.read(ledger_fields)
+                original = invoice.read(
+                    [
+                        "state",
+                        "write_date",
+                        "l10n_ae_fiscal_uuid",
+                        "l10n_ae_transmission_ids",
+                        "ubl_cii_xml_id",
+                    ]
+                )
+                action = invoice.action_send_and_print()
+                wizard = (
+                    invoice.env[action["res_model"]]
+                    .with_context(**action["context"])
+                    .create({"move_id": invoice.id})
+                )
+                self.assertFalse(wizard.env.su)
+                self.assertEqual(invoice.company_id.country_code, address)
+                self.assertEqual(invoice.country_code, fiscal)
+                self.assertEqual(wizard.invoice_edi_format, "kmee_ae_pint")
+                wizard.write(
+                    {
+                        "sending_methods": ["email"],
+                        "mail_partner_ids": [Command.set([self.partner_a.id])],
+                    }
+                )
+                self.assertEqual(
+                    wizard.alerts["account_missing_email"]["level"], "danger"
+                )
+                uae = {
+                    k: v
+                    for k, v in wizard.alerts.items()
+                    if k.startswith("l10n_ae_edi_")
+                }
+                if reviewed:
+                    self.assertEqual(set(uae), {"l10n_ae_edi_ibr_007_ae"})
+                    alert = uae["l10n_ae_edi_ibr_007_ae"]
+                    self.assertIn("IBR-007-AE", alert["message"])
+                    self.assertEqual(alert["action"]["res_model"], "account.move")
+                    self.assertEqual(alert["action"]["res_id"], invoice.id)
+                else:
+                    self.assertFalse(uae)
+                self.assertEqual(invoice.read(list(original[0].keys())), original)
+                self.assertEqual(invoice.line_ids.read(ledger_fields), ledger)
+                self.assertEqual(invoice.amount_total, 100)
+
     def test_native_send_format_choice_survives_reopen_and_method_change(self):
         self.env.company.l10n_ae_edi_auto_prepare = False
         self.partner_a.write(
