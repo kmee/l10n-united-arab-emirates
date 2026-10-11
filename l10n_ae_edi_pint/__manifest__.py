@@ -22,6 +22,7 @@
         "views/account_journal_views.xml",
         "views/account_move_send_wizard_views.xml",
         "views/edi_inbox_views.xml",
+        "views/edi_inbox_receiver_views.xml",
         "views/edi_inbox_selection_views.xml",
         "views/edi_inbox_event_review_views.xml",
         "views/edi_inbox_task_views.xml",
