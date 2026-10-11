@@ -232,18 +232,18 @@ class _ValidationBatch:
             identity["manifest_sha256"],
             validator.timeout,
         )
-        if (
-            self.worker is None
-            or key != self.key
-            or self.worker_requests >= MAX_BATCH_REQUESTS
-        ):
-            self._discard_worker()
-            self.worker = _BatchWorker(validator)
-            self.key = key
-            self.worker_requests = 0
-            self.worker_compilations = (0, 0)
-            self.counters["worker_starts"] += 1
         try:
+            if (
+                self.worker is None
+                or key != self.key
+                or self.worker_requests >= MAX_BATCH_REQUESTS
+            ):
+                self._discard_worker()
+                self.worker = _BatchWorker(validator)
+                self.key = key
+                self.worker_requests = 0
+                self.worker_compilations = (0, 0)
+                self.counters["worker_starts"] += 1
             self.counters["requests"] += 1
             self.worker_requests += 1
             packet = self.worker.request(content, validator.timeout)
@@ -276,37 +276,39 @@ class _ValidationBatch:
 
 class _BatchWorker:
     def __init__(self, validator):
-        self.temporary = tempfile.TemporaryDirectory(prefix="uae-pint-batch-")
-        directory = Path(self.temporary.name)
-        self.diagnostic = (directory / "diagnostic").open("w+b")
-        self.channel, child = socket.socketpair()
-        try:
-            self.process = subprocess.Popen(
-                [
-                    sys.executable,
-                    "-I",
-                    str(Path(__file__).resolve()),
-                    str(validator.resource_directory),
-                    validator.ruleset,
-                    "--batch",
-                ],
-                stdin=child,
-                stdout=child,
-                stderr=self.diagnostic,
-                cwd=directory,
-                env={
-                    "PATH": os.defpath,
-                    "LANG": "C.UTF-8",
-                    "TMPDIR": self.temporary.name,
-                },
-            )
-        except BaseException:
-            self.channel.close()
-            self.diagnostic.close()
-            self.temporary.cleanup()
-            raise
-        finally:
-            child.close()
+        with ExitStack() as startup:
+            self.temporary = tempfile.TemporaryDirectory(prefix="uae-pint-batch-")
+            startup.callback(self.temporary.cleanup)
+            directory = Path(self.temporary.name)
+            # Before Popen succeeds this owned directory contains only the diagnostic.
+            # Remove by name: recursive cleanup itself needs descriptors on EMFILE.
+            startup.callback(directory.rmdir)
+            diagnostic_path = directory / "diagnostic"
+            startup.callback(diagnostic_path.unlink, missing_ok=True)
+            self.diagnostic = startup.enter_context(diagnostic_path.open("w+b"))
+            self.channel, child = socket.socketpair()
+            startup.callback(self.channel.close)
+            with child:
+                self.process = subprocess.Popen(
+                    [
+                        sys.executable,
+                        "-I",
+                        str(Path(__file__).resolve()),
+                        str(validator.resource_directory),
+                        validator.ruleset,
+                        "--batch",
+                    ],
+                    stdin=child,
+                    stdout=child,
+                    stderr=self.diagnostic,
+                    cwd=directory,
+                    env={
+                        "PATH": os.defpath,
+                        "LANG": "C.UTF-8",
+                        "TMPDIR": self.temporary.name,
+                    },
+                )
+            startup.pop_all()
 
     def close(self):
         with ExitStack() as cleanup:
