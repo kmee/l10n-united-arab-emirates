@@ -7,7 +7,7 @@ from datetime import date
 
 from freezegun import freeze_time
 
-from odoo import fields
+from odoo import Command, fields
 from odoo.exceptions import AccessError, UserError, ValidationError
 from odoo.tests import Form, tagged
 from odoo.tests.common import new_test_user
@@ -178,6 +178,109 @@ class TestUaeIncident(AccountTestInvoicingCommon):
         opened_before = incident.read()
         self.assertTrue(incident.action_open())
         self.assertEqual(incident.read(), opened_before)
+
+    @freeze_time("2026-12-01 12:00:00")
+    def test_incident_and_calendar_follow_fiscal_country_not_address(self):
+        ae = self.env.ref("base.ae")
+        fr = self.env.ref("base.fr")
+        company_a = self.env.company
+        company_a.write(
+            {"country_id": fr.id, "account_fiscal_country_id": ae.id, "state_id": False}
+        )
+        data_b = self.setup_other_company(name="Synthetic foreign fiscal incident")
+        company_b = data_b["company"]
+        company_b.write(
+            {
+                "country_id": ae.id,
+                "account_fiscal_country_id": fr.id,
+                "state_id": self.env.ref("base.state_ae_du").id,
+            }
+        )
+        self.simple_accountman.company_ids = [Command.set([company_a.id, company_b.id])]
+        for company, address, fiscal, eligible in (
+            (company_a, "FR", "AE", True),
+            (company_b, "AE", "FR", False),
+        ):
+            with self.subTest(address=address, fiscal=fiscal):
+                incidents = (
+                    self.env["l10n_ae.edi.incident"]
+                    .with_user(self.simple_accountman)
+                    .with_company(company)
+                    .with_context(allowed_company_ids=[company.id])
+                )
+                self.assertFalse(incidents.env.su)
+                self.assertEqual(company.country_code, address)
+                self.assertEqual(company.account_fiscal_country_id.code, fiscal)
+                calendars = incidents.env["l10n_ae.edi.calendar"]
+                calendar_values = {
+                    "name": "Synthetic fiscal-country calendar",
+                    "company_id": company.id,
+                    "version": "synthetic-fiscal-country-1",
+                    "calendar_start": "2026-12-01",
+                    "calendar_end": "2026-12-10",
+                    "calendar_holidays": ["2026-12-02", "2026-12-03"],
+                    "source_reference": "Synthetic source, not official holidays",
+                    "source_snapshot": "Fixture excludes Dec2/3 and Sat/Sun",
+                    "review_note": "Arithmetic fixture only",
+                }
+                incident_values = {
+                    "name": "Synthetic fiscal-country incident",
+                    "company_id": company.id,
+                    "affected_roles": "issuer",
+                    "occurrence_at": "2026-11-30 21:30:00",
+                    "detected_at": "2026-12-01 08:00:00",
+                    "reason": "Synthetic outage",
+                    "responsible_id": self.simple_accountman.id,
+                    "source_reference": "Synthetic reviewed date exclusion",
+                    "review_note": "Dubai Dec1; working days Dec4 and Dec7",
+                }
+                if eligible:
+                    calendar = calendars.create(calendar_values)
+                    self.assertTrue(calendar.action_approve())
+                    self.assertEqual(calendar.company_id, company)
+                    self.assertEqual(calendar.approved_by_id, self.simple_accountman)
+                    incident = incidents.create(
+                        {**incident_values, "calendar_version_id": calendar.id}
+                    )
+                    self.assertEqual(incident.state, "draft")
+                    self.assertTrue(incident.action_open())
+                    self.assertEqual(incident.company_id, company)
+                    self.assertEqual(incident.state, "open")
+                    self.assertEqual(incident.opened_by_id, self.simple_accountman)
+                    self.assertEqual(incident.calendar_version_id, calendar)
+                    self.assertEqual(
+                        incident.calendar_source_sha256, calendar.source_sha256
+                    )
+                    self.assertEqual(incident.notification_due_date, date(2026, 12, 7))
+                    self.assertEqual(len(incident.activity_ids), 1)
+                    self.assertEqual(
+                        incident.activity_ids.date_deadline, date(2026, 12, 7)
+                    )
+                    before = incident.read(
+                        ["state", "write_date", "opened_at", "activity_ids"]
+                    )
+                    self.assertTrue(incident.action_open())
+                    self.assertEqual(
+                        incident.read(
+                            ["state", "write_date", "opened_at", "activity_ids"]
+                        ),
+                        before,
+                    )
+                else:
+                    for model, values in (
+                        (incidents, incident_values),
+                        (calendars, calendar_values),
+                    ):
+                        with (
+                            self.cr.savepoint(),
+                            self.assertRaisesRegex(
+                                ValidationError, "Select a UAE incident company"
+                            ),
+                        ):
+                            model.create(values)
+                        self.assertFalse(
+                            model.search_count([("name", "=", values["name"])])
+                        )
 
     def test_calendar_rejects_non_list_holiday_inputs(self):
         manager = new_test_user(

@@ -272,7 +272,7 @@ class UaeEdiIncident(models.Model):
             or company.id not in self.env.companies.ids
         ):
             raise AccessError(self.env._("This incident company is not accessible."))
-        if company.country_id.code != "AE":
+        if company.account_fiscal_country_id.code != "AE":
             raise ValidationError(self.env._("Select a UAE incident company."))
 
     @api.model_create_multi
