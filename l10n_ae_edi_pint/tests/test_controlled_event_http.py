@@ -19,6 +19,8 @@ from odoo.addons.l10n_ae_edi.tests.common import (
 )
 from odoo.addons.l10n_ae_edi.tools.controlled_executor import ControlledExecutor
 
+from .common import requires_normative_resources
+
 
 @contextmanager
 def _literal_controlled_http_server(observed):
@@ -337,6 +339,7 @@ class TestUaeNativeControlledEventHttp(AccountTestInvoicingCommon, HttpCase):
                 else:
                     os.environ[key] = value
 
+    @requires_normative_resources("1.0.4")
     def test_native_prepared_invoice_accepts_signed_public_http_event(self):
         fixture = self._accepted_invoice()
         transmission = fixture[1]
@@ -356,6 +359,7 @@ class TestUaeNativeControlledEventHttp(AccountTestInvoicingCommon, HttpCase):
         self.assertEqual(events.original_body, raw.decode("utf-8"))
         self.assertEqual(events.body_hash, hashlib.sha256(raw).hexdigest())
 
+    @requires_normative_resources("1.0.4")
     def test_public_http_deduplicates_replay_and_retains_divergent_original(self):
         fixture = self._accepted_invoice()
         transmission = fixture[1]

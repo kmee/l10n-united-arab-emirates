@@ -17,11 +17,14 @@ from odoo.addons.l10n_ae_edi.tests.common import (
     review_controlled_binding,
 )
 
+from .common import requires_normative_resources
+
 _logger = logging.getLogger(__name__)
 
 
 @tagged("post_install", "-at_install")
 class TestUaeSelfBillingInbound(AccountTestInvoicingCommon):
+    @requires_normative_resources("1.0.4")
     def test_summary_selfbilling_partial_credit_roundtrip_preserves_each_period(self):
         # Reviewed January services:100 +5 VAT; partial credit40 +2 VAT.
         # Native reversal reconciles42, leaving63 on the buyer's payable.
@@ -304,6 +307,7 @@ class TestUaeSelfBillingInbound(AccountTestInvoicingCommon):
         self.assertFalse(original_issue.attempt_ids or credit_issue.attempt_ids)
         self.assertFalse(original_issue.event_ids or credit_issue.event_ids)
 
+    @requires_normative_resources("1.0.4")
     def test_received_frequency_absence_is_not_inferred_from_local_term(self):
         source, _agreement, binding = self._selfbilling_fixture()
         source.l10n_ae_billing_frequency_code = False
@@ -353,6 +357,7 @@ class TestUaeSelfBillingInbound(AccountTestInvoicingCommon):
         self.assertFalse(received.l10n_ae_billing_frequency_code)
         self.assertEqual(replay.original_xml.content, content)
 
+    @requires_normative_resources("1.0.4")
     def test_received_other_frequency_keeps_original_note_as_declared(self):
         source, _agreement, binding = self._selfbilling_fixture()
         source.write(
@@ -408,6 +413,7 @@ class TestUaeSelfBillingInbound(AccountTestInvoicingCommon):
         self.assertEqual(received.l10n_ae_billing_frequency_note, note)
         self.assertEqual(replay.original_xml.content, content)
 
+    @requires_normative_resources("1.0.4")
     def test_received_selfbilling_frequency_preserves_original_over_local_term(self):
         source, _agreement, binding = self._selfbilling_fixture()
         source.l10n_ae_billing_frequency_code = "MTH"
@@ -483,6 +489,7 @@ class TestUaeSelfBillingInbound(AccountTestInvoicingCommon):
         self.assertEqual(received.line_ids.sorted("id").read(ledger_fields), ledger)
         self.assertEqual(replay.original_xml.content, content)
 
+    @requires_normative_resources("1.0.4")
     def test_margin_selfbilling_partial_credit_preserves_roles_and_originals(self):
         # Independently worked representation:1000/N5/VAT0 original,
         # quarter adjustment250. Agreements define buyer and supplier roles.
@@ -753,6 +760,7 @@ class TestUaeSelfBillingInbound(AccountTestInvoicingCommon):
             self.assertEqual(move.line_ids.read(ledger_fields), ledger)
         self.assertEqual((purchase_tax.amount, sale_tax.amount), (0, 0))
 
+    @requires_normative_resources("1.0.4")
     def test_free_zone_margin_credit_roundtrip_preserves_beneficiary_and_originals(
         self,
     ):
@@ -959,6 +967,7 @@ class TestUaeSelfBillingInbound(AccountTestInvoicingCommon):
             self.assertEqual(move.line_ids.read(ledger_fields), ledger)
         self.assertEqual((tax.amount, recipient_tax.amount), (0, 0))
 
+    @requires_normative_resources("1.0.4")
     def test_margin_credit_reversal_and_received_reference_preserve_originals(self):
         # Independent partial adjustment:1000 original,250 credit, no disclosed
         # VAT, nominal N5. Native receivable reconciliation remains core-owned.
@@ -1137,6 +1146,7 @@ class TestUaeSelfBillingInbound(AccountTestInvoicingCommon):
             self.assertEqual(move.line_ids.read(ledger_fields), ledger)
         self.assertEqual((tax.amount, recipient_tax.amount), (0, 0))
 
+    @requires_normative_resources("1.0.4")
     def test_received_margin_n_matches_reviewed_nominal_metadata_not_native_rate(self):
         # Independent PINT example: net1000, nominal N5, disclosed VAT0,
         # payable1000. This is representation, not margin liability accounting.
@@ -1361,6 +1371,7 @@ class TestUaeSelfBillingInbound(AccountTestInvoicingCommon):
         )
         return source, recipient_agreement, binding
 
+    @requires_normative_resources("1.0.4")
     def test_received_invalid_emirate_retains_original_and_explains_local_review(self):
         source, _agreement, binding = self._selfbilling_fixture()
         company = self.env.company
@@ -1428,6 +1439,7 @@ class TestUaeSelfBillingInbound(AccountTestInvoicingCommon):
             history.validation_report_hash,
         )
 
+    @requires_normative_resources("1.0.4")
     def test_received_blank_agreement_evidence_requires_review_and_repaired_retry(self):
         source, agreement, binding = self._selfbilling_fixture()
         company = self.env.company
@@ -1545,6 +1557,7 @@ class TestUaeSelfBillingInbound(AccountTestInvoicingCommon):
         self.assertEqual(inbox.xml_hash, digest)
         self.assertEqual(moves.search_count(domain), before + 1)
 
+    @requires_normative_resources("1.0.4")
     def test_received_single_s_header_allowance_creates_one_adjustment_line(self):
         source, agreement, binding = self._selfbilling_fixture()
         tree = etree.fromstring(source.preview_l10n_ae_pint().encode())
@@ -1680,6 +1693,7 @@ class TestUaeSelfBillingInbound(AccountTestInvoicingCommon):
             1,
         )
 
+    @requires_normative_resources("1.0.4")
     def test_received_single_s_header_charge_creates_one_adjustment_line(self):
         source, agreement, binding = self._selfbilling_fixture()
         tree = etree.fromstring(source.preview_l10n_ae_pint().encode())
@@ -1806,6 +1820,7 @@ class TestUaeSelfBillingInbound(AccountTestInvoicingCommon):
             1,
         )
 
+    @requires_normative_resources("1.0.4")
     def test_agent_selfbilling_uses_supplier_vat_and_refuses_mismatched_principal(self):
         source, agreement, binding = self._selfbilling_fixture()
         source.write(
@@ -1852,6 +1867,7 @@ class TestUaeSelfBillingInbound(AccountTestInvoicingCommon):
         self.assertEqual((existing.amount_tax, existing.amount_total), (5, 105))
         self.assertEqual(inbox.original_xml.content, content)
 
+    @requires_normative_resources("1.0.4")
     def test_received_branch_reuses_parent_masters_but_requires_its_own_agreement(self):
         root = self.env.company
         source, parent_agreement, _binding = self._selfbilling_fixture()
@@ -1992,6 +2008,7 @@ class TestUaeSelfBillingInbound(AccountTestInvoicingCommon):
         self.assertEqual(invoice.amount_total, 105)
         self.assertFalse(invoice.l10n_ae_transmission_ids or invoice.ubl_cii_xml_id)
 
+    @requires_normative_resources("1.0.4")
     def test_buyer_issued_invoice_is_received_as_a_supplier_sale_without_emission(self):
         supplier = self.env.company
         source, recipient_agreement, binding = self._selfbilling_fixture()
@@ -2024,6 +2041,7 @@ class TestUaeSelfBillingInbound(AccountTestInvoicingCommon):
         sale.action_post()
         self.assertFalse(sale.l10n_ae_transmission_id)
 
+    @requires_normative_resources("1.0.4")
     def test_received_self_billed_credit_links_the_original_supplier_sale(self):
         source, agreement, binding = self._selfbilling_fixture()
         inbox_model = self.env["l10n_ae.edi.inbox"].with_user(self.simple_accountman)
@@ -2073,6 +2091,7 @@ class TestUaeSelfBillingInbound(AccountTestInvoicingCommon):
         self.assertFalse(refund.l10n_ae_transmission_id)
         self.assertEqual(original.move_id.state, "draft")
 
+    @requires_normative_resources("1.0.4")
     def test_received_self_billing_links_the_existing_billing_sale_without_rewriting_it(
         self,
     ):
@@ -2115,6 +2134,7 @@ class TestUaeSelfBillingInbound(AccountTestInvoicingCommon):
         self.assertEqual(existing.amount_total, 105)
         self.assertEqual(inbox.original_xml.content, content)
 
+    @requires_normative_resources("1.0.4")
     def test_received_padded_uuid_links_existing_sale_without_matching_number(self):
         source, agreement, binding = self._selfbilling_fixture()
         existing = self.init_invoice(
@@ -2150,6 +2170,7 @@ class TestUaeSelfBillingInbound(AccountTestInvoicingCommon):
         self.assertEqual(inbox.original_xml.content, content)
         self.assertEqual(inbox.xml_hash, hashlib.sha256(content).hexdigest())
 
+    @requires_normative_resources("1.0.4")
     def test_xml_comments_do_not_prevent_linking_the_existing_billing_sale(self):
         source, _agreement, binding = self._selfbilling_fixture()
         existing = self.init_invoice(
@@ -2178,6 +2199,7 @@ class TestUaeSelfBillingInbound(AccountTestInvoicingCommon):
         self.assertEqual(inbox.move_id, existing)
         self.assertEqual(inbox.original_xml.content, content)
 
+    @requires_normative_resources("1.0.4")
     def test_selfbilling_reconciliation_requires_matching_free_zone_and_beneficiary(
         self,
     ):
@@ -2237,6 +2259,7 @@ class TestUaeSelfBillingInbound(AccountTestInvoicingCommon):
         self.assertEqual((existing.amount_tax, existing.amount_total), (5, 105))
         self.assertEqual(inbox.original_xml.content, content)
 
+    @requires_normative_resources("1.0.4")
     def test_received_agreement_evidence_survives_later_contract_changes(self):
         source, agreement, binding = self._selfbilling_fixture()
         inbox = (
@@ -2272,6 +2295,7 @@ class TestUaeSelfBillingInbound(AccountTestInvoicingCommon):
                 {"l10n_ae_received_agreement_snapshot": {"reference": "REWRITTEN"}}
             )
 
+    @requires_normative_resources("1.0.4")
     def test_equal_totals_do_not_allow_replacing_different_billing_quantities(self):
         source, _agreement, binding = self._selfbilling_fixture()
         existing = self.init_invoice(
@@ -2312,6 +2336,7 @@ class TestUaeSelfBillingInbound(AccountTestInvoicingCommon):
         self.assertFalse(existing.l10n_ae_received_document)
         self.assertEqual(inbox.original_xml.content, content)
 
+    @requires_normative_resources("1.0.4")
     def test_ineligible_or_ambiguous_receiving_agreement_stays_in_review(self):
         source, agreement, binding = self._selfbilling_fixture()
         content = source.preview_l10n_ae_pint().encode()
@@ -2352,6 +2377,7 @@ class TestUaeSelfBillingInbound(AccountTestInvoicingCommon):
         self.assertEqual(inbox.move_id.l10n_ae_selfbilling_agreement_id, agreement)
         self.assertEqual(inbox.original_xml.content, content)
 
+    @requires_normative_resources("1.0.4")
     def test_sender_prepaid_credit_does_not_claim_a_local_payment_in_the_history(self):
         source, _agreement, binding = self._selfbilling_fixture()
         inbox_model = self.env["l10n_ae.edi.inbox"].with_user(self.simple_accountman)

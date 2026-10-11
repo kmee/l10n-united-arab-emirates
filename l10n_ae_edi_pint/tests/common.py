@@ -3,6 +3,7 @@
 import hashlib
 import json
 import os
+from functools import wraps
 from pathlib import Path
 
 from lxml import etree
@@ -21,6 +22,47 @@ NS = {
     "cbc": "urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2",
     "cac": "urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2",
 }
+
+
+def requires_normative_resources(*versions):
+    """Skip conformance fixtures when their optional pinned package is absent.
+
+    Only an absent directory is optional; a partial or corrupt installed package
+    must reach the real validator instead of becoming a skip.
+    """
+    supported_versions = ("1.0.4", "1.0.3")
+    if not versions or any(version not in supported_versions for version in versions):
+        raise ValueError("Declare a shipped PINT-AE test package version.")
+
+    def decorate(method):
+        @wraps(method)
+        def run(self, *args, **kwargs):
+            runtime = Path(__file__).resolve().parents[2] / ".runtime"
+            directories = getattr(
+                self,
+                "normative_directories",
+                {
+                    "1.0.4": os.environ.get(
+                        "KMEE_UAE_NORMATIVE_DIR", str(runtime / "normative")
+                    ),
+                    "1.0.3": os.environ.get(
+                        "KMEE_UAE_TEST_NORMATIVE_1_0_3_DIR",
+                        str(runtime / "normative-1.0.3"),
+                    ),
+                },
+            )
+            for version in versions:
+                directory = Path(directories[version])
+                if not directory.exists():
+                    self.skipTest(
+                        f"Optional PINT-AE {version} test resources are not installed. "
+                        "Acquire the pinned package to run conformance tests."
+                    )
+            return method(self, *args, **kwargs)
+
+        return run
+
+    return decorate
 
 
 class UaePintTestCommon(AccountTestInvoicingCommon):

@@ -17,13 +17,14 @@ from odoo.addons.l10n_ae_edi.tests.common import (
 )
 
 from ..tools.validation import OfflinePintValidator
-from .common import NS, UaePintTestCommon
+from .common import NS, UaePintTestCommon, requires_normative_resources
 
 _logger = logging.getLogger(__name__)
 
 
 @tagged("post_install", "-at_install")
 class TestUaeInvoiceAmounts(UaePintTestCommon):
+    @requires_normative_resources("1.0.4")
     def test_summary_native_partial_credit_preserves_reviewed_period_and_original(self):
         if not {"deferred_start_date", "deferred_end_date"}.issubset(
             self.env["account.move.line"]._fields
@@ -210,6 +211,7 @@ class TestUaeInvoiceAmounts(UaePintTestCommon):
         self.assertFalse(issue.attempt_ids or original_issue.attempt_ids)
         self.assertFalse(issue.event_ids or original_issue.event_ids)
 
+    @requires_normative_resources("1.0.4")
     def test_summary_uses_native_deferred_lines_without_inventing_due_dates(self):
         if not {"deferred_start_date", "deferred_end_date"}.issubset(
             self.env["account.move.line"]._fields
@@ -343,6 +345,7 @@ class TestUaeInvoiceAmounts(UaePintTestCommon):
         self.assertEqual(invoice.line_ids.sorted("id").read(ledger_fields), ledger)
         self.assertFalse(issue.attempt_ids or issue.event_ids)
 
+    @requires_normative_resources("1.0.4")
     def test_reviewed_nine_codes_render_native_aed_invoice_instructions(self):
         # Independent literals from the published AE list; these are ordinary
         # 380/AED representations, not nine complete economic-direction matrices.
@@ -491,6 +494,7 @@ class TestUaeInvoiceAmounts(UaePintTestCommon):
             self.assertEqual(invoice.line_ids.sorted("id").read(ledger_fields), ledger)
             self.assertFalse(issue.attempt_ids or issue.event_ids)
 
+    @requires_normative_resources("1.0.4")
     def test_no_selected_method_freezes_undefined_payment_instruction(self):
         self.env.company.l10n_ae_edi_auto_prepare = False
         binding = self._reviewed_binding(
@@ -588,6 +592,7 @@ class TestUaeInvoiceAmounts(UaePintTestCommon):
         self.assertEqual(invoice.line_ids.sorted("id").read(ledger_fields), ledger)
         self.assertFalse(issue.attempt_ids or issue.event_ids)
 
+    @requires_normative_resources("1.0.3", "1.0.4")
     def test_emitted_tax_credit_exposes_real_official_payment_rule_delta(self):
         # Independent worksheet, no reconciliation: original100+5=105;
         # partial consideration credit40+2=42. Both stay fully open.
@@ -855,6 +860,7 @@ class TestUaeInvoiceAmounts(UaePintTestCommon):
                 ),
             )
 
+    @requires_normative_resources("1.0.4")
     def test_usd_invoice_prepares_from_dated_native_rates_without_manual_quote(self):
         usd = self.env.ref("base.USD")
         usd.active = True
@@ -944,6 +950,7 @@ class TestUaeInvoiceAmounts(UaePintTestCommon):
             ledger,
         )
 
+    @requires_normative_resources("1.0.4")
     def test_usd_invoice_preserves_the_quote_and_unrounded_line_aed_amounts(self):
         usd = self.env.ref("base.USD")
         usd.active = True
@@ -1092,6 +1099,7 @@ class TestUaeInvoiceAmounts(UaePintTestCommon):
         with self.assertRaisesRegex(UserError, "AED exchange rate"):
             invoice.preview_l10n_ae_pint()
 
+    @requires_normative_resources("1.0.4")
     def test_company_eur_ledger_does_not_replace_usd_to_aed_fiscal_currency(self):
         eur = self.env.ref("base.EUR")
         usd = self.env.ref("base.USD")
@@ -1175,6 +1183,7 @@ class TestUaeInvoiceAmounts(UaePintTestCommon):
         report = invoice.validate_l10n_ae_pint()
         self.assertTrue(report["valid"], report)
 
+    @requires_normative_resources("1.0.4")
     def test_usd_line_discount_preserves_eur_ledger_and_reviewed_aed_quote(self):
         # Independent worksheet: USD100 less10% gives USD90 net, USD4.50 VAT
         # and USD94.50 gross. The accounting quote USD1=EUR0.90 gives EUR81,
@@ -1396,6 +1405,7 @@ class TestUaeInvoiceAmounts(UaePintTestCommon):
             or issue.validation_receipt
         )
 
+    @requires_normative_resources("1.0.4")
     def test_settled_usd_credit_preserves_aed_gross_and_original_reference(self):
         usd = self.env.ref("base.USD")
         usd.active = True
@@ -1471,6 +1481,7 @@ class TestUaeInvoiceAmounts(UaePintTestCommon):
         report = credit.validate_l10n_ae_pint()
         self.assertTrue(report["valid"], report)
 
+    @requires_normative_resources("1.0.4")
     def test_fractional_usd_uses_native_aed_totals_without_a_rounding_patch(
         self,
     ):
@@ -1563,6 +1574,7 @@ class TestUaeInvoiceAmounts(UaePintTestCommon):
         self.assertEqual(invoice.line_ids.read(ledger_fields), ledger)
         self.assertFalse(issue.attempt_ids or issue.event_ids or issue.remote_id)
 
+    @requires_normative_resources("1.0.4")
     def test_small_usd_selfbilling_invoice_and_credit_keep_native_aed_signs(self):
         usd = self.env.ref("base.USD")
         usd.active = True
@@ -1680,6 +1692,7 @@ class TestUaeInvoiceAmounts(UaePintTestCommon):
             source,
         )
 
+    @requires_normative_resources("1.0.4")
     def test_reversed_summary_period_is_refused_before_an_issue_is_frozen(self):
         invoice = (
             self.init_invoice(
@@ -1741,6 +1754,7 @@ class TestUaeInvoiceAmounts(UaePintTestCommon):
             (100, 5, 105),
         )
 
+    @requires_normative_resources("1.0.4")
     def test_summary_without_period_is_refused_before_an_issue_is_frozen(self):
         invoice = (
             self.init_invoice(
@@ -1805,6 +1819,7 @@ class TestUaeInvoiceAmounts(UaePintTestCommon):
             (100, 5, 105),
         )
 
+    @requires_normative_resources("1.0.4")
     def test_usd_billing_batch_preserves_native_fx_and_refuses_unreviewed_tax_date(
         self,
     ):
@@ -1959,6 +1974,7 @@ class TestUaeInvoiceAmounts(UaePintTestCommon):
             )
         self.assertEqual(json.dumps(request, sort_keys=True), original_request)
 
+    @requires_normative_resources("1.0.4")
     def test_billing_summary_period_survives_submission_replay_and_conflict(self):
         company = self.env.company
         journal = self.env["account.journal"].search(
@@ -2118,6 +2134,7 @@ class TestUaeInvoiceAmounts(UaePintTestCommon):
         self.assertFalse(issue.event_ids)
         self.assertFalse(issue.remote_id)
 
+    @requires_normative_resources("1.0.4")
     def test_summary_tax_invoice_serializes_reviewed_invoice_period(self):
         company = self.env.company
         self.assertEqual((company.currency_id.name, self.tax_sale_a.amount), ("AED", 5))
@@ -2295,6 +2312,7 @@ class TestUaeInvoiceAmounts(UaePintTestCommon):
         self.assertFalse(issue.attempt_ids)
         self.assertFalse(issue.event_ids)
 
+    @requires_normative_resources("1.0.4")
     def test_summary_tax_invoice_serializes_single_reviewed_period_endpoint(self):
         company = self.env.company
         self.assertEqual((company.currency_id.name, self.tax_sale_a.amount), ("AED", 5))

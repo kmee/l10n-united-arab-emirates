@@ -15,6 +15,8 @@ from odoo.addons.l10n_ae_edi.tests.common import (
     review_controlled_binding,
 )
 
+from .common import requires_normative_resources
+
 NS = {
     "cbc": "urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2",
     "cac": "urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2",
@@ -175,6 +177,7 @@ class TestUaeFiscalCategoryMatrix(AccountTestInvoicingCommon):
             ledger,
         )
 
+    @requires_normative_resources("1.0.4")
     def test_margin_n_nominal_rate_preserves_native_amounts_and_frozen_xml(self):
         # Independently worked official Margin scheme.xml: AED1000 payable,
         # displayed VAT0, category N with nominal5. This is a representation
@@ -453,6 +456,7 @@ class TestUaeFiscalCategoryMatrix(AccountTestInvoicingCommon):
         standard = self.env.ref(f"account.{company.id}_uae_sale_tax_5_dubai")
         self.assertEqual((standard.amount, standard.amount_type), (5, "percent"))
 
+    @requires_normative_resources("1.0.4")
     def test_native_zero_rate_sales_tax_prepares_z_without_an_exemption_reason(self):
         company = self.env.company
         tax = self.env.ref(f"account.{company.id}_uae_sale_tax_0")
@@ -618,6 +622,7 @@ class TestUaeFiscalCategoryMatrix(AccountTestInvoicingCommon):
         self.assertEqual(custom.ubl_cii_tax_category_code, "E")
         self.assertEqual(native.read(financial_fields), before)
 
+    @requires_normative_resources("1.0.4")
     def test_tax_inclusive_discount_preserves_net_allowance_and_original_ledger(self):
         # Independent AED example: gross unit price105 includes5% VAT.
         # Before discount the net basis is100. A10% discount therefore means
@@ -747,6 +752,7 @@ class TestUaeFiscalCategoryMatrix(AccountTestInvoicingCommon):
             or issue.validation_receipt
         )
 
+    @requires_normative_resources("1.0.4")
     def test_full_line_discount_preserves_allowance_and_zero_payable(self):
         # Independent AED example: net unit price100 with5% VAT.
         # A100% line allowance is100, leaving net/VAT/gross/payable zero.
@@ -876,6 +882,7 @@ class TestUaeFiscalCategoryMatrix(AccountTestInvoicingCommon):
             or issue.validation_receipt
         )
 
+    @requires_normative_resources("1.0.4")
     def test_tax_inclusive_full_discount_preserves_original_net_basis(self):
         # Independent AED example: gross unit price105 includes5% VAT, so the
         # undiscounted net price and allowance basis are100. A100% discount
@@ -1018,6 +1025,7 @@ class TestUaeFiscalCategoryMatrix(AccountTestInvoicingCommon):
             or issue.validation_receipt
         )
 
+    @requires_normative_resources("1.0.4")
     def test_line_charge_preserves_adk_reason_and_native_totals(self):
         # Independent AED example: net unit price100 plus a10% line charge
         # yields base100, charge10, net110, VAT5.50 and gross/payable115.50.
@@ -1158,6 +1166,7 @@ class TestUaeFiscalCategoryMatrix(AccountTestInvoicingCommon):
             or issue.validation_receipt
         )
 
+    @requires_normative_resources("1.0.4")
     def test_discounted_partial_credit_keeps_allowance_reference_and_native_balance(
         self,
     ):
@@ -1351,6 +1360,7 @@ class TestUaeFiscalCategoryMatrix(AccountTestInvoicingCommon):
                 or transmission.validation_receipt
             )
 
+    @requires_normative_resources("1.0.4")
     def test_small_usd_quantity_emits_decimal_aed_without_binary_residue(self):
         # Independent worked vector: 3 * USD0.10, VAT5% gives raw USD0.015
         # VAT / USD0.315 gross. At AED/USD3.672500: 0.0550875 / 1.1568375.
@@ -1470,6 +1480,7 @@ class TestUaeFiscalCategoryMatrix(AccountTestInvoicingCommon):
         self.assertEqual(invoice.state, "posted")
         self.assertFalse(issue.attempt_ids or issue.event_ids or issue.remote_id)
 
+    @requires_normative_resources("1.0.4")
     def test_small_usd_discount_emits_exact_allowance_and_preserves_original(self):
         # Independent allowance vector: 3 * USD0.10 = USD0.30 basis;
         # 10% discount is USD0.03, net USD0.27, VAT USD0.0135.
@@ -1576,6 +1587,7 @@ class TestUaeFiscalCategoryMatrix(AccountTestInvoicingCommon):
         self.assertEqual(invoice.line_ids.read(ledger_fields), ledger)
         self.assertFalse(issue.attempt_ids or issue.event_ids or issue.remote_id)
 
+    @requires_normative_resources("1.0.4")
     def test_small_usd_full_discount_emits_exact_allowance_and_preserves_original(self):
         # Independent allowance vector: 3 * USD0.10 = USD0.30 basis;
         # 100% discount is USD0.30, net and VAT zero.
@@ -1682,6 +1694,7 @@ class TestUaeFiscalCategoryMatrix(AccountTestInvoicingCommon):
         self.assertEqual(invoice.line_ids.read(ledger_fields), ledger)
         self.assertFalse(issue.attempt_ids or issue.event_ids or issue.remote_id)
 
+    @requires_normative_resources("1.0.4")
     def test_fractional_usd_quantity_keeps_high_precision_price_and_raw_aed_lines(self):
         # Worked vector, independent of the exporter: 400.1234 USD * 0.125
         # = 50.015425 net, 2.50077125 VAT, 52.51619625 gross before rounding.
@@ -1835,6 +1848,7 @@ class TestUaeFiscalCategoryMatrix(AccountTestInvoicingCommon):
             or issue.validation_receipt
         )
 
+    @requires_normative_resources("1.0.4")
     def test_fractional_usd_discount_preserves_exact_allowance_and_original_ledger(
         self,
     ):
@@ -2006,6 +2020,7 @@ class TestUaeFiscalCategoryMatrix(AccountTestInvoicingCommon):
             or issue.validation_receipt
         )
 
+    @requires_normative_resources("1.0.4")
     def test_many_small_usd_lines_retain_native_aed_and_fail_source_vat_rules(self):
         # Independent worked per-line policy: 100 * USD1.23, each tax USD0.06.
         # Native AED base 100 * 4.52 = 452; native VAT 100 * 0.22 = 22;
@@ -2291,6 +2306,7 @@ class TestUaeFiscalCategoryMatrix(AccountTestInvoicingCommon):
                     self.assertFalse(invoice.l10n_ae_fiscal_uuid)
                     self.assertEqual(invoice.l10n_ae_document_category, "tax")
 
+    @requires_normative_resources("1.0.4")
     def test_commercial_e_o_documents_keep_their_explicit_non_tax_types(self):
         exempt = self.env.ref(f"account.{self.env.company.id}_uae_sale_tax_exempted")
         exempt.write(
@@ -2470,6 +2486,7 @@ class TestUaeFiscalCategoryMatrix(AccountTestInvoicingCommon):
                 self.assertFalse(invoice.l10n_ae_transmission_ids)
                 self.assertEqual(tax.ubl_cii_tax_exemption_reason_code, code)
 
+    @requires_normative_resources("1.0.4")
     def test_four_uae_exemption_codes_survive_native_emission(self):
         binding = review_controlled_binding(
             self.env["l10n_ae.edi.binding"].create({"name": "Synthetic E codes"}),
@@ -2566,6 +2583,7 @@ class TestUaeFiscalCategoryMatrix(AccountTestInvoicingCommon):
                     or issue.validation_receipt
                 )
 
+    @requires_normative_resources("1.0.4")
     def test_mixed_eur_tax_invoice_preserves_exempt_absence(self):
         eur = self.env.ref("base.EUR")
         eur.active = True

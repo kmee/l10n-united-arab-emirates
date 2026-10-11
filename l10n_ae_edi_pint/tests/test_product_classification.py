@@ -15,6 +15,8 @@ from odoo.addons.l10n_ae_edi.tests.common import (
     review_controlled_binding,
 )
 
+from .common import requires_normative_resources
+
 NS = {
     "cbc": "urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2",
     "cac": "urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2",
@@ -49,6 +51,7 @@ class TestUaeProductClassification(AccountTestInvoicingCommon):
                 }
             )
 
+    @requires_normative_resources("1.0.4")
     def test_native_product_form_preserves_reviewed_rcm_nature_in_frozen_ae_invoice(
         self,
     ):
@@ -193,6 +196,7 @@ class TestUaeProductClassification(AccountTestInvoicingCommon):
         self.assertFalse(issue.attempt_ids)
         self.assertFalse(issue.event_ids)
 
+    @requires_normative_resources("1.0.4")
     def test_native_manual_ae_line_preserves_reviewed_nature_and_standard_id(self):
         # Synthetic declared AE/0% line: net100, VAT0 and payable100.
         # This exercises BTAE-09/IBR-174, not the nominal-rate interpretation.
@@ -299,6 +303,7 @@ class TestUaeProductClassification(AccountTestInvoicingCommon):
         self.assertFalse(issue.attempt_ids)
         self.assertFalse(issue.event_ids)
 
+    @requires_normative_resources("1.0.4")
     def test_service_product_preserves_reviewed_sac_in_frozen_xml_and_snapshot(self):
         # BTAE-13/17, IBR-185/189: S requires a separate SAC identifier.
         # These arbitrary codes/version are synthetic reviewed test data only.
@@ -401,6 +406,7 @@ class TestUaeProductClassification(AccountTestInvoicingCommon):
         self.assertFalse(issue.attempt_ids)
         self.assertFalse(issue.event_ids)
 
+    @requires_normative_resources("1.0.4")
     def test_incomplete_classification_posts_in_review_and_repairs_without_ledger_edit(
         self,
     ):
@@ -492,6 +498,7 @@ class TestUaeProductClassification(AccountTestInvoicingCommon):
                 self.assertFalse(issue.attempt_ids)
                 self.assertFalse(issue.event_ids)
 
+    @requires_normative_resources("1.0.4")
     def test_goods_and_service_preserves_distinct_hs_and_sac(self):
         # BTAE-13 and IBR-186 require both identifiers, not a shared code.
         product = self.env["product.product"].create(
@@ -575,6 +582,7 @@ class TestUaeProductClassification(AccountTestInvoicingCommon):
         self.assertFalse(issue.attempt_ids)
         self.assertFalse(issue.event_ids)
 
+    @requires_normative_resources("1.0.4")
     def test_goods_product_preserves_hs_without_emitting_service_identifiers(self):
         # G requires IBT-158 with the UAE HS scheme (IBR-184/188).
         # 999999 is synthetic test input, not an approved goods classification.
@@ -646,6 +654,7 @@ class TestUaeProductClassification(AccountTestInvoicingCommon):
         )
         self.assertFalse(issue.attempt_ids)
 
+    @requires_normative_resources("1.0.4")
     def test_native_product_form_configures_service_variant_for_emission(self):
         self.simple_accountman.group_ids |= self.env.ref(
             "product.group_product_manager"
@@ -714,6 +723,7 @@ class TestUaeProductClassification(AccountTestInvoicingCommon):
             issue.read(["payload", "payload_hash", "xml_content", "xml_hash"]), original
         )
 
+    @requires_normative_resources("1.0.4")
     def test_native_product_form_configures_mixed_variant_with_both_identifiers(self):
         self.simple_accountman.group_ids |= self.env.ref(
             "product.group_product_manager"
@@ -763,6 +773,7 @@ class TestUaeProductClassification(AccountTestInvoicingCommon):
         report = invoice.validate_l10n_ae_pint()
         self.assertTrue(report["valid"], report)
 
+    @requires_normative_resources("1.0.4")
     def test_variant_forms_keep_distinct_sac_and_refuse_ambiguous_template_updates(
         self,
     ):

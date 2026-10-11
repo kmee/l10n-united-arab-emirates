@@ -16,11 +16,12 @@ from odoo.addons.l10n_ae_edi.tests.common import (
     review_controlled_binding,
 )
 
-from .common import UaePintTestCommon
+from .common import UaePintTestCommon, requires_normative_resources
 
 
 @tagged("post_install", "-at_install")
 class TestUaeCbuaeFx(UaePintTestCommon):
+    @requires_normative_resources("1.0.4")
     def test_renamed_imported_currency_requires_review_and_keeps_frozen_invoice(self):
         usd, _anchor, review = self._reviewed_cbuae_usd()
         company = self.env.company
@@ -148,6 +149,7 @@ class TestUaeCbuaeFx(UaePintTestCommon):
         )
         self.assertEqual(review.import_facts["currency_code"], "USD")
 
+    @requires_normative_resources("1.0.4")
     def test_branch_invoice_reader_retains_imported_root_source_without_mutation(self):
         usd, _anchor, review = self._reviewed_cbuae_usd()
         root = self.env.company
@@ -493,6 +495,7 @@ class TestUaeCbuaeFx(UaePintTestCommon):
         review.action_import()
         return usd, anchor, review
 
+    @requires_normative_resources("1.0.4")
     def test_selected_cbuae_import_is_retained_without_fiscal_approval(self):
         usd, anchor, review = self._reviewed_cbuae_usd()
         self.env.company.l10n_ae_edi_auto_prepare = False

@@ -7,6 +7,8 @@ from odoo.tests.common import new_test_user
 from odoo.addons.account.tests.common import AccountTestInvoicingCommon
 from odoo.addons.l10n_ae_edi.tests.common import review_controlled_binding
 
+from .common import requires_normative_resources
+
 
 @tagged("post_install", "-at_install")
 class TestUaeReceiveCapabilities(AccountTestInvoicingCommon):
@@ -190,6 +192,7 @@ class TestUaeReceiveCapabilities(AccountTestInvoicingCommon):
                 )
                 self.assertFalse(events.search_count([("binding_id", "=", binding.id)]))
 
+    @requires_normative_resources("1.0.4")
     def test_invalidated_receive_contract_keeps_retained_original_review_available(
         self,
     ):

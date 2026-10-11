@@ -21,11 +21,12 @@ from odoo.addons.l10n_ae_edi.tests.common import (
 )
 
 from ..tools.validation import OfflinePintValidator
-from .common import NS, UaePintTestCommon
+from .common import NS, UaePintTestCommon, requires_normative_resources
 
 
 @tagged("post_install", "-at_install")
 class TestUaeReceivedXml(UaePintTestCommon):
+    @requires_normative_resources("1.0.3")
     def test_received_commercial_credit_pins_package_while_original_bill_is_missing(
         self,
     ):
@@ -273,6 +274,7 @@ class TestUaeReceivedXml(UaePintTestCommon):
         self.assertEqual(inbox.original_xml.content, content)
         self.assertEqual(inbox.xml_hash, original_xml_hash)
 
+    @requires_normative_resources("1.0.3")
     def test_received_review_pins_first_formal_normative_package_across_retry(self):
         source = self.init_invoice(
             "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
@@ -399,6 +401,7 @@ class TestUaeReceivedXml(UaePintTestCommon):
             1,
         )
 
+    @requires_normative_resources("1.0.3")
     def test_received_technical_review_pins_package_before_resources_exist(self):
         source = self.init_invoice(
             "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
@@ -594,6 +597,7 @@ class TestUaeReceivedXml(UaePintTestCommon):
         self.assertEqual(inbox.original_xml.content, content)
         self.assertEqual(inbox.xml_hash, original_xml_hash)
 
+    @requires_normative_resources("1.0.3")
     def test_received_processing_retains_the_administrative_package_report(self):
         source = self.init_invoice(
             "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
@@ -671,6 +675,7 @@ class TestUaeReceivedXml(UaePintTestCommon):
         )
         self.assertFalse(inbox.move_id.l10n_ae_transmission_id)
 
+    @requires_normative_resources("1.0.4")
     def test_received_agent_free_zone_invoice_and_credit_preserve_principal_and_replay(
         self,
     ):
@@ -758,6 +763,7 @@ class TestUaeReceivedXml(UaePintTestCommon):
         self.assertTrue(refund_inbox.action_process())
         self.assertEqual(refund_inbox.move_id, refund)
 
+    @requires_normative_resources("1.0.4")
     def test_received_principal_defects_retain_original_and_require_review(self):
         source = self.init_invoice(
             "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
@@ -938,6 +944,7 @@ class TestUaeReceivedXml(UaePintTestCommon):
         self.assertEqual(changed.original_xml.content, b"<changed/>")
         self.assertFalse(originals.move_id)
 
+    @requires_normative_resources("1.0.4")
     def test_received_usd_partial_credit_preserves_aed_facts_and_original_reference(
         self,
     ):
@@ -990,6 +997,7 @@ class TestUaeReceivedXml(UaePintTestCommon):
         self.assertFalse(refund.l10n_ae_tax_exchange_rate)
         self.assertFalse(refund.l10n_ae_transmission_id)
 
+    @requires_normative_resources("1.0.4")
     def test_received_inactive_document_currency_stays_in_review(self):
         tree, _rate, _source = self._foreign_received_fixture()
         self.env.ref("base.CHF").active = False
@@ -1017,6 +1025,7 @@ class TestUaeReceivedXml(UaePintTestCommon):
         self.assertFalse(inbox.move_id)
         self.assertFalse(self.env.ref("base.CHF").active)
 
+    @requires_normative_resources("1.0.4")
     def test_received_usd_bill_preserves_sender_aed_facts_separately_from_local_review(
         self,
     ):
@@ -1084,6 +1093,7 @@ class TestUaeReceivedXml(UaePintTestCommon):
         bill.action_post()
         self.assertFalse(bill.l10n_ae_transmission_id)
 
+    @requires_normative_resources("1.0.4")
     def test_received_ecommerce_preserves_declared_delivery_separately_from_partners(
         self,
     ):
@@ -1251,6 +1261,7 @@ class TestUaeReceivedXml(UaePintTestCommon):
                 hashlib.sha256(exported_delivery).hexdigest(),
             )
 
+    @requires_normative_resources("1.0.4")
     def test_received_free_zone_ecommerce_combines_beneficiary_delivery_and_replay(
         self,
     ):
@@ -1490,6 +1501,7 @@ class TestUaeReceivedXml(UaePintTestCommon):
                 inbox.with_user(actor).sudo().action_download_evidence()
             actor.active = True
 
+    @requires_normative_resources("1.0.4")
     def test_received_ecommerce_archive_refuses_a_tampered_delivery_snapshot(self):
         tree = self._received_test_xml()
         tree.find("cbc:ProfileExecutionID", NS).text = "00000010"
@@ -1630,6 +1642,7 @@ class TestUaeReceivedXml(UaePintTestCommon):
             history_facts,
         )
 
+    @requires_normative_resources("1.0.4")
     def test_received_ecommerce_missing_required_delivery_stays_in_review(self):
         binding = self._reviewed_binding(
             {"name": "Incomplete received e-commerce delivery"},
@@ -1688,6 +1701,7 @@ class TestUaeReceivedXml(UaePintTestCommon):
                 )
                 self.assertEqual(len(inbox.processing_history_ids), 1)
 
+    @requires_normative_resources("1.0.4")
     def test_received_ecommerce_multiple_deliveries_require_review_without_a_draft(
         self,
     ):
@@ -1730,6 +1744,7 @@ class TestUaeReceivedXml(UaePintTestCommon):
             0,
         )
 
+    @requires_normative_resources("1.0.4")
     def test_received_ecommerce_delivery_is_visible_in_native_review_forms(self):
         tree = self._received_test_xml()
         tree.find("cbc:ProfileExecutionID", NS).text = "00000010"
@@ -1771,6 +1786,7 @@ class TestUaeReceivedXml(UaePintTestCommon):
         self.assertEqual(inbox.move_id.state, "draft")
         self.assertEqual(inbox.original_xml.content, content)
 
+    @requires_normative_resources("1.0.4")
     def test_received_delivery_emirate_requires_review_and_preserves_original(self):
         original = self._received_test_xml()
         binding = self._reviewed_binding(
@@ -1916,6 +1932,7 @@ class TestUaeReceivedXml(UaePintTestCommon):
                 self.env.invalidate_all()
             self.assertEqual(audit.evidence_archive.content, after)
 
+    @requires_normative_resources("1.0.4")
     def test_received_events_replay_without_duplicate_original_or_bill(self):
         binding = self._reviewed_binding(
             {"name": "Event identity"},
@@ -1956,6 +1973,7 @@ class TestUaeReceivedXml(UaePintTestCommon):
         self.assertEqual(len(original.processing_history_ids), 1)
         self.assertFalse(original.ingestion_conflict)
 
+    @requires_normative_resources("1.0.4")
     def test_received_summary_preserves_period_original_and_one_supplier_draft(self):
         source = self.init_invoice(
             "out_invoice", amounts=[40, 60], taxes=self.tax_sale_a, post=True
@@ -2037,6 +2055,7 @@ class TestUaeReceivedXml(UaePintTestCommon):
             with self.assertRaisesRegex(UserError, "received"):
                 bill.write(values)
 
+    @requires_normative_resources("1.0.4")
     def test_received_free_zone_summary_invoice_preserves_beneficiary_and_period(self):
         source = self.init_invoice(
             "out_invoice", amounts=[40, 60], taxes=self.tax_sale_a, post=True
@@ -2198,6 +2217,7 @@ class TestUaeReceivedXml(UaePintTestCommon):
             with self.assertRaisesRegex(UserError, "received"):
                 bill.write(values)
 
+    @requires_normative_resources("1.0.4")
     def test_received_summary_invalid_periods_are_retained_without_accounting(self):
         company = self.env.company
         source = self.init_invoice(
@@ -2352,6 +2372,7 @@ class TestUaeReceivedXml(UaePintTestCommon):
                     [{expected_rule}, {expected_rule}],
                 )
 
+    @requires_normative_resources("1.0.4")
     def test_received_free_zone_preserves_beneficiary_without_changing_vat(self):
         source = self.init_invoice(
             "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
@@ -2401,6 +2422,7 @@ class TestUaeReceivedXml(UaePintTestCommon):
         bill.action_post()
         self.assertFalse(bill.l10n_ae_transmission_id)
 
+    @requires_normative_resources("1.0.4")
     def test_received_native_multiline_aed_declarations_create_a_reviewable_draft(self):
         usd = self.env.ref("base.USD")
         usd.active = True
@@ -2495,6 +2517,7 @@ class TestUaeReceivedXml(UaePintTestCommon):
                 }
             ).create({})
 
+    @requires_normative_resources("1.0.4")
     def test_received_unequal_aed_headers_preserve_declarations_for_draft_review(self):
         original, rate, _source = self._foreign_received_fixture()
         binding = self._reviewed_binding(
@@ -2560,6 +2583,7 @@ class TestUaeReceivedXml(UaePintTestCommon):
                 self.assertEqual(inbox.original_xml.content, content)
                 self.assertFalse(bill.l10n_ae_transmission_ids)
 
+    @requires_normative_resources("1.0.4")
     def test_received_malformed_fx_headers_stay_in_review_without_a_draft(self):
         original, _rate, _source = self._foreign_received_fixture()
         binding = self._reviewed_binding(
@@ -2602,6 +2626,7 @@ class TestUaeReceivedXml(UaePintTestCommon):
                 self.assertEqual(inbox.original_xml.content, content)
                 self.assertEqual(self.env["account.move"].search_count([]), before)
 
+    @requires_normative_resources("1.0.4")
     def test_received_fx_line_currency_and_conversion_require_review(self):
         original, _rate, _source = self._foreign_received_fixture()
         binding = self._reviewed_binding(
@@ -2684,6 +2709,7 @@ class TestUaeReceivedXml(UaePintTestCommon):
                         hashlib.sha256(history.validation_report.encode()).hexdigest(),
                     )
 
+    @requires_normative_resources("1.0.4")
     def test_received_fractional_quantity_retains_unrounded_aed_line_values(self):
         tree, _rate, _source = self._foreign_received_fixture()
         # Independently worked incoming vector, not derived from the local emitter:
@@ -2740,6 +2766,7 @@ class TestUaeReceivedXml(UaePintTestCommon):
             (1.84, 38.56),
         )
 
+    @requires_normative_resources("1.0.4")
     def test_received_fractional_discount_keeps_exact_original_and_aed_declarations(
         self,
     ):
@@ -2826,6 +2853,7 @@ class TestUaeReceivedXml(UaePintTestCommon):
         self.assertEqual(inbox.move_id, bill)
         self.assertEqual(inbox.original_xml.content, content)
 
+    @requires_normative_resources("1.0.4")
     def test_received_credit_codes_normalize_while_unknown_reason_stays_in_review(self):
         source = self.init_invoice(
             "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
@@ -2897,6 +2925,7 @@ class TestUaeReceivedXml(UaePintTestCommon):
                     self.assertFalse(history.move_id)
                     self.assertEqual(history.outcome, "review")
 
+    @requires_normative_resources("1.0.4")
     def test_received_partial_credit_links_the_supplier_bill_and_preserves_reason(self):
         original = self.init_invoice(
             "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
@@ -2970,11 +2999,13 @@ class TestUaeReceivedXml(UaePintTestCommon):
         self.assertFalse(refund.l10n_ae_transmission_id)
         self.assertEqual(bill.state, "draft")
 
+    @requires_normative_resources("1.0.4")
     def test_received_summary_credit_preserves_period_and_links_supplier_bill(self):
         self._assert_received_summary_credit(
             expected_flags="00010000", free_zone=False, beneficiary_id=False
         )
 
+    @requires_normative_resources("1.0.4")
     def test_received_free_zone_summary_credit_preserves_original_and_period(self):
         self._assert_received_summary_credit(
             expected_flags="10010000",
@@ -2982,6 +3013,7 @@ class TestUaeReceivedXml(UaePintTestCommon):
             beneficiary_id="1000000003",
         )
 
+    @requires_normative_resources("1.0.4")
     def test_received_free_zone_summary_rejects_invalid_required_facts(self):
         credit_content, receiver, binding = self._assert_received_summary_credit(
             expected_flags="10010000",
@@ -3155,6 +3187,7 @@ class TestUaeReceivedXml(UaePintTestCommon):
                     baseline_move_timestamps,
                 )
 
+    @requires_normative_resources("1.0.4")
     def test_received_supplier_endpoint_must_match_the_known_vat_partner(self):
         tree = self._received_test_xml()
         tree.find(
@@ -3177,6 +3210,7 @@ class TestUaeReceivedXml(UaePintTestCommon):
         self.assertFalse(inbox.move_id)
         self.assertIn("supplier", inbox.diagnostic)
 
+    @requires_normative_resources("1.0.4")
     def test_received_declared_amounts_keep_the_xml_currency_during_accounting_review(
         self,
     ):
@@ -3203,6 +3237,7 @@ class TestUaeReceivedXml(UaePintTestCommon):
         with self.assertRaisesRegex(UserError, "received"):
             bill.write({"l10n_ae_received_currency_id": usd.id})
 
+    @requires_normative_resources("1.0.4")
     def test_received_commercial_invoice_matches_non_vat_supplier_registration(
         self,
     ):
@@ -3237,6 +3272,7 @@ class TestUaeReceivedXml(UaePintTestCommon):
         with self.assertRaisesRegex(UserError, "received"):
             bill.write({"l10n_ae_document_category": "tax"})
 
+    @requires_normative_resources("1.0.4")
     def test_received_commercial_credit_links_the_non_vat_supplier_bill(
         self,
     ):
@@ -3288,6 +3324,7 @@ class TestUaeReceivedXml(UaePintTestCommon):
         self.assertTrue(inbox.action_process())
         self.assertEqual(inbox.move_id, refund)
 
+    @requires_normative_resources("1.0.4")
     def test_received_credit_with_a_wrong_original_date_stays_in_review(self):
         original = self.init_invoice(
             "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
@@ -3329,6 +3366,7 @@ class TestUaeReceivedXml(UaePintTestCommon):
         self.assertIn("original supplier bill", inbox.diagnostic)
         self.assertEqual(received.move_id.amount_total, 105)
 
+    @requires_normative_resources("1.0.4")
     def test_received_identical_xml_with_another_remote_id_reuses_the_bill(self):
         content = etree.tostring(self._received_test_xml())
         binding = self._reviewed_binding(
@@ -3418,6 +3456,7 @@ class TestUaeReceivedXml(UaePintTestCommon):
         self.assertFalse(changed.action_process())
         self.assertIn("identity", changed.diagnostic)
 
+    @requires_normative_resources("1.0.4")
     def test_received_branch_uses_parent_supplier_tax_and_purchase_journal(self):
         root = self.env.company
         self.partner_a.company_id = root
@@ -3507,6 +3546,7 @@ class TestUaeReceivedXml(UaePintTestCommon):
         )
         self.assertFalse(bill.l10n_ae_transmission_id)
 
+    @requires_normative_resources("1.0.4")
     def test_received_invoice_creates_one_draft_bill_for_the_known_supplier(self):
         source = self.init_invoice(
             "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True

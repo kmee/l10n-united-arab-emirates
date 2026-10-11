@@ -15,11 +15,12 @@ from odoo.addons.l10n_ae_edi.tests.common import (
     review_controlled_binding,
 )
 
-from .common import NS, UaePintTestCommon
+from .common import NS, UaePintTestCommon, requires_normative_resources
 
 
 @tagged("post_install", "-at_install")
 class TestUaeNativeWorkflow(UaePintTestCommon):
+    @requires_normative_resources("1.0.4")
     def test_native_post_reviews_a_blank_item_name_without_changing_accounting(self):
         self.env.company.l10n_ae_edi_auto_prepare = True
         binding = self._reviewed_binding(
@@ -118,6 +119,7 @@ class TestUaeNativeWorkflow(UaePintTestCommon):
         self.assertEqual(invoice.state, "posted")
         self.assertEqual(invoice.line_ids.sorted("id").read(ledger_fields), ledger)
 
+    @requires_normative_resources("1.0.4")
     def test_native_partial_credit_freezes_selected_customer_payment_account(self):
         self.env.company.l10n_ae_edi_auto_prepare = False
         journal = self.company_data["default_journal_bank"]
@@ -286,6 +288,7 @@ class TestUaeNativeWorkflow(UaePintTestCommon):
         self.assertFalse(issue.attempt_ids or original_issue.attempt_ids)
         self.assertFalse(issue.event_ids or original_issue.event_ids)
 
+    @requires_normative_resources("1.0.4")
     def test_native_transfer_requires_recipient_account_and_freezes_review(self):
         journal = self.company_data["default_journal_bank"]
         journal.bank_account_id = False
@@ -403,6 +406,7 @@ class TestUaeNativeWorkflow(UaePintTestCommon):
         self.assertFalse(issue.attempt_ids)
         self.assertFalse(issue.event_ids)
 
+    @requires_normative_resources("1.0.4")
     def test_native_cash_method_freezes_instruction_and_preserves_ledger(
         self,
     ):
@@ -1171,6 +1175,7 @@ class TestUaeNativeWorkflow(UaePintTestCommon):
             "1000000004",
         )
 
+    @requires_normative_resources("1.0.4")
     def test_native_agent_credit_retains_original_identifiers_as_reviewable_defaults(
         self,
     ):
@@ -1244,6 +1249,7 @@ class TestUaeNativeWorkflow(UaePintTestCommon):
         self.assertEqual(original.l10n_ae_transmission_id, original_issue)
         self.assertEqual(original.preview_l10n_ae_pint(), original_xml)
 
+    @requires_normative_resources("1.0.4")
     def test_native_uae_states_emit_and_freeze_pint_emirate_codes(
         self,
     ):
@@ -1403,10 +1409,12 @@ class TestUaeNativeWorkflow(UaePintTestCommon):
         self.assertFalse(invoice.l10n_ae_tax_exchange_date)
         self.assertFalse(invoice.l10n_ae_tax_exchange_source)
 
+    @requires_normative_resources("1.0.4")
     def test_native_partial_commercial_credit_preserves_480_original_and_type_81(self):
         self.env.company.partner_id.vat = False
         self._assert_native_partial_commercial_credit()
 
+    @requires_normative_resources("1.0.4")
     def test_native_self_billed_partial_credit_requires_reviewed_agreement_and_261(
         self,
     ):
@@ -1561,6 +1569,7 @@ class TestUaeNativeWorkflow(UaePintTestCommon):
             self.assertEqual((issue.payload, issue.xml_content), (payload, xml))
             self.assertFalse(issue.attempt_ids)
 
+    @requires_normative_resources("1.0.4")
     def test_native_reset_preserves_queued_original_and_prepares_next_revision(self):
         binding = self._reviewed_binding(
             {

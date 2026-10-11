@@ -22,13 +22,14 @@ from odoo.addons.l10n_ae_edi.tests.common import (
 )
 
 from ..tools.validation import OfflinePintValidator
-from .common import NS, UaePintTestCommon
+from .common import NS, UaePintTestCommon, requires_normative_resources
 
 _logger = logging.getLogger(__name__)
 
 
 @tagged("post_install", "-at_install")
 class TestUaeInvoiceXml(UaePintTestCommon):
+    @requires_normative_resources("1.0.4")
     def test_explicit_period_wins_without_merging_native_dates_or_freezing_them(self):
         if not {"deferred_start_date", "deferred_end_date"}.issubset(
             self.env["account.move.line"]._fields
@@ -146,6 +147,7 @@ class TestUaeInvoiceXml(UaePintTestCommon):
                 )
                 self.assertFalse(issue.attempt_ids or issue.event_ids)
 
+    @requires_normative_resources("1.0.4")
     def test_other_eight_reviewed_term_codes_render_valid_code_only_periods(self):
         # Published IBR-005-AE literals, complementing the Monthly/Other
         # journeys. These are ordinary AED380 representations, not all flows.
@@ -257,6 +259,7 @@ class TestUaeInvoiceXml(UaePintTestCommon):
                 )
                 self.assertFalse(issue.attempt_ids or issue.event_ids)
 
+    @requires_normative_resources("1.0.4")
     def test_api_invoice_defaults_reviewed_monthly_term_without_supply_dates(self):
         self.env.company.l10n_ae_edi_auto_prepare = False
         term = self.env["account.payment.term"].create(
@@ -361,6 +364,7 @@ class TestUaeInvoiceXml(UaePintTestCommon):
         self.assertEqual(invoice.line_ids.sorted("id").read(ledger_fields), ledger)
         self.assertFalse(issue.attempt_ids or issue.event_ids)
 
+    @requires_normative_resources("1.0.4")
     def test_other_billing_frequency_reviews_explanation_without_replacing_terms(self):
         binding = self._reviewed_binding(
             {
@@ -472,6 +476,7 @@ class TestUaeInvoiceXml(UaePintTestCommon):
         self.assertEqual(invoice.line_ids.sorted("id").read(ledger_fields), ledger)
         self.assertFalse(issue.attempt_ids or issue.event_ids)
 
+    @requires_normative_resources("1.0.4")
     def test_reviewed_monthly_term_preserves_supply_period_and_native_due_date(self):
         self.env.company.l10n_ae_edi_auto_prepare = False
         with Form(
@@ -579,6 +584,7 @@ class TestUaeInvoiceXml(UaePintTestCommon):
         self.assertEqual(invoice.line_ids.sorted("id").read(ledger_fields), ledger)
         self.assertFalse(issue.attempt_ids or issue.event_ids)
 
+    @requires_normative_resources("1.0.4")
     def test_unclassified_native_method_reviews_then_freezes_online_service(self):
         journal = self.company_data["default_journal_credit"]
         method = journal.inbound_payment_method_line_ids.filtered(
@@ -685,6 +691,7 @@ class TestUaeInvoiceXml(UaePintTestCommon):
         self.assertEqual(invoice.line_ids.sorted("id").read(ledger_fields), ledger)
         self.assertFalse(issue.attempt_ids or issue.event_ids)
 
+    @requires_normative_resources("1.0.4")
     def test_reviewed_native_journal_cheque_instruction_preserves_original(self):
         self.env.company.l10n_ae_edi_auto_prepare = False
         journal = self.company_data["default_journal_bank"]
@@ -993,6 +1000,7 @@ class TestUaeInvoiceXml(UaePintTestCommon):
             1,
         )
 
+    @requires_normative_resources("1.0.3", "1.0.4")
     def test_emitted_commercial_invoice_preserves_package_across_official_cycle(self):
         # Independent worksheet: one AED100 supply, category O/0%, VAT0,
         # exclusive/inclusive/payable100. No allowance, advance or refund.
@@ -1171,6 +1179,7 @@ class TestUaeInvoiceXml(UaePintTestCommon):
                 ),
             )
 
+    @requires_normative_resources("1.0.3", "1.0.4")
     def test_new_commercial_issue_keeps_b_package_when_deployment_returns_to_a(self):
         # Three separate ordinary supplies: AED100/200/300, O/0%, VAT0;
         # exclusive/inclusive/payable equals each independently chosen amount.
@@ -1409,6 +1418,7 @@ class TestUaeInvoiceXml(UaePintTestCommon):
         )
         self.assertFalse(invoice.l10n_ae_transmission_id.attempt_ids)
 
+    @requires_normative_resources("1.0.4")
     def test_prepared_packages_survive_configuration_swap_and_rollback(self):
         invoice = self.init_invoice(
             "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
@@ -1504,6 +1514,7 @@ class TestUaeInvoiceXml(UaePintTestCommon):
         self.assertEqual(invoice.amount_total, 105)
         self.assertEqual(invoice.preview_l10n_ae_pint(), issue.xml_content)
 
+    @requires_normative_resources("1.0.4")
     def test_export_with_an_existing_foreign_participant_keeps_exchange(self):
         self.partner_a.write(
             {
@@ -1549,6 +1560,7 @@ class TestUaeInvoiceXml(UaePintTestCommon):
         self.assertEqual(invoice.amount_total, 105)
         self.assertTrue(invoice.validate_l10n_ae_pint()["valid"])
 
+    @requires_normative_resources("1.0.4")
     def test_explicit_foreign_vat_is_preserved_and_requires_formal_review(self):
         self.partner_a.write(
             {
@@ -1649,6 +1661,7 @@ class TestUaeInvoiceXml(UaePintTestCommon):
                 self.assertEqual((invoice.state, invoice.amount_total), ("draft", 100))
                 self.assertFalse(invoice.l10n_ae_transmission_id)
 
+    @requires_normative_resources("1.0.4")
     def test_prepared_export99_preserves_review_foreign_identity_and_free_zone(self):
         self.partner_a.write(
             {
@@ -1834,6 +1847,7 @@ class TestUaeInvoiceXml(UaePintTestCommon):
                 with self.assertRaisesRegex(UserError, diagnostic):
                     invoice.action_l10n_ae_prepare()
 
+    @requires_normative_resources("1.0.4")
     def test_reviewed_non_peppol_export_routes_to_99_preserving_the_buyer(self):
         self.partner_a.write(
             {
@@ -1929,6 +1943,7 @@ class TestUaeInvoiceXml(UaePintTestCommon):
                 with self.assertRaisesRegex(UserError, diagnostic):
                     invoice.action_l10n_ae_prepare()
 
+    @requires_normative_resources("1.0.4")
     def test_prepared_disclosed_agent_issue_freezes_principal_and_scenario(self):
         invoice = self.init_invoice(
             "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
@@ -1970,6 +1985,7 @@ class TestUaeInvoiceXml(UaePintTestCommon):
         self.assertEqual(invoice.state, "draft")
         self.assertFalse(invoice.l10n_ae_transmission_id)
 
+    @requires_normative_resources("1.0.4")
     def test_disclosed_agent_invoice_preserves_principal_and_supplier_vat(self):
         invoice = self.init_invoice(
             "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
@@ -2151,6 +2167,7 @@ class TestUaeInvoiceXml(UaePintTestCommon):
             restriction.unlink()
             self.env.invalidate_all()
 
+    @requires_normative_resources("1.0.4")
     def test_identity_selection_requires_reading_every_linked_accounting_document(self):
         binding = self._reviewed_binding(
             {"name": "Hidden linked accounting"},
@@ -2194,6 +2211,7 @@ class TestUaeInvoiceXml(UaePintTestCommon):
         self.assertEqual(len(first.identity_decision_ids), 1)
         self.assertFalse(other.move_id)
 
+    @requires_normative_resources("1.0.4")
     def test_cached_identity_package_refreshes_after_another_original_is_processed(
         self,
     ):
@@ -2352,6 +2370,7 @@ class TestUaeInvoiceXml(UaePintTestCommon):
         fresh.action_confirm()
         self.assertEqual(len(selected.identity_decision_ids), 1)
 
+    @requires_normative_resources("1.0.4")
     def test_manager_selects_original_through_native_review_form(self):
         tree = self._received_test_xml()
         binding = self._reviewed_binding(
@@ -2558,6 +2577,7 @@ class TestUaeInvoiceXml(UaePintTestCommon):
         self.assertEqual(len(second.identity_decision_ids), 2)
         self.assertFalse((first | second | third).move_id)
 
+    @requires_normative_resources("1.0.4")
     def test_selection_keeps_the_linked_original_and_restores_internal_resolution(self):
         tree = self._received_test_xml()
         content = etree.tostring(tree)
@@ -2599,6 +2619,7 @@ class TestUaeInvoiceXml(UaePintTestCommon):
         self.assertEqual(len(first.processing_history_ids), 1)
         self.assertTrue(first.identity_conflict)
 
+    @requires_normative_resources("1.0.4")
     def test_reviewed_identity_variant_creates_only_its_one_draft(self):
         tree = self._received_test_xml()
         first_content = etree.tostring(tree)
@@ -2767,6 +2788,7 @@ class TestUaeInvoiceXml(UaePintTestCommon):
         self.assertEqual(inbox.original_xml.content, content)
         self.assertFalse(inbox.move_id)
 
+    @requires_normative_resources("1.0.4")
     def test_processed_original_without_a_request_cannot_open_a_new_review(self):
         content = etree.tostring(self._received_test_xml())
         binding = self._reviewed_binding(
@@ -2788,6 +2810,7 @@ class TestUaeInvoiceXml(UaePintTestCommon):
         self.assertFalse(inbox.internal_review_task_ids)
         self.assertEqual(inbox.original_xml.content, content)
 
+    @requires_normative_resources("1.0.4")
     def test_supplier_recovery_resolves_internal_review_without_erasing_history(self):
         content = etree.tostring(self._received_test_xml())
         binding = self._reviewed_binding(
@@ -2842,6 +2865,7 @@ class TestUaeInvoiceXml(UaePintTestCommon):
             inbox.processing_history_ids.mapped("outcome"), ["review", "processed"]
         )
 
+    @requires_normative_resources("1.0.4")
     def test_archived_supplier_review_requests_one_internal_activity(self):
         content = etree.tostring(self._received_test_xml())
         binding = self._reviewed_binding(
@@ -2894,6 +2918,7 @@ class TestUaeInvoiceXml(UaePintTestCommon):
         self.assertEqual(inbox.state, "review")
         self.assertFalse(inbox.move_id)
 
+    @requires_normative_resources("1.0.4")
     def test_combined_free_zone_ecommerce_requires_both_declared_groups(self):
         source = self.init_invoice(
             "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
@@ -2961,6 +2986,7 @@ class TestUaeInvoiceXml(UaePintTestCommon):
                     0,
                 )
 
+    @requires_normative_resources("1.0.4")
     def test_repeated_credit_delivery_keeps_one_refund_and_original_reference(self):
         source = self.init_invoice(
             "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
@@ -3118,6 +3144,7 @@ class TestUaeInvoiceXml(UaePintTestCommon):
         self.assertEqual(first.ingestion_event_ids.disposition, "retained")
         self.assertEqual(second.ingestion_event_ids.disposition, "collision")
 
+    @requires_normative_resources("1.0.4")
     def test_reused_delivery_event_preserves_associations_and_blocks_processing(self):
         binding = self._reviewed_binding(
             {"name": "Conflicting event"},
@@ -3183,6 +3210,7 @@ class TestUaeInvoiceXml(UaePintTestCommon):
         self.assertEqual(len(first.processing_history_ids), 1)
         self.assertFalse(second.processing_history_ids)
 
+    @requires_normative_resources("1.0.4")
     def test_duplicate_received_beneficiary_requires_review_without_selecting_first(
         self,
     ):
@@ -3246,6 +3274,7 @@ class TestUaeInvoiceXml(UaePintTestCommon):
                     before,
                 )
 
+    @requires_normative_resources("1.0.4")
     def test_non_vat_supplier_with_a_different_license_stays_in_review(self):
         source, _purchase_tax, tree = self._commercial_received_fixture()
         tree.find(
@@ -3389,6 +3418,7 @@ class TestUaeInvoiceXml(UaePintTestCommon):
                 self.assertFalse(invoice.l10n_ae_transmission_id.attempt_ids)
                 self.assertFalse(invoice.l10n_ae_transmission_id.event_ids)
 
+    @requires_normative_resources("1.0.4")
     def test_uae_vat_point_date_is_reviewed_in_native_invoice_form(self):
         self.env.company.l10n_ae_edi_auto_prepare = False
         binding = self._reviewed_binding(
@@ -3472,6 +3502,7 @@ class TestUaeInvoiceXml(UaePintTestCommon):
         self.assertEqual(invoice.amount_total_signed, 385.61)
         self.assertFalse(invoice.l10n_ae_transmission_id)
 
+    @requires_normative_resources("1.0.4")
     def test_future_manual_quote_posts_in_review_until_date_repaired(
         self,
     ):
@@ -3672,6 +3703,7 @@ class TestUaeInvoiceXml(UaePintTestCommon):
             registration.get("schemeAgencyName"), "Synthetic Free Zone Authority"
         )
 
+    @requires_normative_resources("1.0.4")
     def test_standard_tax_invoice_passes_the_official_offline_rules(self):
         invoice = self.init_invoice(
             "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
@@ -3685,6 +3717,7 @@ class TestUaeInvoiceXml(UaePintTestCommon):
             [layer["name"] for layer in report["layers"]], ["shared", "ae"]
         )
 
+    @requires_normative_resources("1.0.4")
     def test_standard_credit_note_preserves_original_invoice_and_reason(self):
         original = self.init_invoice(
             "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
@@ -3737,6 +3770,7 @@ class TestUaeInvoiceXml(UaePintTestCommon):
         report = credit.validate_l10n_ae_pint()
         self.assertTrue(report["valid"], report)
 
+    @requires_normative_resources("1.0.4")
     def test_commercial_invoice_without_supplier_vat_passes_official_rules(self):
         self.env.company.partner_id.vat = False
         outside_scope = self.tax_sale_a.copy(
@@ -3776,6 +3810,7 @@ class TestUaeInvoiceXml(UaePintTestCommon):
         report = invoice.validate_l10n_ae_pint()
         self.assertTrue(report["valid"], report)
 
+    @requires_normative_resources("1.0.4")
     def test_tax_invoice_without_supplier_vat_is_rejected_instead_of_using_tin(self):
         self.env.company.partner_id.vat = False
         invoice = self.init_invoice(
@@ -3793,6 +3828,7 @@ class TestUaeInvoiceXml(UaePintTestCommon):
             ],
         )
 
+    @requires_normative_resources("1.0.4")
     def test_formal_action_reports_missing_uuid_as_a_normative_diagnostic(self):
         invoice = self.init_invoice(
             "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
@@ -3800,6 +3836,7 @@ class TestUaeInvoiceXml(UaePintTestCommon):
         with self.assertRaisesRegex(UserError, "ibr-193-ae"):
             invoice.action_l10n_ae_validate_pint()
 
+    @requires_normative_resources("1.0.4")
     def test_controlled_preparation_assigns_one_uuid_without_preseeded_identity(self):
         binding = self._reviewed_binding(
             {
@@ -3887,6 +3924,7 @@ class TestUaeInvoiceXml(UaePintTestCommon):
             (invoice.state, invoice.amount_total_signed), ("posted", 385.61)
         )
 
+    @requires_normative_resources("1.0.4")
     def test_partial_credit_uses_its_own_amount_and_preserves_original_reference(self):
         original = self.init_invoice(
             "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
@@ -3932,6 +3970,7 @@ class TestUaeInvoiceXml(UaePintTestCommon):
         report = credit.validate_l10n_ae_pint()
         self.assertTrue(report["valid"], report)
 
+    @requires_normative_resources("1.0.4")
     def test_discount_and_quantity_keep_core_totals_and_pass_official_rules(self):
         invoice = self.init_invoice("out_invoice", amounts=[100], taxes=self.tax_sale_a)
         invoice.invoice_line_ids.write({"quantity": 2, "discount": 10})
@@ -3955,6 +3994,7 @@ class TestUaeInvoiceXml(UaePintTestCommon):
         report = invoice.validate_l10n_ae_pint()
         self.assertTrue(report["valid"], report)
 
+    @requires_normative_resources("1.0.4")
     def test_partial_credit_preserves_two_allocated_original_references(self):
         first = self.init_invoice(
             "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
@@ -4184,6 +4224,7 @@ class TestUaeInvoiceXml(UaePintTestCommon):
         ref.invoice_id = original
         self.assertEqual((credit.state, credit.amount_total), ("draft", 52.5))
 
+    @requires_normative_resources("1.0.4")
     def test_external_credit_originals_need_reviewed_evidence_without_fake_moves(self):
         credit = self.init_invoice("out_refund", amounts=[50], taxes=self.tax_sale_a)
         credit.write(
@@ -4288,6 +4329,7 @@ class TestUaeInvoiceXml(UaePintTestCommon):
                 self.assertFalse(move.l10n_ae_fiscal_uuid)
                 self.assertFalse(move.l10n_ae_transmission_id)
 
+    @requires_normative_resources("1.0.4")
     def test_registered_supplier_commercial_credit_preserves_outside_scope_category(
         self,
     ):
@@ -4348,6 +4390,7 @@ class TestUaeInvoiceXml(UaePintTestCommon):
                     f"urn:peppol:bis:{process}",
                 )
 
+    @requires_normative_resources("1.0.4")
     def test_publisher_posting_batch_isolates_missing_agreement_evidence_and_repairs(
         self,
     ):
@@ -4554,6 +4597,7 @@ class TestUaeInvoiceXml(UaePintTestCommon):
                 agreement.with_user(self.simple_accountman).write({name: original})
                 bill.action_l10n_ae_validate()
 
+    @requires_normative_resources("1.0.4")
     def test_self_billed_purchase_freezes_buyer_issuer_and_supplier_roles(self):
         bill, agreement = self._selfbilling_bill_with_agreement()
         bill.action_post()
@@ -4652,6 +4696,7 @@ class TestUaeInvoiceXml(UaePintTestCommon):
                 allowed_company_ids=self.env.company.ids
             ).read(["scope"])
 
+    @requires_normative_resources("1.0.4")
     def test_deemed_supply_routes_to_97_without_changing_the_actual_buyer(self):
         invoice = self.init_invoice(
             "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
@@ -4742,6 +4787,7 @@ class TestUaeInvoiceXml(UaePintTestCommon):
         self.assertEqual(bill.company_id.partner_id.routing_endpoint, "1000000001")
         self.assertEqual(self.partner_a.routing_endpoint, "1000000002")
 
+    @requires_normative_resources("1.0.4")
     def test_reviewed_domestic_business_buyer_without_onboarding_uses_destination_98(
         self,
     ):
@@ -5165,6 +5211,7 @@ class TestUaeInvoiceXml(UaePintTestCommon):
             "synthetic-beneficiary",
         )
 
+    @requires_normative_resources("1.0.4")
     def test_prepared_free_zone_document_freezes_scenario_and_beneficiary_facts(self):
         invoice = self.init_invoice(
             "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
@@ -5229,6 +5276,7 @@ class TestUaeInvoiceXml(UaePintTestCommon):
         )
         self.assertEqual(invoice.preview_l10n_ae_pint(), expected)
 
+    @requires_normative_resources("1.0.4")
     def test_formal_validation_reads_frozen_xml_after_master_data_changes(self):
         invoice = self.init_invoice(
             "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
