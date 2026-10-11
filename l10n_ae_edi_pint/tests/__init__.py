@@ -1,6 +1,7 @@
 # Copyright 2026 KMEE
 # License AGPL-3.0 or later (https://www.gnu.org/licenses/agpl).
-from . import test_invoice_xml
+from . import test_invoice_xml_source
+from . import test_invoice_xml_conformance
 from . import test_invoice_amounts
 from . import test_native_workflow
 from . import test_received_xml
