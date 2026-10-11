@@ -6,6 +6,12 @@ from odoo import api, fields, models
 class ResCompany(models.Model):
     _inherit = "res.company"
 
+    available_additional_identifiers_metadata = fields.Json(
+        related=False,
+        compute="_compute_l10n_ae_available_identifiers_metadata",
+        compute_sudo=True,
+        readonly=True,
+    )
     l10n_ae_fiscal_country_code = fields.Char(
         related="account_fiscal_country_id.code", string="Fiscal Country Code"
     )
@@ -41,6 +47,27 @@ class ResCompany(models.Model):
     l10n_ae_registration_authority = fields.Char(
         related="partner_id.l10n_ae_registration_authority", readonly=False
     )
+
+    @api.depends_context("company")
+    @api.depends(
+        "account_fiscal_country_id",
+        "partner_id.available_additional_identifiers_metadata",
+    )
+    def _compute_l10n_ae_available_identifiers_metadata(self):
+        for company in self:
+            partner = company.partner_id
+            metadata = dict(partner.available_additional_identifiers_metadata or {})
+            if company.account_fiscal_country_id.code == "AE":
+                # Company jurisdiction can differ from the physical address. Keep
+                # native address choices and offer its UAE legal registration too.
+                all_metadata = partner._get_all_additional_identifiers_metadata()
+                for key in ("AE_TL", "AE_CL", "AE_EID", "AE_PAS", "AE_CD"):
+                    metadata[key] = (
+                        partner._lazy_translate_additional_identifiers_metadata(
+                            all_metadata[key]
+                        )
+                    )
+            company.available_additional_identifiers_metadata = metadata
 
     @api.constrains("l10n_ae_edi_binding_id")
     def _check_l10n_ae_default_binding_company(self):

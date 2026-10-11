@@ -167,6 +167,73 @@ class TestUaeInvoiceIdentity(AccountTestInvoicingCommon):
         self.assertEqual(fr_company.country_code, "AE")
         self.assertEqual(fr_company.account_fiscal_country_id.code, "FR")
 
+    def test_company_legal_identifier_choices_follow_fiscal_country(self):
+        # Literal expected keys/labels, independent of implementation metadata.
+        expected = {
+            "AE_TL": ("UAE Trade License", "EN"),
+            "AE_CL": ("UAE Commercial License", "EN"),
+            "AE_EID": ("UAE Emirates ID", "CN"),
+            "AE_PAS": ("UAE Passport", "CN"),
+            "AE_CD": ("UAE Cabinet Decision", "EN"),
+        }
+        ae = self.env.ref("base.ae")
+        fr = self.env.ref("base.fr")
+        company = self.env.company
+        company.write(
+            {
+                "country_id": self.env.ref("base.us").id,
+                "account_fiscal_country_id": fr.id,
+                "state_id": self.env.ref("base.state_us_5").id,
+                "additional_identifiers": False,
+            }
+        )
+        manager = new_test_user(
+            self.env,
+            login="uae-company-legal-metadata-manager",
+            groups="base.group_erp_manager,account.group_account_manager",
+            company_id=company.id,
+            company_ids=[Command.set(company.ids)],
+        )
+        owned = company.with_user(manager).with_context(
+            allowed_company_ids=company.ids,
+            lang="en_US",
+        )
+        self.assertFalse(owned.env.su)
+        self.assertFalse(manager.has_group("base.group_system"))
+        field = "available_additional_identifiers_metadata"
+        # Physical US + fiscal FR: native US choices, no additional AE choices.
+        native_us = owned.partner_id.read([field])[0][field]
+        foreign = owned.read([field])[0][field]
+        self.assertEqual(foreign, native_us)
+        self.assertFalse(set(expected) & set(foreign))
+        # Fiscal jurisdiction enables company-only choices without changing address.
+        company.account_fiscal_country_id = ae
+        offered = owned.read([field])[0][field]
+        self.assertEqual(set(offered) - set(native_us), set(expected))
+        for key, metadata in native_us.items():
+            self.assertEqual(offered[key], metadata)
+        for key, (label, category) in expected.items():
+            self.assertEqual(offered[key]["label"], label)
+            self.assertEqual(offered[key]["countries"], ["AE"])
+            self.assertEqual(offered[key]["category"], category)
+            self.assertEqual(offered[key]["sequence"], 10)
+        self.assertEqual(owned.partner_id.read([field])[0][field], native_us)
+        self.assertEqual(owned.country_code, "US")
+        self.assertFalse(owned.additional_identifiers)
+        # Physical AE + fiscal FR retains its native address-based choices.
+        company.write(
+            {
+                "country_id": ae.id,
+                "account_fiscal_country_id": fr.id,
+                "state_id": self.env.ref("base.state_ae_du").id,
+            }
+        )
+        native_ae = owned.partner_id.read([field])[0][field]
+        self.assertTrue(set(expected) <= set(native_ae))
+        self.assertEqual(owned.read([field])[0][field], native_ae)
+        self.assertEqual(owned.l10n_ae_fiscal_country_code, "FR")
+        self.assertFalse(owned.additional_identifiers)
+
     def test_document_form_limits_issuance_controls_to_supported_processes(self):
         ae = self.env.ref("base.ae")
         fr = self.env.ref("base.fr")
