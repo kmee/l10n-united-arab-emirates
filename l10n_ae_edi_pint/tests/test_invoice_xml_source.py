@@ -24,6 +24,57 @@ _logger = logging.getLogger(__name__)
 
 @tagged("post_install", "-at_install")
 class TestUaeInvoiceXmlSource(UaePintTestCommon):
+    def test_uae_participant_preserves_registered_identity_at_foreign_address(self):
+        self.env.company.write(
+            {
+                "country_id": self.env.ref("base.us").id,
+                "account_fiscal_country_id": self.env.ref("base.ae").id,
+                "l10n_ae_edi_auto_prepare": False,
+            }
+        )
+        supplier = self.env.company.partner_id
+        supplier.write(
+            {
+                "state_id": self.env.ref("base.state_us_5").id,
+                "city": "San Francisco",
+                "zip": "94105",
+            }
+        )
+        invoice = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a
+        ).with_user(self.simple_accountman)
+        self.assertFalse(invoice.env.su)
+        self.assertFalse(invoice.env.user.has_group("base.group_system"))
+        self.assertEqual(invoice.country_code, "AE")
+        self.assertEqual(supplier.country_code, "US")
+        self.assertEqual(supplier.routing_scheme, "0235")
+        ledger_fields = ["account_id", "debit", "credit", "balance", "write_date"]
+        ledger = invoice.line_ids.sorted("id").read(ledger_fields)
+        invoice.action_l10n_ae_validate()
+        xml = etree.fromstring(invoice.preview_l10n_ae_pint().encode())
+        party = xml.find("cac:AccountingSupplierParty/cac:Party", NS)
+        self.assertEqual(
+            party.findtext(
+                "cac:PostalAddress/cac:Country/cbc:IdentificationCode", namespaces=NS
+            ),
+            "US",
+        )
+        registration = party.find("cac:PartyLegalEntity/cbc:CompanyID", NS)
+        self.assertEqual(registration.text, "SYNTH-TRADE-0001")
+        self.assertEqual(registration.get("schemeAgencyID"), "TL")
+        self.assertEqual(
+            registration.get("schemeAgencyName"), "Synthetic Free Zone Authority"
+        )
+        self.assertEqual(
+            (invoice.amount_untaxed, invoice.amount_tax, invoice.amount_total),
+            (100, 5, 105),
+        )
+        self.assertEqual(invoice.line_ids.sorted("id").read(ledger_fields), ledger)
+        self.assertEqual(invoice.state, "draft")
+        self.assertFalse(
+            invoice.l10n_ae_fiscal_uuid or invoice.l10n_ae_transmission_ids
+        )
+
     def test_check_uae_data_refuses_native_buyer_country_constraint(self):
         self.env.company.l10n_ae_edi_auto_prepare = False
         self.partner_a.country_id = False
