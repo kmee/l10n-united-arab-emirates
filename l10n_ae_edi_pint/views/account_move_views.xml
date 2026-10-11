@@ -5,6 +5,14 @@
         <field name="model">account.move</field>
         <field name="inherit_id" ref="l10n_ae_edi.account_move_form_uae_edi" />
         <field name="arch" type="xml">
+            <xpath
+                expr="//label[@for='l10n_ae_dispatch_review_required']"
+                position="attributes"
+            >
+                <attribute
+                    name="string"
+                >Automatic sending is paused for this document. Use Validate UAE E-Invoice to review the preserved document.</attribute>
+            </xpath>
             <xpath expr="//form/header" position="inside">
                 <button
                     name="action_l10n_ae_validate_pint"
