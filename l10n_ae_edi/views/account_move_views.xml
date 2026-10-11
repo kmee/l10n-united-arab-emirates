@@ -181,7 +181,7 @@
                         <label
                             for="l10n_ae_dispatch_review_required"
                             colspan="2"
-                            string="Automatic sending is paused for this document. Use Validate UAE E-Invoice to review the preserved document."
+                            string="Automatic sending is paused for this document. Use Check UAE Data to review the UAE data. This does not validate the preserved XML."
                         />
                     </group>
                     <group
