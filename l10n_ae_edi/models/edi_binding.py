@@ -3,6 +3,7 @@
 import hashlib
 import json
 import os
+from contextlib import nullcontext
 
 from odoo import api, fields, models
 from odoo.exceptions import AccessError, UserError, ValidationError
@@ -42,6 +43,11 @@ class UaeEdiBinding(models.Model):
     _name = "l10n_ae.edi.binding"
     _description = "UAE E-Invoicing Provider Binding"
     _check_company_auto = True
+
+    def _controlled_validation_scope(self):
+        """Optional document-format extension; base has no XML engine dependency."""
+        self.ensure_one()
+        return nullcontext()
 
     name = fields.Char(required=True)
     company_id = fields.Many2one(

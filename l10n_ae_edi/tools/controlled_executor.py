@@ -178,6 +178,7 @@ class ControlledExecutor:
             binding.check_access("read")
             if binding.company_id.id != self.company_id:
                 raise AccessError(env._("The UAE binding belongs to another company."))
+            validation_scope = binding._controlled_validation_scope()
             transmission_ids = (
                 env["l10n_ae.edi.transmission"]
                 .search(
@@ -205,28 +206,29 @@ class ControlledExecutor:
                 )
                 .ids
             )
-        outcomes = []
-        for record_id in transmission_ids:
-            outcome = {"transmission_id": record_id}
-            try:
-                outcome["result"] = self.run_once(record_id)
-            except UaeDocumentValidationError as error:
-                with self.registry.cursor() as cursor:
-                    record = self._record(cursor, record_id).sudo()
-                    outcome["result"] = record._mark_controlled_dispatch_review(
-                        self.clock(), report=error.report, error_kind=error.kind
-                    )
-                    cursor.commit()
-                if outcome["result"] == "blocked":
-                    outcome["error_kind"] = error.kind
-            except UaeControlledEndpointMismatch:
-                with self.registry.cursor() as cursor:
-                    record = self._record(cursor, record_id).sudo()
-                    outcome["result"] = record._mark_controlled_endpoint_review(
-                        self.endpoint, self.clock()
-                    )
-                    cursor.commit()
-                if outcome["result"] == "blocked":
-                    outcome["error_kind"] = "endpoint_mismatch"
-            outcomes.append(outcome)
-        return outcomes
+        with validation_scope:
+            outcomes = []
+            for record_id in transmission_ids:
+                outcome = {"transmission_id": record_id}
+                try:
+                    outcome["result"] = self.run_once(record_id)
+                except UaeDocumentValidationError as error:
+                    with self.registry.cursor() as cursor:
+                        record = self._record(cursor, record_id).sudo()
+                        outcome["result"] = record._mark_controlled_dispatch_review(
+                            self.clock(), report=error.report, error_kind=error.kind
+                        )
+                        cursor.commit()
+                    if outcome["result"] == "blocked":
+                        outcome["error_kind"] = error.kind
+                except UaeControlledEndpointMismatch:
+                    with self.registry.cursor() as cursor:
+                        record = self._record(cursor, record_id).sudo()
+                        outcome["result"] = record._mark_controlled_endpoint_review(
+                            self.endpoint, self.clock()
+                        )
+                        cursor.commit()
+                    if outcome["result"] == "blocked":
+                        outcome["error_kind"] = "endpoint_mismatch"
+                outcomes.append(outcome)
+            return outcomes
