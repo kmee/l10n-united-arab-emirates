@@ -107,8 +107,22 @@ class ControlledInboxWorker:
                     binding = self._binding(cursor, binding_id, process=process)
                     inbox = binding.env["l10n_ae.edi.inbox"].browse(inbox_id)
                     if process:
-                        inbox.action_process()
+                        processed = inbox.action_process()
                     result = {"inbox_id": inbox.id, "state": inbox.state}
+                    if process and not processed:
+                        reasons = [
+                            field
+                            for field in (
+                                "event_review_pending",
+                                "identity_review_pending",
+                            )
+                            if inbox[field]
+                        ]
+                        if reasons:
+                            result.update(
+                                processing_status="review_pending",
+                                pending_review_reasons=reasons,
+                            )
                     cursor.commit()
                     return result
             except SerializationFailure:
