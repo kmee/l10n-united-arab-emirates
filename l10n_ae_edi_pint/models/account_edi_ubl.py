@@ -425,6 +425,14 @@ class AccountEdiUblUae(models.AbstractModel):
         classification = product._l10n_ae_item_classification()
         nodes.append({"cbc:CommodityCode": {"_text": classification["type"]}})
         if classification["hs_code"]:
+            # The reviewed UAE value also owns the frozen fiscal snapshot.
+            # Replace native HS nodes in this exporter without changing Intrastat.
+            nodes[:] = [
+                node
+                for node in nodes
+                if "cbc:ItemClassificationCode" not in node
+                or node["cbc:ItemClassificationCode"].get("listID") != "HS"
+            ]
             nodes.append(
                 {
                     "cbc:ItemClassificationCode": {
