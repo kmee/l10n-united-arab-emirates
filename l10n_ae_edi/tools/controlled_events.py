@@ -48,6 +48,14 @@ def _unique_object(pairs):
     return result
 
 
+class ControlledEventBindingUnavailable(ValueError):
+    """An authenticated receiver route references an absent binding.
+
+    Retain ValueError compatibility for direct callers; the HTTP controller
+    distinguishes this server-side absence from malformed event data.
+    """
+
+
 class ControlledEventReceiver:
     """Consume authenticated bytes in a dedicated transaction after API acceptance."""
 
@@ -129,6 +137,10 @@ class ControlledEventReceiver:
             ):
                 raise AccessError(env._("UAE event receiving permission is required."))
             binding = env["l10n_ae.edi.binding"].browse(binding_id).exists()
+            if not binding:
+                raise ControlledEventBindingUnavailable(
+                    "Controlled event binding is unavailable."
+                )
             binding.ensure_one()
             binding.check_access("read")
             if binding.company_id.id != self.company_id:

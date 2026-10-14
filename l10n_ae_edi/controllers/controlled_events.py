@@ -11,7 +11,10 @@ from odoo import http
 from odoo.exceptions import AccessError, UserError
 from odoo.http import request
 
-from ..tools.controlled_events import ControlledEventReceiver
+from ..tools.controlled_events import (
+    ControlledEventBindingUnavailable,
+    ControlledEventReceiver,
+)
 
 
 class ControlledEventIngress(http.Controller):
@@ -66,6 +69,8 @@ class ControlledEventIngress(http.Controller):
             )
         except AccessError:
             return respond({"error": "receiving_forbidden"}, 403)
+        except ControlledEventBindingUnavailable:
+            return respond({"error": "receiving_unavailable"}, 503)
         except ValueError:
             return respond({"error": "invalid_event"}, 400)
         except UserError:
