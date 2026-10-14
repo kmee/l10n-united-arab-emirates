@@ -583,6 +583,78 @@ class TestUaeProductClassification(AccountTestInvoicingCommon):
         self.assertFalse(issue.event_ids)
 
     @requires_normative_resources("1.0.4")
+    def test_goods_uae_hs_takes_precedence_over_installed_intrastat_hs(self):
+        intrastat_module = (
+            self.env["ir.module.module"]
+            .sudo()
+            .search(
+                [("name", "=", "account_intrastat"), ("state", "=", "installed")],
+                limit=1,
+            )
+        )
+        if not intrastat_module:
+            self.skipTest("account_intrastat is unavailable in this edition")
+        self.assertIn("intrastat_code_id", self.env["product.product"]._fields)
+        intrastat = self.env.ref("account_intrastat.commodity_code_2018_25309000")
+        self.assertEqual(intrastat.code, "25309000")
+        product = self.env["product.product"].create(
+            {
+                "name": "Synthetic dual-source HS goods",
+                "type": "consu",
+                "list_price": 100,
+                "barcode": "6291041500213",
+                "intrastat_code_id": intrastat.id,
+                "l10n_ae_classification_code": "999999",
+            }
+        )
+        binding = review_controlled_binding(
+            self.env["l10n_ae.edi.binding"].create(
+                {
+                    "name": "Synthetic dual-source HS sandbox",
+                    "fiscal_uuid_policy": "controlled_local",
+                }
+            ),
+            self.simple_accountman,
+            capabilities=CONTROLLED_CAPABILITIES,
+            note="Synthetic UAE/Intrastat HS precedence contract.",
+        )
+        invoice = self.init_invoice("out_invoice", amounts=[100], taxes=self.tax_sale_a)
+        invoice.invoice_line_ids.product_id = product
+        invoice.l10n_ae_binding_id = binding
+        invoice = invoice.with_user(self.simple_accountman)
+        invoice.action_post()
+        invoice.action_l10n_ae_prepare()
+        issue = invoice.l10n_ae_transmission_id
+        self.assertTrue(issue)
+        item = etree.fromstring(issue.xml_content.encode()).find(
+            "cac:InvoiceLine/cac:Item", NS
+        )
+        self.assertEqual(
+            item.xpath(
+                "cac:CommodityClassification/cbc:CommodityCode/text()",
+                namespaces=NS,
+            ),
+            ["G"],
+        )
+        hs_nodes = item.xpath(
+            "cac:CommodityClassification/cbc:ItemClassificationCode[@listID='HS']",
+            namespaces=NS,
+        )
+        self.assertEqual(
+            [(node.text, node.get("listID")) for node in hs_nodes],
+            [("999999", "HS")],
+        )
+        self.assertEqual(
+            item.xpath("cac:StandardItemIdentification/cbc:ID/text()", namespaces=NS),
+            ["6291041500213"],
+        )
+        self.assertEqual(product.intrastat_code_id, intrastat)
+        self.assertEqual(
+            json.loads(issue.payload)["lines"][0]["item_classification"]["hs_code"],
+            "999999",
+        )
+
+    @requires_normative_resources("1.0.4")
     def test_goods_product_preserves_hs_without_emitting_service_identifiers(self):
         # G requires IBT-158 with the UAE HS scheme (IBR-184/188).
         # 999999 is synthetic test input, not an approved goods classification.
