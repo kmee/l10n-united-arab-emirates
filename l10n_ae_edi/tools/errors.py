@@ -10,6 +10,9 @@ class UaeDocumentValidationError(UserError):
 
     def __init__(self, message, report=None, *, kind="local_review"):
         super().__init__(message)
+        # The public RPC context lets the core show its standard warning dialog
+        # while retaining this typed exception for controlled dispatch handling.
+        self.context = {"exception_class": "odoo.exceptions.UserError"}
         self.report = report
         self.kind = kind
 
