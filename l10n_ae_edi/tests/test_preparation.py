@@ -69,13 +69,29 @@ class TestUaeInvoicePreparation(AccountTestInvoicingCommon):
         self.env.company.l10n_ae_edi_auto_prepare = True
         invoice = self.init_invoice("out_invoice", amounts=[100], taxes=self.tax_sale_a)
         invoice.l10n_ae_binding_id = binding
-        actor = invoice.with_user(self.simple_accountman)
+        invoice_user = new_test_user(
+            self.env,
+            login="uae-capability-invoice-user",
+            groups="account.group_account_invoice",
+            company_id=self.env.company.id,
+            company_ids=[Command.set(self.env.company.ids)],
+        )
+        self.assertTrue(invoice_user.has_group("account.group_account_invoice"))
+        self.assertFalse(invoice_user.has_group("account.group_account_manager"))
+        self.assertFalse(invoice_user.has_group("base.group_system"))
+        self.assertEqual(invoice_user.company_ids, self.env.company)
+        guidance = (
+            "Ask an accounting manager to confirm document support and review "
+            "the binding's contract capabilities before preparing this document."
+        )
+        actor = invoice.with_user(invoice_user)
         self.assertFalse(actor.env.su)
         actor.action_post()
         self.assertEqual(actor.state, "posted")
         self.assertEqual(actor.amount_total, 105)
         self.assertEqual(actor.l10n_ae_preparation_state, "review")
         self.assertIn("billing_invoice", actor.l10n_ae_preparation_error)
+        self.assertIn(guidance, actor.l10n_ae_preparation_error)
         self.assertFalse(actor.l10n_ae_transmission_ids)
         self.assertFalse(actor.l10n_ae_fiscal_uuid)
         ledger_fields = [
@@ -88,10 +104,11 @@ class TestUaeInvoicePreparation(AccountTestInvoicingCommon):
         ]
         ledger = actor.line_ids.read(ledger_fields)
         with (
-            self.assertRaisesRegex(ValidationError, "billing_invoice"),
+            self.assertRaisesRegex(ValidationError, "billing_invoice") as refusal,
             self.cr.savepoint(),
         ):
             actor.action_l10n_ae_prepare()
+        self.assertIn(guidance, str(refusal.exception))
         self.assertFalse(actor.l10n_ae_transmission_ids)
         self.assertFalse(actor.l10n_ae_fiscal_uuid)
         with Form(binding) as form:

@@ -278,7 +278,13 @@ class UaeEdiBinding(models.Model):
         code = f"{process}_{document}"
         if code not in self.capability_ids.mapped("code"):
             raise ValidationError(
-                self.env._("The reviewed binding contract does not support %s.", code)
+                self.env._(
+                    "The reviewed binding contract does not support %s. "
+                    "Ask an accounting manager to confirm document support and "
+                    "review the binding's contract capabilities before preparing "
+                    "this document.",
+                    code,
+                )
             )
 
     @api.constrains(
