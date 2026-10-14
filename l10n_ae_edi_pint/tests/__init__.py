@@ -13,3 +13,4 @@ from . import test_product_classification
 from . import test_cbuae_fx
 from . import test_receive_capabilities
 from . import test_controlled_event_http
+from . import test_scheduled_operations
