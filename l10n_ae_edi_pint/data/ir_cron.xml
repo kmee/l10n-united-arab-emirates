@@ -26,6 +26,6 @@
         />
         <field name="interval_number" eval="1" />
         <field name="interval_type">minutes</field>
-        <field name="active" eval="True" />
+        <field name="active" eval="False" />
     </record>
 </odoo>
