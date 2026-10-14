@@ -839,6 +839,62 @@ class TestUaeSalesAdvance(AccountTestInvoicingCommon):
         self.assertFalse(final.l10n_ae_fiscal_uuid)
         self.assertFalse(final.l10n_ae_transmission_id)
 
+    def test_final_balance_rejects_unposted_advance_with_auto_prepare_disabled(self):
+        # Independent balance: 10000 + VAT 500 less advance 1000 + VAT 50.
+        self.env.company.l10n_ae_edi_auto_prepare = False
+        order = self.env["sale.order"].create(
+            {
+                "partner_id": self.partner_a.id,
+                "order_line": [
+                    Command.create(
+                        {
+                            "product_id": self.product_a.id,
+                            "product_uom_qty": 1,
+                            "price_unit": 10000,
+                            "tax_ids": [Command.set(self.tax_sale_a.ids)],
+                        }
+                    )
+                ],
+            }
+        )
+        order.action_confirm()
+        advance = self._create_invoice(order, "percentage", 10)
+        final = self._create_invoice(order, "delivered")
+        self.assertEqual(advance.state, "draft")
+        self.assertEqual(final.state, "draft")
+        self.assertEqual(
+            (advance.amount_untaxed, advance.amount_tax, advance.amount_total),
+            (1000, 50, 1050),
+        )
+        self.assertEqual(
+            (final.amount_untaxed, final.amount_tax, final.amount_total),
+            (9000, 450, 9450),
+        )
+        ledger_fields = [
+            "id",
+            "account_id",
+            "debit",
+            "credit",
+            "amount_currency",
+            "currency_id",
+        ]
+        advance_ledger = advance.line_ids.sorted("id").read(ledger_fields)
+        final_ledger = final.line_ids.sorted("id").read(ledger_fields)
+        with self.assertRaisesRegex(
+            UserError,
+            "The original taxed advance must be posted before this deduction",
+        ):
+            final.action_post()
+        self.assertEqual((advance.state, final.state), ("draft", "draft"))
+        self.assertEqual(
+            advance.line_ids.sorted("id").read(ledger_fields), advance_ledger
+        )
+        self.assertEqual(final.line_ids.sorted("id").read(ledger_fields), final_ledger)
+        self.assertFalse(advance.l10n_ae_fiscal_uuid)
+        self.assertFalse(advance.l10n_ae_transmission_id)
+        self.assertFalse(final.l10n_ae_fiscal_uuid)
+        self.assertFalse(final.l10n_ae_transmission_id)
+
     def test_final_balance_rejects_an_advance_for_another_commercial_customer(self):
         order = self.env["sale.order"].create(
             {
