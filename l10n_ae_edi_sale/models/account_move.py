@@ -81,9 +81,7 @@ class AccountMove(models.Model):
         # Keep the existing advance-consumption accounting guard. Unlike missing
         # fiscal metadata, an unposted/over-consumed advance invalidates the
         # deduction itself; automatic preparation must not swallow this refusal.
-        for move in candidates.filtered(
-            lambda move: move.company_id.l10n_ae_edi_auto_prepare
-        ):
+        for move in candidates:
             move._l10n_ae_advance_references()
         return super()._post(soft=soft)
 
