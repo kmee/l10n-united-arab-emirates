@@ -22,6 +22,12 @@ DIMENSION_STATES = {
     "reporting_c2_state": {"confirmed", "rejected"},
     "reporting_c3_state": {"confirmed", "rejected"},
 }
+RETRYABLE_EVENT_UNIQUE_CONSTRAINTS = frozenset(
+    {
+        "l10n_ae_edi_event_event_identity_unique",
+        "l10n_ae_edi_event_event_bytes_unique",
+    }
+)
 REQUIRED_KEYS = {
     "contract_version",
     "event_id",
@@ -110,12 +116,9 @@ class ControlledEventReceiver:
             try:
                 return self._persist(binding_id, body, raw_body)
             except (SerializationFailure, UniqueViolation) as error:
-                if isinstance(
-                    error, UniqueViolation
-                ) and error.diag.constraint_name not in {
-                    "l10n_ae_edi_event_event_identity_unique",
-                    "l10n_ae_edi_event_event_bytes_unique",
-                }:
+                if isinstance(error, UniqueViolation) and (
+                    error.diag.constraint_name not in RETRYABLE_EVENT_UNIQUE_CONSTRAINTS
+                ):
                     raise
                 if attempt == 2:
                     raise
