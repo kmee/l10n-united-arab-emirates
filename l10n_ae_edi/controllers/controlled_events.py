@@ -5,6 +5,7 @@
 import os
 import re
 
+from psycopg2.errors import SerializationFailure, UniqueViolation
 from werkzeug.exceptions import RequestEntityTooLarge
 
 from odoo import http
@@ -12,6 +13,7 @@ from odoo.exceptions import AccessError, UserError
 from odoo.http import request
 
 from ..tools.controlled_events import (
+    RETRYABLE_EVENT_UNIQUE_CONSTRAINTS,
     ControlledEventBindingUnavailable,
     ControlledEventReceiver,
 )
@@ -30,10 +32,11 @@ class ControlledEventIngress(http.Controller):
         max_content_length=65537,
     )
     def receive(self, binding_id, **_kwargs):
-        def respond(body, status):
-            return request.make_json_response(
-                body, status=status, headers={"Cache-Control": "no-store"}
-            )
+        def respond(body, status, retry_after=None):
+            headers = {"Cache-Control": "no-store"}
+            if retry_after is not None:
+                headers["Retry-After"] = retry_after
+            return request.make_json_response(body, status=status, headers=headers)
 
         if request.httprequest.mimetype != "application/json":
             return respond({"error": "unsupported_media_type"}, 415)
@@ -67,6 +70,12 @@ class ControlledEventIngress(http.Controller):
             outcome = receiver.receive(
                 binding_id, raw, request.httprequest.headers.get("X-KMEE-UAE-Signature")
             )
+        except SerializationFailure:
+            return respond({"error": "receiving_unavailable"}, 503, retry_after="1")
+        except UniqueViolation as error:
+            if error.diag.constraint_name not in RETRYABLE_EVENT_UNIQUE_CONSTRAINTS:
+                raise
+            return respond({"error": "receiving_unavailable"}, 503, retry_after="1")
         except AccessError:
             return respond({"error": "receiving_forbidden"}, 403)
         except ControlledEventBindingUnavailable:
