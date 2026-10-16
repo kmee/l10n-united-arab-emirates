@@ -338,3 +338,128 @@ class TestUaeProviderBinding(AccountTestInvoicingCommon):
             form.controlled_dispatch_enabled = True
         self.assertTrue(binding.controlled_dispatch_enabled)
         self.assertEqual(binding.read(declaration_fields), declaration)
+
+    def test_two_entity_contract_reviews_remain_independent(self):
+        company_a = self.env.company
+        company_b = self.env["res.company"].create(
+            {
+                "name": "Synthetic UAE legal entity B",
+                "country_id": company_a.country_id.id,
+            }
+        )
+        manager = new_test_user(
+            self.env,
+            login="uae-two-entity-contract-manager",
+            groups="account.group_account_manager",
+            company_id=company_a.id,
+            company_ids=[(6, 0, (company_a + company_b).ids)],
+        )
+        self.assertFalse(manager.has_group("base.group_system"))
+        company_context = {
+            "allowed_company_ids": (company_a + company_b).ids,
+        }
+        binding_model = (
+            self.env["l10n_ae.edi.binding"]
+            .with_user(manager)
+            .with_context(**company_context)
+        )
+        binding_a = binding_model.create(
+            {
+                "name": "Synthetic entity A credit contract",
+                "company_id": company_a.id,
+            }
+        )
+        binding_b = binding_model.create(
+            {
+                "name": "Synthetic entity B invoice contract",
+                "company_id": company_b.id,
+            }
+        )
+        self.assertFalse(binding_a.env.su)
+        self.assertFalse(binding_b.env.su)
+
+        capabilities = self.env["l10n_ae.edi.capability"].with_user(manager)
+        credit_codes = ["submit", "lookup", "report", "billing_credit"]
+        invoice_codes = ["submit", "lookup", "report", "billing_invoice"]
+        credit_capabilities = capabilities.search([("code", "in", credit_codes)])
+        invoice_capabilities = capabilities.search([("code", "in", invoice_codes)])
+        self.assertEqual(set(credit_capabilities.mapped("code")), set(credit_codes))
+        self.assertEqual(set(invoice_capabilities.mapped("code")), set(invoice_codes))
+
+        with Form(binding_a) as form:
+            form.capability_profile = "kmee-controlled-1"
+            form.capability_review_note = (
+                "Entity A reviewed synthetic credit-only sandbox contract."
+            )
+            for capability in credit_capabilities:
+                form.capability_ids.add(capability)
+        with Form(binding_b) as form:
+            form.capability_profile = "kmee-controlled-1"
+            form.capability_review_note = (
+                "Entity B reviewed synthetic invoice-only sandbox contract."
+            )
+            for capability in invoice_capabilities:
+                form.capability_ids.add(capability)
+
+        review_fields = [
+            "company_id",
+            "provider",
+            "environment",
+            "fiscal_uuid_policy",
+            "capability_profile",
+            "capability_ids",
+            "capability_review_note",
+            "capability_review_state",
+            "capability_reviewed_by",
+            "capability_reviewed_at",
+            "capability_review_hash",
+            "controlled_dispatch_enabled",
+        ]
+        company_b_unreviewed = binding_b.read(review_fields)
+        binding_a.action_review_capabilities()
+        self.assertEqual(binding_b.read(review_fields), company_b_unreviewed)
+        self.assertEqual(binding_a.capability_reviewed_by, manager)
+        self.assertEqual(binding_a.capability_review_state, "ready")
+        self.assertEqual(binding_b.capability_review_state, "review")
+        self.assertFalse(binding_b.capability_reviewed_by)
+        self.assertFalse(binding_b.capability_reviewed_at)
+        self.assertFalse(binding_b.capability_review_hash)
+        with (
+            self.assertRaisesRegex(ValidationError, "Review.*capabilities"),
+            self.cr.savepoint(),
+            Form(binding_b) as form,
+        ):
+            form.controlled_dispatch_enabled = True
+
+        binding_b.action_review_capabilities()
+        self.assertEqual(binding_b.capability_reviewed_by, manager)
+        self.assertEqual(binding_b.capability_review_state, "ready")
+        with Form(binding_a) as form:
+            form.controlled_dispatch_enabled = True
+        with Form(binding_b) as form:
+            form.controlled_dispatch_enabled = True
+        self.assertTrue(binding_a.controlled_dispatch_enabled)
+        self.assertTrue(binding_b.controlled_dispatch_enabled)
+        self.assertEqual(
+            set(binding_a.capability_ids.mapped("code")), set(credit_codes)
+        )
+        self.assertEqual(
+            set(binding_b.capability_ids.mapped("code")), set(invoice_codes)
+        )
+
+        company_b_snapshot = binding_b.read(review_fields)
+        with Form(binding_a) as form:
+            form.capability_review_note = (
+                "Entity A updated its synthetic credit contract evidence."
+            )
+        self.assertEqual(binding_a.capability_review_state, "review")
+        self.assertFalse(binding_a.capability_reviewed_by)
+        self.assertFalse(binding_a.capability_reviewed_at)
+        self.assertFalse(binding_a.capability_review_hash)
+        self.assertFalse(binding_a.controlled_dispatch_enabled)
+        self.assertEqual(binding_b.read(review_fields), company_b_snapshot)
+
+        binding_a.action_review_capabilities()
+        self.assertEqual(binding_a.capability_review_state, "ready")
+        self.assertFalse(binding_a.controlled_dispatch_enabled)
+        self.assertEqual(binding_b.read(review_fields), company_b_snapshot)
