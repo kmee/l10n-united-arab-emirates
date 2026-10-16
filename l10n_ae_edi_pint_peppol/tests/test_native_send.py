@@ -90,7 +90,25 @@ class TestUaePeppolSend(AccountTestInvoicingCommon):
                 "account_peppol_proxy_state": "sender",
             }
         )
-        invoice = self.init_invoice("out_invoice", amounts=[100], taxes=self.tax_sale_a)
+        group = self.env["account.tax.group"].create(
+            {
+                "name": "Synthetic Belgian verification control",
+                "company_id": self.env.company.id,
+                "country_id": self.env.ref("base.be").id,
+            }
+        )
+        tax = self.env["account.tax"].create(
+            {
+                "name": "Synthetic verification control 5%",
+                "amount": 5,
+                "amount_type": "percent",
+                "type_tax_use": "sale",
+                "company_id": self.env.company.id,
+                "country_id": self.env.ref("base.be").id,
+                "tax_group_id": group.id,
+            }
+        )
+        invoice = self.init_invoice("out_invoice", amounts=[100], taxes=tax)
         invoice.action_post()
         partner = invoice.commercial_partner_id.with_company(invoice.company_id)
         self.assertFalse(partner.peppol_verification_state)
