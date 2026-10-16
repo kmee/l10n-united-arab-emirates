@@ -11,6 +11,7 @@
     "website": "https://github.com/kmee/l10n-uae",
     "license": "AGPL-3",
     "depends": ["l10n_ae_edi_pint", "account_peppol"],
+    "data": ["views/res_partner_views.xml"],
     "auto_install": True,
     "installable": True,
 }

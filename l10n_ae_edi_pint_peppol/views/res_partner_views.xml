@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<odoo>
+    <record id="res_partner_form_uae_peppol_verify_feedback" model="ir.ui.view">
+        <field name="name">res.partner.form.uae.peppol.verify.feedback</field>
+        <field name="model">res.partner</field>
+        <field name="inherit_id" ref="account_peppol.res_partner_form_account_peppol" />
+        <field name="arch" type="xml">
+            <xpath
+                expr="//button[@name='button_account_peppol_check_partner_endpoint']"
+                position="attributes"
+            >
+                <attribute
+                    name="name"
+                >action_l10n_ae_edi_pint_peppol_verify_partner_endpoint</attribute>
+            </xpath>
+        </field>
+    </record>
+</odoo>
