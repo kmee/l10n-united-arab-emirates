@@ -73,6 +73,116 @@ class TestUaeNativeWorkflow(UaePintTestCommon):
             invoice.l10n_ae_transmission_ids or invoice.l10n_ae_fiscal_uuid
         )
 
+    def test_native_layout_genuine_ae_vat_edit_preserves_confirmed_tin(self):
+        company = self.env.company
+        issuer = company.partner_id
+        layout_model = (
+            self.env["base.document.layout"]
+            .with_user(self.simple_accountman)
+            .with_company(company)
+            .with_context(
+                allowed_company_ids=[company.id],
+                default_company_id=company.id,
+                account_document_layout_configurator=True,
+            )
+        )
+        layout = layout_model.create({"company_id": company.id, "vat": issuer.vat})
+
+        layout.write({"vat": "100000000900003"})
+
+        issuer.flush_recordset(["vat", "routing_scheme", "routing_endpoint"])
+        issuer.invalidate_recordset(["vat", "routing_scheme", "routing_endpoint"])
+        self.assertEqual(issuer.vat, "100000000900003")
+        self.assertEqual(issuer.routing_scheme, "0235")
+        self.assertEqual(issuer.routing_endpoint, "100000000900003")
+        self.assertEqual(company.l10n_ae_tin, "1000000001")
+        self.assertTrue(company.l10n_ae_tin_confirmed)
+        self.assertFalse(layout.env.su)
+
+    def test_foreign_fiscal_layout_keeps_core_vat_update_behavior(self):
+        data = self.setup_other_company(name="Synthetic foreign fiscal layout")
+        company = data["company"]
+        company.write(
+            {
+                "country_id": self.env.ref("base.ae").id,
+                "account_fiscal_country_id": self.env.ref("base.fr").id,
+            }
+        )
+        issuer = company.partner_id
+        issuer.write(
+            {
+                "vat": "100000000700003",
+                "routing_scheme": "0235",
+                "routing_endpoint": "1000000007",
+            }
+        )
+        self.simple_accountman.company_ids = [Command.link(company.id)]
+        layout_model = (
+            self.env["base.document.layout"]
+            .with_user(self.simple_accountman)
+            .with_company(company)
+            .with_context(
+                allowed_company_ids=[company.id],
+                default_company_id=company.id,
+                account_document_layout_configurator=True,
+            )
+        )
+        layout = layout_model.create({"company_id": company.id, "vat": issuer.vat})
+
+        issuer.flush_recordset(["routing_endpoint"])
+        issuer.invalidate_recordset(["routing_endpoint"])
+        self.assertEqual(issuer.routing_endpoint, "100000000700003")
+        layout.write({"vat": "100000000700004"})
+
+        issuer.flush_recordset(["vat", "routing_scheme", "routing_endpoint"])
+        issuer.invalidate_recordset(["vat", "routing_scheme", "routing_endpoint"])
+        self.assertEqual(company.account_fiscal_country_id.code, "FR")
+        self.assertEqual(issuer.vat, "100000000700004")
+        self.assertEqual(issuer.routing_scheme, "0235")
+        self.assertEqual(issuer.routing_endpoint, "100000000700004")
+        self.assertFalse(layout.env.su)
+
+    def test_native_layout_still_denies_an_unallowed_company(self):
+        own_company = self.env.company
+        other = self.setup_other_company(name="Synthetic unallowed layout company")[
+            "company"
+        ]
+        self.assertNotIn(other, self.simple_accountman.company_ids)
+        layout_model = (
+            self.env["base.document.layout"]
+            .with_user(self.simple_accountman)
+            .with_context(
+                allowed_company_ids=[own_company.id],
+                default_company_id=own_company.id,
+                account_document_layout_configurator=True,
+            )
+        )
+        other_identity = other.partner_id.read(
+            ["vat", "routing_scheme", "routing_endpoint"]
+        )
+        with self.assertRaises(AccessError):
+            layout_model.create({"company_id": other.id, "vat": other.partner_id.vat})
+
+        self.assertEqual(
+            other.partner_id.read(["vat", "routing_scheme", "routing_endpoint"]),
+            other_identity,
+        )
+        own_identity = own_company.partner_id.read(
+            ["vat", "routing_scheme", "routing_endpoint"]
+        )
+        self.assertEqual(
+            own_identity,
+            [
+                {
+                    "id": own_company.partner_id.id,
+                    "vat": "100000000100003",
+                    "routing_scheme": "0235",
+                    "routing_endpoint": "1000000001",
+                }
+            ],
+        )
+        self.assertFalse(layout_model.env.su)
+
     @requires_normative_resources("1.0.4")
     def test_native_post_reviews_a_blank_item_name_without_changing_accounting(self):
         self.env.company.l10n_ae_edi_auto_prepare = True
