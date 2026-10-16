@@ -1043,6 +1043,21 @@ class AccountMove(models.Model):
             "conventional_filename": move._get_invoice_report_filename(report=report),
         }
 
+    def action_l10n_ae_open_events(self):
+        """Inspect confirmation facts for this invoice and its preserved revisions."""
+        self.ensure_one()
+        self.check_access("read")
+        transmissions = self.l10n_ae_transmission_ids
+        transmissions.check_access("read")
+        action = self.env["ir.actions.actions"]._for_xml_id(
+            "l10n_ae_edi.edi_audit_event_action"
+        )
+        action["domain"] = [
+            ("company_id", "=", self.company_id.id),
+            ("transmission_id", "in", transmissions.ids),
+        ]
+        return action
+
     def action_l10n_ae_generate_conventional_pdf(self):
         """Download the same prepared conventional invoice, without delivering it."""
         self.ensure_one()
