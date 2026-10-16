@@ -2042,6 +2042,188 @@ class TestUaeSelfBillingInbound(AccountTestInvoicingCommon):
         self.assertFalse(sale.l10n_ae_transmission_id)
 
     @requires_normative_resources("1.0.4")
+    def test_received_self_billed_credit_eligibility_failures_stay_in_review(
+        self,
+    ):
+        source, agreement, binding = self._selfbilling_fixture()
+        supplier = self.env.company
+        manager = new_test_user(
+            self.env,
+            login="uae-selfbilling-credit-review-manager",
+            groups="account.group_account_manager",
+            company_id=supplier.id,
+            company_ids=[Command.set(supplier.ids)],
+        )
+        self.assertFalse(manager.has_group("base.group_system"))
+        self.assertEqual(manager.company_ids, supplier)
+        actor = (
+            self.env["l10n_ae.edi.inbox"]
+            .with_user(manager)
+            .with_context(allowed_company_ids=supplier.ids)
+        )
+        moves = actor.env["account.move"]
+        original_content = source.preview_l10n_ae_pint().encode()
+        original = actor.receive_controlled_document(
+            binding.id, "selfbilling-credit-review-original", original_content
+        )
+        self.assertTrue(original.action_process(), original.diagnostic)
+        sale = original.move_id
+        self.assertEqual((sale.move_type, sale.state), ("out_invoice", "draft"))
+        self.assertEqual(
+            (sale.amount_untaxed, sale.amount_tax, sale.amount_total), (100, 5, 105)
+        )
+        move_fields = [
+            "name",
+            "ref",
+            "state",
+            "move_type",
+            "company_id",
+            "partner_id",
+            "invoice_date",
+            "amount_untaxed",
+            "amount_tax",
+            "amount_total",
+            "l10n_ae_received_document",
+            "l10n_ae_received_process",
+            "l10n_ae_selfbilling_agreement_id",
+            "l10n_ae_received_agreement_snapshot",
+            "l10n_ae_fiscal_uuid",
+            "reversed_entry_id",
+            "l10n_ae_transmission_ids",
+        ]
+        ledger_fields = [
+            "move_id",
+            "account_id",
+            "debit",
+            "credit",
+            "amount_currency",
+            "quantity",
+            "price_unit",
+            "tax_ids",
+        ]
+        preserved = source | sale
+        before_moves = preserved.read(move_fields)
+        before_lines = preserved.line_ids.sorted("id").read(ledger_fields)
+        refund_domain = [
+            ("company_id", "=", supplier.id),
+            ("move_type", "in", ["out_refund", "in_refund"]),
+        ]
+        before_refunds = moves.search_count(refund_domain)
+        proofs = []
+        buyer_agreement = source.l10n_ae_selfbilling_agreement_id
+        for variant, fiscal_uuid, diagnostic in (
+            (
+                "missing_agreement",
+                "eeeeeeec-3333-4333-8333-333333333333",
+                "self-billing agreement requires review",
+            ),
+            (
+                "conflicting_reference_date",
+                "eeeeeeec-4444-4444-8444-444444444444",
+                "original self-billed sale requires review",
+            ),
+        ):
+            with self.subTest(variant=variant):
+                credit = source.copy(
+                    {
+                        "move_type": "in_refund",
+                        "invoice_date": source.invoice_date,
+                        "reversed_entry_id": source.id,
+                        "l10n_ae_selfbilling_agreement_id": buyer_agreement.id,
+                        "l10n_ae_credit_reason": "DL8.61.1.C",
+                        "l10n_ae_fiscal_uuid": fiscal_uuid,
+                    }
+                )
+                credit.invoice_line_ids.price_unit = 40
+                credit.action_post()
+                self.assertEqual(
+                    (credit.amount_untaxed, credit.amount_tax, credit.amount_total),
+                    (40, 2, 42),
+                )
+                credit_before = credit.read(move_fields)
+                credit_lines = credit.line_ids.sorted("id").read(ledger_fields)
+                source_xml = credit.preview_l10n_ae_pint().encode()
+                tree = etree.fromstring(source_xml)
+                self.assertEqual(tree.findtext("./{*}CreditNoteTypeCode"), "261")
+                self.assertEqual(
+                    tree.findtext("./{*}CustomizationID"),
+                    "urn:peppol:pint:selfbilling-1@ae-1",
+                )
+                reference = tree.find(
+                    "./{*}BillingReference/{*}InvoiceDocumentReference"
+                )
+                self.assertIsNotNone(reference)
+                self.assertEqual(reference.findtext("./{*}ID"), source.name)
+                self.assertEqual(reference.findtext("./{*}IssueDate"), "2026-10-02")
+                if variant == "conflicting_reference_date":
+                    # Deliberate derived XML vector: correct invoice number with a
+                    # conflicting date. Keep the buyer's native source unchanged.
+                    reference.find("./{*}IssueDate").text = "2026-10-01"
+                    content = etree.tostring(tree)
+                else:
+                    content = source_xml
+                    agreement.active = False
+                try:
+                    digest = hashlib.sha256(content).hexdigest()
+                    inbox = actor.receive_controlled_document(
+                        binding.id,
+                        "selfbilling-credit-review-" + variant,
+                        content,
+                        event_id="selfbilling-credit-review-event-" + variant,
+                    )
+                    self.assertFalse(inbox.action_process())
+                    self.assertEqual(inbox.state, "review")
+                    self.assertFalse(inbox.move_id)
+                    self.assertIn(diagnostic, inbox.diagnostic)
+                    self.assertEqual(inbox.original_xml.content, content)
+                    self.assertEqual(inbox.xml_hash, digest)
+                    self.assertEqual(len(inbox.ingestion_event_ids), 1)
+                    history = inbox.processing_history_ids
+                    self.assertEqual(len(history), 1)
+                    self.assertEqual(history.outcome, "review")
+                    self.assertEqual(history.operator_id, manager)
+                    self.assertFalse(history.move_id)
+                    report = json.loads(history.validation_report)
+                    self.assertTrue(report["valid"], report)
+                    self.assertTrue(report["xsd_valid"], report)
+                    self.assertEqual(moves.search_count(refund_domain), before_refunds)
+                    self.assertFalse(
+                        moves.search(
+                            [
+                                ("company_id", "=", supplier.id),
+                                ("l10n_ae_fiscal_uuid", "=", fiscal_uuid),
+                            ]
+                        )
+                    )
+                    self.assertEqual(preserved.read(move_fields), before_moves)
+                    self.assertEqual(
+                        preserved.line_ids.sorted("id").read(ledger_fields),
+                        before_lines,
+                    )
+                    self.assertEqual(credit.read(move_fields), credit_before)
+                    self.assertEqual(
+                        credit.line_ids.sorted("id").read(ledger_fields), credit_lines
+                    )
+                    self.assertEqual(credit.preview_l10n_ae_pint().encode(), source_xml)
+                    self.assertEqual(original.original_xml.content, original_content)
+                    proofs.append(
+                        {
+                            "variant": variant,
+                            "type_code": "261",
+                            "review": True,
+                            "normative_valid": True,
+                            "created_refunds": 0,
+                            "original_sha256": digest,
+                        }
+                    )
+                finally:
+                    agreement.active = True
+        self.assertEqual(len(proofs), 2)
+        _logger.info(
+            "UAE_SELFBILL_CREDIT_REVIEW=%s", json.dumps(proofs, sort_keys=True)
+        )
+
+    @requires_normative_resources("1.0.4")
     def test_received_self_billed_credit_links_the_original_supplier_sale(self):
         source, agreement, binding = self._selfbilling_fixture()
         inbox_model = self.env["l10n_ae.edi.inbox"].with_user(self.simple_accountman)
