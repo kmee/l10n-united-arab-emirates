@@ -2056,6 +2056,15 @@ class TestUaeSelfBillingInbound(AccountTestInvoicingCommon):
         )
         self.assertFalse(manager.has_group("base.group_system"))
         self.assertEqual(manager.company_ids, supplier)
+        review_controlled_binding(
+            binding,
+            manager,
+            capabilities=CONTROLLED_CAPABILITIES,
+            note="Reviewed receiving and outbound contract for anti-loop control.",
+        )
+        supplier.write(
+            {"l10n_ae_edi_auto_prepare": True, "l10n_ae_edi_binding_id": binding.id}
+        )
         actor = (
             self.env["l10n_ae.edi.inbox"]
             .with_user(manager)
@@ -2110,6 +2119,7 @@ class TestUaeSelfBillingInbound(AccountTestInvoicingCommon):
         ]
         before_refunds = moves.search_count(refund_domain)
         proofs = []
+        recovered = {}
         buyer_agreement = source.l10n_ae_selfbilling_agreement_id
         for variant, fiscal_uuid, diagnostic in (
             (
@@ -2186,7 +2196,8 @@ class TestUaeSelfBillingInbound(AccountTestInvoicingCommon):
                     report = json.loads(history.validation_report)
                     self.assertTrue(report["valid"], report)
                     self.assertTrue(report["xsd_valid"], report)
-                    self.assertEqual(moves.search_count(refund_domain), before_refunds)
+                    observed_refunds = moves.search_count(refund_domain)
+                    self.assertEqual(observed_refunds, before_refunds)
                     self.assertFalse(
                         moves.search(
                             [
@@ -2212,13 +2223,86 @@ class TestUaeSelfBillingInbound(AccountTestInvoicingCommon):
                             "type_code": "261",
                             "review": True,
                             "normative_valid": True,
-                            "created_refunds": 0,
+                            "additional_refunds": 0,
+                            "refunds_before": before_refunds,
+                            "refunds_after": observed_refunds,
                             "original_sha256": digest,
                         }
                     )
                 finally:
                     agreement.active = True
+                if variant == "missing_agreement":
+                    # Recover this exact original by repairing only configuration.
+                    # Full outbound capabilities must not turn received261 into
+                    # a new obligation when the operator posts its refund.
+                    first_history = history.read(
+                        ["outcome", "operator_id", "diagnostic", "xml_hash"]
+                    )
+                    self.assertTrue(inbox.action_process(), inbox.diagnostic)
+                    refund = inbox.move_id
+                    self.assertEqual(
+                        (refund.move_type, refund.state), ("out_refund", "draft")
+                    )
+                    self.assertEqual(refund.reversed_entry_id, sale)
+                    self.assertEqual(refund.partner_id, self.buyer.partner_id)
+                    self.assertEqual(refund.l10n_ae_selfbilling_agreement_id, agreement)
+                    self.assertEqual(refund.l10n_ae_credit_reason, "DL8.61.1.C")
+                    self.assertEqual(
+                        (refund.amount_untaxed, refund.amount_tax, refund.amount_total),
+                        (40, 2, 42),
+                    )
+                    self.assertEqual(
+                        inbox.processing_history_ids.mapped("outcome"),
+                        ["review", "processed"],
+                    )
+                    self.assertEqual(
+                        history.read(
+                            ["outcome", "operator_id", "diagnostic", "xml_hash"]
+                        ),
+                        first_history,
+                    )
+                    self.assertTrue(supplier.l10n_ae_edi_auto_prepare)
+                    self.assertEqual(supplier.l10n_ae_edi_binding_id, binding)
+                    self.assertEqual(
+                        set(binding.capability_ids.mapped("code")),
+                        set(CONTROLLED_CAPABILITIES),
+                    )
+                    refund.action_post()
+                    self.assertEqual(refund.state, "posted")
+                    self.assertTrue(refund.l10n_ae_received_document)
+                    self.assertEqual(refund.l10n_ae_received_process, "selfbilling")
+                    self.assertFalse(refund.l10n_ae_transmission_ids)
+                    self.assertEqual(inbox.original_xml.content, content)
+                    self.assertEqual(inbox.xml_hash, digest)
+                    self.assertEqual(
+                        moves.search_count(refund_domain), before_refunds + 1
+                    )
+                    self.assertEqual(preserved.read(move_fields), before_moves)
+                    self.assertEqual(
+                        preserved.line_ids.sorted("id").read(ledger_fields),
+                        before_lines,
+                    )
+                    self.assertEqual(credit.read(move_fields), credit_before)
+                    self.assertEqual(
+                        credit.line_ids.sorted("id").read(ledger_fields), credit_lines
+                    )
+                    before_refunds += 1
+                    preserved |= refund
+                    before_moves = preserved.read(move_fields)
+                    before_lines = preserved.line_ids.sorted("id").read(ledger_fields)
+                    recovered = {
+                        "move_type": "out_refund",
+                        "posted": True,
+                        "outbound_intents": 0,
+                        "full_outbound_contract": True,
+                        "automatic_preparation": True,
+                        "same_original_sha256": digest,
+                    }
         self.assertEqual(len(proofs), 2)
+        self.assertTrue(recovered)
+        _logger.info(
+            "UAE_SELFBILL_CREDIT_RECOVERY=%s", json.dumps(recovered, sort_keys=True)
+        )
         _logger.info(
             "UAE_SELFBILL_CREDIT_REVIEW=%s", json.dumps(proofs, sort_keys=True)
         )
