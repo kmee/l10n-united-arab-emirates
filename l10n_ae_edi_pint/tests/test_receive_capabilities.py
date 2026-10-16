@@ -169,7 +169,7 @@ class TestUaeReceiveCapabilities(AccountTestInvoicingCommon):
         for field, expected_group in (("binding_id", binding), ("company_id", company)):
             rows = receiver.read_group(scope, groupby=[field], aggregates=["id:count"])
             self.assertEqual(len(rows), 1)
-            self.assertEqual(rows[0][0].id, expected_group.id)
+            self.assertEqual(rows[0][0], expected_group.id)
             self.assertEqual(rows[0][1], 5)
         before = {
             row.id: (

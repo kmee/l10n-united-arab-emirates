@@ -357,53 +357,10 @@
             </list>
         </field>
     </record>
-    <record id="edi_inbox_search" model="ir.ui.view">
-        <field name="name">l10n_ae.edi.inbox.search</field>
-        <field name="model">l10n_ae.edi.inbox</field>
-        <field name="arch" type="xml">
-            <search string="Received UAE Documents">
-                <field name="remote_id" />
-                <field name="binding_id" />
-                <field name="company_id" groups="base.group_multi_company" />
-                <field name="received_at" />
-                <filter
-                    name="review"
-                    string="Requires Review"
-                    domain="[('state', '=', 'review')]"
-                />
-                <separator />
-                <filter
-                    name="identity_conflict"
-                    string="Remote ID Conflict"
-                    domain="[('identity_conflict', '=', True)]"
-                />
-                <separator />
-                <filter
-                    name="ingestion_conflict"
-                    string="Delivery Event Conflict"
-                    domain="[('ingestion_conflict', '=', True)]"
-                />
-                <group>
-                    <filter
-                        name="group_binding"
-                        string="ASP Binding"
-                        context="{'group_by': 'binding_id'}"
-                    />
-                    <filter
-                        name="group_company"
-                        string="Company"
-                        context="{'group_by': 'company_id'}"
-                        groups="base.group_multi_company"
-                    />
-                </group>
-            </search>
-        </field>
-    </record>
     <record id="edi_inbox_action" model="ir.actions.act_window">
         <field name="name">Received UAE Documents</field>
         <field name="res_model">l10n_ae.edi.inbox</field>
         <field name="view_mode">list,form</field>
-        <field name="search_view_id" ref="edi_inbox_search" />
     </record>
     <menuitem
         id="edi_inbox_menu"
