@@ -407,14 +407,15 @@ installed UAE modules alone did not install the newly discovered addon
 in the disposable upgrade rehearsal.</p>
 <p>A Community installation without native Peppol does not need it. No new
 credentials, permissions or configuration are introduced.</p>
-<p>Native applicability follows Odoo’s supported-country list and
-registration state. In the qualified public Odoo 20 source
+<p>The bridge checks the accounting fiscal country; native Peppol
+applicability follows Odoo’s physical company country and registration
+state. In qualified public Odoo 20
 (<tt class="docutils literal">65fca92369e515db7e340abef7dad47686c3da46</tt>), AE is absent from
-<tt class="docutils literal">PEPPOL_LIST</tt> in <tt class="docutils literal">account/models/company.py</tt>. The native-applicable
-AE branch is therefore forward compatibility, not a currently qualified
-UAE transport. The bridge retains the native applicability check so
-future native UAE support can delegate normally. Configuring an external
-ASP does not enable Odoo’s native verifier.</p>
+<tt class="docutils literal">PEPPOL_LIST</tt> in <tt class="docutils literal">account/models/company.py</tt>. A UAE fiscal company
+with an eligible foreign physical country can still enter the native
+delegation branch. This distinction does not establish UAE transport or
+network acceptance. Configuring an external ASP does not enable Odoo’s
+native verifier.</p>
 </div>
 <div class="section" id="usage">
 <h1><a class="toc-backref" href="#toc-entry-2">Usage</a></h1>

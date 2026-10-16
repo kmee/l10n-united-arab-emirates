@@ -86,6 +86,7 @@ class TestUaePeppolSend(AccountTestInvoicingCommon):
         self.env.company.write(
             {
                 "country_id": self.env.ref("base.be").id,
+                "account_fiscal_country_id": self.env.ref("base.be").id,
                 "account_peppol_proxy_state": "sender",
             }
         )
@@ -130,6 +131,7 @@ class TestUaePeppolSend(AccountTestInvoicingCommon):
         self.env.company.write(
             {
                 "country_id": self.env.ref("base.be").id,
+                "account_fiscal_country_id": self.env.ref("base.be").id,
                 "account_peppol_proxy_state": "sender",
             }
         )
@@ -175,3 +177,35 @@ class TestUaePeppolSend(AccountTestInvoicingCommon):
             ),
             before,
         )
+
+    def test_uae_fiscal_contact_uses_native_eligible_foreign_address(
+        self,
+    ):
+        company = self.env.company
+        company.write(
+            {
+                "country_id": self.env.ref("base.be").id,
+                "account_fiscal_country_id": self.env.ref("base.ae").id,
+                "account_peppol_proxy_state": "sender",
+            }
+        )
+        # country_code is the native physical country; the fiscal country is
+        # independently UAE. Both are public native company fields.
+        self.assertEqual(company.country_id.code, "BE")
+        self.assertEqual(company.country_code, "BE")
+        self.assertEqual(company.account_fiscal_country_id.code, "AE")
+        self.assertEqual(company.account_peppol_proxy_state, "sender")
+
+        partner = self.partner_a.with_company(company)
+        # This UAE-specific format is unsupported by native Peppol, so Odoo's
+        # real public endpoint action returns not_verified without HTTP lookup.
+        self.assertEqual(partner.invoice_edi_format, "kmee_ae_pint")
+        self.assertFalse(partner.peppol_verification_state)
+        form = partner.get_view(view_type="form")
+        buttons = etree.fromstring(form["arch"]).xpath(
+            "//button[@type='object'][@help=\"Verify partner's Peppol endpoint\"]"
+        )
+        self.assertEqual(len(buttons), 1)
+        action = getattr(partner, buttons[0].get("name"))()
+        self.assertFalse(action)
+        self.assertEqual(partner.peppol_verification_state, "not_verified")
