@@ -24,6 +24,186 @@ class TestUaeReceiveCapabilities(AccountTestInvoicingCommon):
             company_ids=[(6, 0, cls.env.company.ids)],
         )
 
+    def test_receiver_search_filters_retained_originals_without_accounting_access(self):
+        import ast
+
+        from lxml import etree
+
+        from odoo.exceptions import UserError
+
+        company = self.env.company
+        operator = new_test_user(
+            self.env,
+            login="uae-receiver-search-operator",
+            groups="l10n_ae_edi_pint.group_document_receiver",
+            company_id=company.id,
+            company_ids=[(6, 0, company.ids)],
+        )
+        receiver = (
+            self.env["l10n_ae.edi.inbox"]
+            .with_user(operator)
+            .with_context(allowed_company_ids=company.ids)
+        )
+        self.assertFalse(receiver.env.su)
+        self.assertEqual(operator.company_ids, company)
+        for group in (
+            "account.group_account_invoice",
+            "account.group_account_readonly",
+            "account.group_account_manager",
+            "base.group_system",
+            "l10n_ae_edi.group_controlled_sender",
+            "l10n_ae_edi.group_event_receiver",
+        ):
+            self.assertFalse(operator.has_group(group), group)
+        # Setup reads action configuration; the Receiver compiles and uses the view.
+        # Native /web/action/load also reads this configuration as administrator.
+        action = self.env.ref("l10n_ae_edi_pint.edi_receiver_inbox_action")
+        self.assertTrue(
+            action.search_view_id,
+            "Receiver action must explicitly select the shared inbox search view",
+        )
+        accounting_action = self.env.ref("l10n_ae_edi_pint.edi_inbox_action")
+        self.assertEqual(action.search_view_id, accounting_action.search_view_id)
+        for entry in (action, accounting_action):
+            context = ast.literal_eval(entry.context or "{}")
+            self.assertFalse(context.get("search_default_review"))
+        view = receiver.get_view(action.search_view_id.id, "search")
+        arch = etree.fromstring(view["arch"].encode())
+        self.assertEqual(arch.tag, "search")
+        filters = {node.get("name"): node for node in arch.xpath(".//filter[@name]")}
+        self.assertTrue(
+            {"review", "identity_conflict", "ingestion_conflict"} <= filters.keys()
+        )
+        groups = {}
+        for node in arch.xpath(".//filter[@context]"):
+            context = ast.literal_eval(node.get("context"))
+            if context.get("group_by") in ("binding_id", "company_id"):
+                groups[context["group_by"]] = node
+        self.assertEqual(set(groups), {"binding_id"})
+        # Core derives the multi-company display group from authorized companies.
+        # Keep the original Receiver single-company; use a separate native actor.
+        other_company = self.env["res.company"].create(
+            {"name": "Synthetic Receiver Search Other Company"}
+        )
+        authorized_companies = company | other_company
+        grouped_operator = new_test_user(
+            self.env,
+            login="uae-receiver-search-grouped-operator",
+            groups=(
+                "l10n_ae_edi_pint.group_document_receiver,base.group_multi_company"
+            ),
+            company_id=company.id,
+            company_ids=[(6, 0, authorized_companies.ids)],
+        )
+        self.assertEqual(grouped_operator.company_ids, authorized_companies)
+        self.assertTrue(grouped_operator.has_group("base.group_multi_company"))
+        self.assertFalse(grouped_operator.has_group("account.group_account_invoice"))
+        self.assertFalse(grouped_operator.has_group("account.group_account_manager"))
+        grouped_receiver = receiver.with_user(grouped_operator)
+        grouped_view = grouped_receiver.get_view(action.search_view_id.id, "search")
+        grouped_arch = etree.fromstring(grouped_view["arch"].encode())
+        company_group = grouped_arch.xpath(".//filter[@name='group_company']")
+        self.assertEqual(len(company_group), 1)
+        self.assertEqual(
+            ast.literal_eval(company_group[0].get("context")),
+            {"group_by": "company_id"},
+        )
+
+        binding = (
+            self.env["l10n_ae.edi.binding"]
+            .with_user(self.manager)
+            .create({"name": "Synthetic receiver search contract"})
+        )
+        review_controlled_binding(
+            binding,
+            self.manager,
+            capabilities=("receive",),
+            note="Synthetic storage/search fixture only; no fiscal validity claim.",
+        )
+        fresh = receiver.receive_controlled_document(
+            binding.id, "search-fresh", b"<Invoice/>", event_id="search-fresh-event"
+        )
+        identity_first = receiver.receive_controlled_document(
+            binding.id, "search-identity", b"<Invoice id='one'/>"
+        )
+        identity_second = receiver.receive_controlled_document(
+            binding.id, "search-identity", b"<Invoice id='two'/>"
+        )
+        event_first = receiver.receive_controlled_document(
+            binding.id,
+            "search-event-one",
+            b"<Invoice/>",
+            event_id="shared-search-event",
+        )
+        event_second = receiver.receive_controlled_document(
+            binding.id,
+            "search-event-two",
+            b"<Invoice id='other'/>",
+            event_id="shared-search-event",
+        )
+        originals = (
+            fresh | identity_first | identity_second | event_first | event_second
+        )
+        originals.invalidate_recordset()
+        self.assertEqual(len(originals), 5)
+        self.assertEqual(fresh.state, "received")
+        self.assertEqual(
+            (identity_first | identity_second).mapped("state"), ["review", "review"]
+        )
+        self.assertEqual(
+            (event_first | event_second).mapped("state"), ["review", "review"]
+        )
+        expected = {
+            "review": identity_first | identity_second | event_first | event_second,
+            "identity_conflict": identity_first | identity_second,
+            "ingestion_conflict": event_first | event_second,
+        }
+        scope = [("binding_id", "=", binding.id)]
+        self.assertEqual(set(receiver.search(scope).ids), set(originals.ids))
+        self.assertIn(fresh, receiver.search(scope))
+        for name, matching in expected.items():
+            domain = ast.literal_eval(filters[name].get("domain"))
+            self.assertEqual(
+                set(receiver.search(scope + domain).ids), set(matching.ids), name
+            )
+        for field, expected_group in (("binding_id", binding), ("company_id", company)):
+            rows = receiver.read_group(scope, groupby=[field], aggregates=["id:count"])
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0][0], expected_group.id)
+            self.assertEqual(rows[0][1], 5)
+        before = {
+            row.id: (
+                row.original_xml.content,
+                row.xml_hash,
+                row.state,
+                row.create_date,
+                row.write_date,
+                row.ingestion_event_ids.ids,
+                row.processing_history_ids.ids,
+            )
+            for row in originals
+        }
+        with self.cr.savepoint(), self.assertRaises(AccessError):
+            fresh.action_process()
+        with self.cr.savepoint(), self.assertRaises(AccessError):
+            fresh.check_access("write")
+        with self.cr.savepoint(), self.assertRaisesRegex(UserError, "protected"):
+            fresh.write({"diagnostic": "Receiver must not edit retained evidence"})
+        originals.invalidate_recordset()
+        after = {
+            row.id: (
+                row.original_xml.content,
+                row.xml_hash,
+                row.state,
+                row.create_date,
+                row.write_date,
+                row.ingestion_event_ids.ids,
+                row.processing_history_ids.ids,
+            )
+            for row in originals
+        }
+        self.assertEqual(after, before)
+
     def test_receive_only_review_retains_original_and_deduplicates_delivery(self):
         actor = (
             self.env["l10n_ae.edi.binding"]
