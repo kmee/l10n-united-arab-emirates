@@ -55,12 +55,14 @@ class TestUaeReceiveCapabilities(AccountTestInvoicingCommon):
             "l10n_ae_edi.group_event_receiver",
         ):
             self.assertFalse(operator.has_group(group), group)
-        action = receiver.env.ref("l10n_ae_edi_pint.edi_receiver_inbox_action")
+        # Setup reads action configuration; the Receiver compiles and uses the view.
+        # Native /web/action/load also reads this configuration as administrator.
+        action = self.env.ref("l10n_ae_edi_pint.edi_receiver_inbox_action")
         self.assertTrue(
             action.search_view_id,
             "Receiver action must explicitly select the shared inbox search view",
         )
-        accounting_action = receiver.env.ref("l10n_ae_edi_pint.edi_inbox_action")
+        accounting_action = self.env.ref("l10n_ae_edi_pint.edi_inbox_action")
         self.assertEqual(action.search_view_id, accounting_action.search_view_id)
         for entry in (action, accounting_action):
             context = ast.literal_eval(entry.context or "{}")
