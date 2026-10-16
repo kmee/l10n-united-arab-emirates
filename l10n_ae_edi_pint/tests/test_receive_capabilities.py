@@ -80,7 +80,12 @@ class TestUaeReceiveCapabilities(AccountTestInvoicingCommon):
             if context.get("group_by") in ("binding_id", "company_id"):
                 groups[context["group_by"]] = node
         self.assertEqual(set(groups), {"binding_id"})
-        # Multi-company display does not grant access to additional companies.
+        # Core derives the multi-company display group from authorized companies.
+        # Keep the original Receiver single-company; use a separate native actor.
+        other_company = self.env["res.company"].create(
+            {"name": "Synthetic Receiver Search Other Company"}
+        )
+        authorized_companies = company | other_company
         grouped_operator = new_test_user(
             self.env,
             login="uae-receiver-search-grouped-operator",
@@ -88,9 +93,10 @@ class TestUaeReceiveCapabilities(AccountTestInvoicingCommon):
                 "l10n_ae_edi_pint.group_document_receiver,base.group_multi_company"
             ),
             company_id=company.id,
-            company_ids=[(6, 0, company.ids)],
+            company_ids=[(6, 0, authorized_companies.ids)],
         )
-        self.assertEqual(grouped_operator.company_ids, company)
+        self.assertEqual(grouped_operator.company_ids, authorized_companies)
+        self.assertTrue(grouped_operator.has_group("base.group_multi_company"))
         self.assertFalse(grouped_operator.has_group("account.group_account_invoice"))
         self.assertFalse(grouped_operator.has_group("account.group_account_manager"))
         grouped_receiver = receiver.with_user(grouped_operator)
