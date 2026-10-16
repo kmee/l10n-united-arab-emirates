@@ -24,6 +24,120 @@ _logger = logging.getLogger(__name__)
 
 @tagged("post_install", "-at_install")
 class TestUaeInvoiceXmlSource(UaePintTestCommon):
+    def test_vat_group_member_refuses_representative_endpoint_until_repaired(self):
+        member = self.env.company
+        member.l10n_ae_edi_auto_prepare = False
+        group_trn = "100000004200003"
+        representative = self.env["res.company"].create(
+            {
+                "name": "Synthetic VAT-group representative",
+                "country_id": self.env.ref("base.ae").id,
+                "account_fiscal_country_id": self.env.ref("base.ae").id,
+                "currency_id": self.env.ref("base.AED").id,
+                "vat": group_trn,
+                "l10n_ae_tin": "1000000042",
+                "l10n_ae_tin_confirmed": True,
+            }
+        )
+        member.partner_id.write(
+            {
+                "vat": group_trn,
+                "routing_scheme": "0235",
+                "routing_endpoint": representative.l10n_ae_tin,
+                "comment": "Synthetic VAT-group onboarding review: member keeps "
+                "its own TIN1000000001, distinct from representative1000000042. "
+                "Shared VAT TRN is not the member's electronic address.",
+            }
+        )
+        self.assertNotEqual(member, representative)
+        self.assertEqual(member.l10n_ae_tin, "1000000001")
+        self.assertTrue(member.l10n_ae_tin_confirmed)
+        self.assertEqual(member.vat, representative.vat)
+        binding = self._reviewed_binding(
+            {
+                "name": "Synthetic VAT-group member sending contract",
+                "fiscal_uuid_policy": "controlled_local",
+            },
+            capabilities=CONTROLLED_CAPABILITIES,
+            note="Synthetic member-specific onboarding and sending review.",
+        )
+        invoice = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a
+        ).with_user(self.simple_accountman)
+        self.assertFalse(invoice.env.su)
+        self.assertFalse(invoice.env.user.has_group("base.group_system"))
+        invoice.l10n_ae_binding_id = binding
+        invoice.action_post()
+        fields = [
+            "state",
+            "name",
+            "company_id",
+            "amount_untaxed",
+            "amount_tax",
+            "amount_total",
+            "l10n_ae_fiscal_uuid",
+            "l10n_ae_transmission_ids",
+            "write_date",
+        ]
+        ledger_fields = [
+            "account_id",
+            "debit",
+            "credit",
+            "balance",
+            "amount_currency",
+            "tax_ids",
+            "write_date",
+        ]
+        before = invoice.read(fields)
+        ledger = invoice.line_ids.sorted("id").read(ledger_fields)
+        self.assertEqual(invoice.state, "posted")
+        self.assertEqual(
+            (invoice.amount_untaxed, invoice.amount_tax, invoice.amount_total),
+            (100, 5, 105),
+        )
+        self.assertFalse(
+            invoice.l10n_ae_fiscal_uuid or invoice.l10n_ae_transmission_ids
+        )
+        for action in (invoice.action_l10n_ae_validate, invoice.action_l10n_ae_prepare):
+            with self.assertRaisesRegex(UserError, "Routing Endpoint.*confirmed TIN"):
+                action()
+            self.assertEqual(invoice.read(fields), before)
+            self.assertEqual(invoice.line_ids.sorted("id").read(ledger_fields), ledger)
+            self.assertEqual(member.partner_id.routing_endpoint, "1000000042")
+            self.assertEqual(member.l10n_ae_tin, "1000000001")
+            self.assertEqual(member.vat, group_trn)
+        member.partner_id.routing_endpoint = member.l10n_ae_tin
+        invoice.action_l10n_ae_validate()
+        invoice.action_l10n_ae_prepare()
+        issue = invoice.l10n_ae_transmission_id
+        self.assertEqual(len(invoice.l10n_ae_transmission_ids), 1)
+        self.assertEqual(issue.submission_state, "queued")
+        self.assertTrue(invoice.l10n_ae_fiscal_uuid)
+        self.assertFalse(issue.attempt_ids or issue.event_ids or issue.remote_id)
+        tree = etree.fromstring(issue.xml_content.encode())
+        endpoint = tree.find("cac:AccountingSupplierParty/cac:Party/cbc:EndpointID", NS)
+        self.assertEqual(
+            (endpoint.get("schemeID"), endpoint.text), ("0235", "1000000001")
+        )
+        self.assertNotEqual(endpoint.text, representative.l10n_ae_tin)
+        self.assertEqual(
+            tree.findtext(
+                "cac:AccountingSupplierParty/cac:Party/cac:PartyTaxScheme/cbc:CompanyID",
+                namespaces=NS,
+            ),
+            group_trn,
+        )
+        self.assertEqual(invoice.line_ids.sorted("id").read(ledger_fields), ledger)
+        self.assertEqual(invoice.state, "posted")
+        self.assertEqual(
+            (invoice.amount_untaxed, invoice.amount_tax, invoice.amount_total),
+            (100, 5, 105),
+        )
+        self.assertEqual(representative.l10n_ae_tin, "1000000042")
+        self.assertEqual(representative.vat, group_trn)
+        report = invoice.validate_l10n_ae_pint()
+        self.assertTrue(report["valid"], report)
+
     def test_uae_issuer_wrong_scheme_blocks_check_and_prepare_until_repaired(self):
         self.env.company.l10n_ae_edi_auto_prepare = False
         binding = self._reviewed_binding(

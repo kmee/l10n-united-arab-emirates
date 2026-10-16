@@ -239,6 +239,18 @@ class AccountMove(models.Model):
                         "preparing the e-invoice."
                     )
                 )
+            if (
+                move.company_id.partner_id.routing_endpoint
+                != move.company_id.l10n_ae_tin
+            ):
+                raise UserError(
+                    self.env._(
+                        "The issuing UAE entity's Routing Endpoint must match its "
+                        "confirmed TIN. Review the company contact's 10-digit "
+                        "endpoint; do not substitute a tax group representative's "
+                        "TIN."
+                    )
+                )
         formatter = self.env["account.edi.ubl.kmee_ae"]
         for move in self:
             supplier, customer = (
