@@ -24,6 +24,107 @@ _logger = logging.getLogger(__name__)
 
 @tagged("post_install", "-at_install")
 class TestUaeInvoiceXmlSource(UaePintTestCommon):
+    def test_uae_issuer_wrong_scheme_blocks_check_and_prepare_until_repaired(self):
+        self.env.company.l10n_ae_edi_auto_prepare = False
+        binding = self._reviewed_binding(
+            {
+                "name": "Synthetic issuer scheme review",
+                "fiscal_uuid_policy": "controlled_local",
+            },
+            capabilities=CONTROLLED_CAPABILITIES,
+            note="Synthetic UAE issuer scheme validation contract.",
+        )
+        invoice = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a
+        ).with_user(self.simple_accountman)
+        self.assertFalse(invoice.env.su)
+        self.assertFalse(invoice.env.user.has_group("base.group_system"))
+        invoice.l10n_ae_binding_id = binding
+        invoice.action_post()
+        fields = [
+            "state",
+            "name",
+            "amount_untaxed",
+            "amount_tax",
+            "amount_total",
+            "l10n_ae_fiscal_uuid",
+            "l10n_ae_transmission_ids",
+            "write_date",
+        ]
+        ledger_fields = [
+            "account_id",
+            "debit",
+            "credit",
+            "balance",
+            "amount_currency",
+            "tax_ids",
+            "write_date",
+        ]
+        before = invoice.read(fields)
+        ledger = invoice.line_ids.sorted("id").read(ledger_fields)
+        self.assertEqual(
+            (invoice.amount_untaxed, invoice.amount_tax, invoice.amount_total),
+            (100, 5, 105),
+        )
+        self.assertEqual(invoice.state, "posted")
+        self.assertFalse(
+            invoice.l10n_ae_fiscal_uuid or invoice.l10n_ae_transmission_ids
+        )
+        issuer = self.env.company.partner_id
+        original_identity = (
+            issuer.routing_endpoint,
+            issuer.vat,
+            self.env.company.l10n_ae_tin,
+        )
+        self.assertEqual(
+            original_identity, ("1000000001", "100000000100003", "1000000001")
+        )
+        # A generic EAS value is syntactically selectable, but is not this UAE
+        # entity's onboarded scheme. The endpoint and VAT/TIN stay unchanged.
+        issuer.routing_scheme = "0209"
+        self.assertEqual(issuer.routing_scheme, "0209")
+        for action in (invoice.action_l10n_ae_validate, invoice.action_l10n_ae_prepare):
+            with self.assertRaisesRegex(UserError, "UAE.*0235"):
+                action()
+            self.assertEqual(invoice.read(fields), before)
+            self.assertEqual(invoice.line_ids.sorted("id").read(ledger_fields), ledger)
+            self.assertEqual(
+                (issuer.routing_endpoint, issuer.vat, self.env.company.l10n_ae_tin),
+                original_identity,
+            )
+        issuer.routing_scheme = "0235"
+        invoice.action_l10n_ae_validate()
+        invoice.action_l10n_ae_prepare()
+        issue = invoice.l10n_ae_transmission_id
+        self.assertEqual(len(invoice.l10n_ae_transmission_ids), 1)
+        self.assertEqual(issue.submission_state, "queued")
+        self.assertTrue(invoice.l10n_ae_fiscal_uuid)
+        self.assertFalse(issue.attempt_ids or issue.event_ids or issue.remote_id)
+        tree = etree.fromstring(issue.xml_content.encode())
+        endpoint = tree.find("cac:AccountingSupplierParty/cac:Party/cbc:EndpointID", NS)
+        self.assertEqual(
+            (endpoint.get("schemeID"), endpoint.text), ("0235", "1000000001")
+        )
+        self.assertEqual(
+            tree.findtext(
+                "cac:AccountingSupplierParty/cac:Party/cac:PartyTaxScheme/cbc:CompanyID",
+                namespaces=NS,
+            ),
+            "100000000100003",
+        )
+        self.assertEqual(invoice.line_ids.sorted("id").read(ledger_fields), ledger)
+        self.assertEqual(
+            (
+                invoice.state,
+                invoice.amount_untaxed,
+                invoice.amount_tax,
+                invoice.amount_total,
+            ),
+            ("posted", 100, 5, 105),
+        )
+        report = invoice.validate_l10n_ae_pint()
+        self.assertTrue(report["valid"], report)
+
     def test_uae_participant_preserves_registered_identity_at_foreign_address(self):
         self.env.company.write(
             {
