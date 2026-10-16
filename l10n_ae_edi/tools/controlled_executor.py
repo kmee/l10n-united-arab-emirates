@@ -80,6 +80,14 @@ class ControlledExecutor:
                 and record.next_attempt_at > self.clock()
             ):
                 return "unknown"
+            # Reject corrupt storage before validation interprets snapshot JSON.
+            if (
+                hashlib.sha256(record.payload.encode()).hexdigest()
+                != record.payload_hash
+            ):
+                raise UaeDocumentValidationError(
+                    record.env._("Frozen UAE snapshot integrity check failed.")
+                )
             # Validate only this accessible frozen issue; do not grant invoice ACLs.
             validation = record.sudo()._validate_controlled_document()
             document = {
@@ -89,13 +97,6 @@ class ControlledExecutor:
                 "xml": record.xml_content or None,
                 "xml_sha256": record.xml_hash or None,
             }
-            if (
-                hashlib.sha256(record.payload.encode()).hexdigest()
-                != record.payload_hash
-            ):
-                raise UaeDocumentValidationError(
-                    record.env._("Frozen UAE snapshot integrity check failed.")
-                )
             key, provider = record.idempotency_key, record.provider
             tin = json.loads(record.payload)["company"]["tin"]
             pending_dimensions = record._controlled_pending_dimensions()
