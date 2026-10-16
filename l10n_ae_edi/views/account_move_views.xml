@@ -334,7 +334,7 @@
                                 <field name="company_id" column_invisible="True" />
                                 <field
                                     name="invoice_id"
-                                    domain="[('company_id', '=', parent.company_id), ('currency_id', '=', parent.currency_id), ('state', '=', 'posted'), ('move_type', '=', 'in_invoice' if parent.is_self_billing else 'out_invoice')]"
+                                    domain="[('company_id', '=', parent.company_id), ('currency_id', '=', parent.currency_id), ('state', '=', 'posted'), ('move_type', '=', 'in_invoice' if parent.is_self_billing else 'out_invoice'), ('commercial_partner_id', '=', parent.commercial_partner_id), ('l10n_ae_document_category', '=', parent.l10n_ae_document_category), ('is_self_billing', '=', parent.is_self_billing), ('l10n_ae_received_document', '=', False)]"
                                     options="{'no_create': True}"
                                 />
                                 <field name="number" readonly="invoice_id" />
