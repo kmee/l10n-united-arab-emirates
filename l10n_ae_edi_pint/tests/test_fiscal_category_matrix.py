@@ -1,6 +1,7 @@
 # Copyright 2026 KMEE
 # License AGPL-3.0 or later (https://www.gnu.org/licenses/agpl).
 import json
+import logging
 from decimal import Decimal
 
 from lxml import etree
@@ -16,6 +17,8 @@ from odoo.addons.l10n_ae_edi.tests.common import (
 )
 
 from .common import requires_normative_resources
+
+_logger = logging.getLogger(__name__)
 
 NS = {
     "cbc": "urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2",
@@ -2141,6 +2144,207 @@ class TestUaeFiscalCategoryMatrix(AccountTestInvoicingCommon):
         self.assertEqual(invoice.line_ids.read(ledger_fields), ledger)
         self.assertEqual(
             self.env.company.tax_calculation_rounding_method, "round_per_line"
+        )
+
+    @requires_normative_resources("1.0.4")
+    def test_many_small_usd_lines_global_tax_preserves_native_aed(self):
+        self.env.company.tax_calculation_rounding_method = "round_globally"
+        usd = self.env.ref("base.USD")
+        usd.active = True
+        self.env["res.currency.rate"].create(
+            {
+                "currency_id": usd.id,
+                "company_id": self.env.company.id,
+                "name": "2019-01-01",
+                "rate": 1 / 3.6725,
+            }
+        )
+        tax = self.tax_sale_a.copy(
+            {
+                "name": "Synthetic many small S global round",
+                "amount": 5,
+                "ubl_cii_tax_category_code": "S",
+            }
+        )
+        binding = review_controlled_binding(
+            self.env["l10n_ae.edi.binding"].create(
+                {"name": "Synthetic many small lines global rounding"}
+            ),
+            self.simple_accountman,
+            capabilities=CONTROLLED_CAPABILITIES,
+            note="Synthetic reviewed controlled contract fixture.",
+        )
+        invoice = (
+            self.env["account.move"]
+            .with_user(self.simple_accountman)
+            .with_context(allowed_company_ids=[self.env.company.id])
+            .create(
+                {
+                    "move_type": "out_invoice",
+                    "partner_id": self.partner_a.id,
+                    "journal_id": self.company_data["default_journal_sale"].id,
+                    "currency_id": usd.id,
+                    "invoice_date": "2019-01-01",
+                    "l10n_ae_binding_id": binding.id,
+                    "l10n_ae_fiscal_uuid": "fbfbfbfb-3333-4333-8333-333333333333",
+                    "l10n_ae_tax_exchange_rate": "3.672500",
+                    "l10n_ae_tax_exchange_date": "2019-01-01",
+                    "l10n_ae_tax_exchange_source": "SYNTH-USD-100-SMALL-LINES-GLOBAL",
+                    "invoice_line_ids": [
+                        Command.create(
+                            {
+                                "name": "Synthetic global small line " + str(index),
+                                "quantity": 1,
+                                "price_unit": 1.23,
+                                "account_id": self.company_data[
+                                    "default_account_revenue"
+                                ].id,
+                                "tax_ids": [Command.set(tax.ids)],
+                            }
+                        )
+                        for index in range(100)
+                    ],
+                }
+            )
+        )
+        self.assertFalse(invoice.env.su)
+        invoice.action_post()
+        self.assertEqual(len(invoice.invoice_line_ids), 100)
+
+        # Independent Decimal worksheet: 100 * USD1.23, 5% tax, quote 3.672500.
+        # Source invoice totals are not dependent on the AED posting prediction.
+        expected_source = (Decimal("123.00"), Decimal("6.15"), Decimal("129.15"))
+        self.assertEqual(
+            tuple(
+                Decimal(str(x))
+                for x in (
+                    invoice.amount_untaxed,
+                    invoice.amount_tax,
+                    invoice.amount_total,
+                )
+            ),
+            expected_source,
+        )
+        # Independent global price-excluded worksheet: net AED451.717500
+        # rounds to451.72 and VAT22.585875 to22.59. Core redistributes the
+        # base delta to its product lines; sum of rounded base and tax is474.31,
+        # distinct from rounding raw converted gross474.303375 to474.30.
+        expected_native_signed = (
+            Decimal("451.72"),
+            Decimal("22.59"),
+            Decimal("474.31"),
+        )
+        observed_native_signed = tuple(
+            Decimal(str(x))
+            for x in (
+                invoice.amount_untaxed_signed,
+                invoice.amount_tax_signed,
+                invoice.amount_total_signed,
+            )
+        )
+        self.assertEqual(
+            observed_native_signed,
+            expected_native_signed,
+            msg="Native product FX balances and aggregated VAT must stay intact",
+        )
+
+        ledger_fields = [
+            "account_id",
+            "display_type",
+            "debit",
+            "credit",
+            "amount_currency",
+            "balance",
+            "create_date",
+            "write_date",
+        ]
+        ledger = invoice.line_ids.read(ledger_fields)
+
+        # Public actions must preserve accounting while retaining raw line precision.
+        invoice.action_l10n_ae_validate()
+        xml_text = invoice.preview_l10n_ae_pint()
+        xml = etree.fromstring(xml_text.encode())
+        line_extension_source = xml.xpath(
+            "./cac:InvoiceLine/cbc:LineExtensionAmount[@currencyID='USD']/text()",
+            namespaces=NS,
+        )
+        line_gross_aed = xml.xpath(
+            "./cac:InvoiceLine/cac:ItemPriceExtension/cbc:Amount[@currencyID='AED']/text()",
+            namespaces=NS,
+        )
+        line_vat_aed = xml.xpath(
+            "./cac:InvoiceLine/cac:ItemPriceExtension/cac:TaxTotal/cbc:TaxAmount[@currencyID='AED']/text()",
+            namespaces=NS,
+        )
+        self.assertEqual(len(line_extension_source), 100, xml_text[:2000])
+        self.assertEqual(len(line_gross_aed), 100, xml_text[:2000])
+        self.assertEqual(len(line_vat_aed), 100, xml_text[:2000])
+        line_amounts = {
+            "source_line_extensions_usd": line_extension_source,
+            "gross_aed_lines": line_gross_aed,
+            "vat_aed_lines": line_vat_aed,
+            "invoice_aed_vat_header": xml.xpath(
+                "./cac:TaxTotal/cbc:TaxAmount[@currencyID='AED']/text()", namespaces=NS
+            ),
+            "invoice_aed_gross_header": xml.xpath(
+                "./cac:AdditionalDocumentReference[cbc:ID='AED']/cbc:DocumentDescription/text()",
+                namespaces=NS,
+            ),
+        }
+        report = invoice.validate_l10n_ae_pint()
+        measurement = {
+            "observed_source_totals_usd": [
+                str(value)
+                for value in (
+                    invoice.amount_untaxed,
+                    invoice.amount_tax,
+                    invoice.amount_total,
+                )
+            ],
+            "observed_native_signed_aed": [
+                str(value) for value in observed_native_signed
+            ],
+            "xml_amounts": line_amounts,
+            "validation": report,
+        }
+        _logger.info(
+            "UAE_SMALL_LINES_GLOBAL=%s",
+            json.dumps(measurement, default=str, sort_keys=True),
+        )
+        self.assertEqual(
+            [Decimal(value) for value in line_extension_source], [Decimal("1.23")] * 100
+        )
+        self.assertEqual(
+            [Decimal(value) for value in line_gross_aed], [Decimal("4.74303375")] * 100
+        )
+        self.assertEqual(
+            [Decimal(value) for value in line_vat_aed], [Decimal("0.22585875")] * 100
+        )
+        self.assertEqual(line_amounts["invoice_aed_vat_header"], ["22.59"])
+        self.assertEqual(line_amounts["invoice_aed_gross_header"], ["474.31"])
+        # This is pinned technical validation, not fiscal ratification of the AED
+        # line/header difference: raw gross sum474.303375 differs from native474.31.
+        self.assertTrue(report["valid"], report)
+        invoice.action_l10n_ae_prepare()
+        issue = invoice.l10n_ae_transmission_id
+        self.assertTrue(issue)
+        self.assertEqual(issue.xml_content, xml_text)
+        evidence_fields = [
+            "payload",
+            "xml_content",
+            "idempotency_key",
+            "create_date",
+            "write_date",
+        ]
+        frozen_issue = issue.read(evidence_fields)
+        invoice.action_l10n_ae_validate_pint()
+        invoice.action_l10n_ae_prepare()
+        self.assertEqual(issue.read(evidence_fields), frozen_issue)
+        self.assertFalse(issue.attempt_ids or issue.event_ids or issue.remote_id)
+        self.assertEqual(invoice.state, "posted")
+        self.assertEqual(invoice.line_ids.read(ledger_fields), ledger)
+        self.assertEqual(
+            self.env.company.tax_calculation_rounding_method, "round_globally"
         )
 
     def test_all_exempt_tax_invoice_requires_review_without_blocking_posting(self):
