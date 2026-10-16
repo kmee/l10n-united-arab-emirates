@@ -357,14 +357,19 @@ class UaeEdiBilling(models.AbstractModel):
             raise UserError(
                 self.env._("Only controlled sandbox preparation is available.")
             )
-        move = self.env["account.move"].sudo(False).browse(move_id).exists()
+        # Search through the caller's ordinary access rules and bind the lookup
+        # to the already-authorized company. A missing or foreign move has one
+        # response, so this API does not reveal whether another company's ID exists.
+        move = (
+            self.env["account.move"]
+            .sudo(False)
+            .search([("id", "=", move_id), ("company_id", "=", company_id)], limit=1)
+        )
         if not move:
-            raise UserError(self.env._("The existing invoice was not found."))
-        move.check_access("write")
-        if move.company_id.id != company_id:
             raise AccessError(
-                self.env._("The invoice is outside the authorized company.")
+                self.env._("The invoice is unavailable to the authorized company.")
             )
+        move.check_access("write")
         if move.state != "posted":
             raise UserError(self.env._("Post the invoice before billing preparation."))
         if (
