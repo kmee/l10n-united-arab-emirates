@@ -245,3 +245,96 @@ class TestUaeProviderBinding(AccountTestInvoicingCommon):
                     "fiscal_uuid_policy": "controlled_local",
                 }
             )
+
+    def test_environment_roundtrip_requires_fresh_contract_review(self):
+        capabilities = self.env["l10n_ae.edi.capability"].search(
+            [("code", "in", ["submit", "lookup", "report", "billing_invoice"])]
+        )
+        self.assertEqual(len(capabilities), 4)
+        manager = self.simple_accountman
+        self.assertFalse(manager.has_group("base.group_system"))
+        binding = (
+            self.env["l10n_ae.edi.binding"]
+            .with_user(manager)
+            .with_context(allowed_company_ids=self.env.company.ids)
+            .create(
+                {
+                    "name": "Synthetic environment roundtrip contract",
+                    "company_id": self.env.company.id,
+                    "environment": "sandbox",
+                    "fiscal_uuid_policy": "supplied",
+                    "capability_profile": "kmee-controlled-1",
+                    "capability_ids": [(6, 0, capabilities.ids)],
+                    "capability_review_note": "Synthetic isolated test configuration.",
+                }
+            )
+        )
+        self.assertFalse(binding.env.su)
+        declaration_fields = [
+            "company_id",
+            "provider",
+            "fiscal_uuid_policy",
+            "capability_profile",
+            "capability_ids",
+            "capability_review_note",
+        ]
+        declaration = binding.read(declaration_fields)
+        review_fields = [
+            "environment",
+            "capability_review_state",
+            "capability_reviewed_by",
+            "capability_reviewed_at",
+            "capability_review_hash",
+            "controlled_dispatch_enabled",
+        ]
+        binding.action_review_capabilities()
+        self.assertEqual(binding.capability_review_state, "ready")
+        self.assertEqual(binding.capability_reviewed_by, manager)
+        self.assertTrue(binding.capability_reviewed_at)
+        self.assertTrue(binding.capability_review_hash)
+        with Form(binding) as form:
+            form.controlled_dispatch_enabled = True
+        self.assertTrue(binding.controlled_dispatch_enabled)
+
+        with Form(binding) as form:
+            form.environment = "production"
+        self.assertEqual(binding.environment, "production")
+        self.assertEqual(binding.capability_review_state, "review")
+        self.assertFalse(binding.capability_reviewed_by)
+        self.assertFalse(binding.capability_reviewed_at)
+        self.assertFalse(binding.capability_review_hash)
+        self.assertFalse(binding.controlled_dispatch_enabled)
+        production = binding.read(review_fields)
+        with (
+            self.assertRaisesRegex(ValidationError, "controlled sandbox"),
+            self.cr.savepoint(),
+        ):
+            binding.action_review_capabilities()
+        self.assertEqual(binding.read(review_fields), production)
+        # The native production form hides this switch; public ORM must refuse it
+        # too. The test never constructs a production client or sends a document.
+        with (
+            self.assertRaisesRegex(ValidationError, "requires the sandbox"),
+            self.cr.savepoint(),
+        ):
+            binding.write({"controlled_dispatch_enabled": True})
+        self.assertEqual(binding.read(review_fields), production)
+
+        with Form(binding) as form:
+            form.environment = "sandbox"
+        self.assertEqual(binding.environment, "sandbox")
+        self.assertEqual(binding.capability_review_state, "review")
+        self.assertFalse(binding.capability_reviewed_by)
+        self.assertFalse(binding.capability_reviewed_at)
+        self.assertFalse(binding.capability_review_hash)
+        self.assertFalse(binding.controlled_dispatch_enabled)
+        binding.action_review_capabilities()
+        self.assertEqual(binding.capability_review_state, "ready")
+        self.assertEqual(binding.capability_reviewed_by, manager)
+        self.assertTrue(binding.capability_reviewed_at)
+        self.assertTrue(binding.capability_review_hash)
+        self.assertFalse(binding.controlled_dispatch_enabled)
+        with Form(binding) as form:
+            form.controlled_dispatch_enabled = True
+        self.assertTrue(binding.controlled_dispatch_enabled)
+        self.assertEqual(binding.read(declaration_fields), declaration)
