@@ -2225,13 +2225,14 @@ class TestUaeFiscalCategoryMatrix(AccountTestInvoicingCommon):
             ),
             expected_source,
         )
-        # Independently worked native FX order: 100 rounded product balances
-        # of AED4.52, then one aggregated VAT amount AED22.585875 -> AED22.59.
-        # Global tax rounding does not aggregate the posted product FX balances.
+        # Independent global price-excluded worksheet: net AED451.717500
+        # rounds to451.72 and VAT22.585875 to22.59. Core redistributes the
+        # base delta to its product lines; sum of rounded base and tax is474.31,
+        # distinct from rounding raw converted gross474.303375 to474.30.
         expected_native_signed = (
-            Decimal("452.00"),
+            Decimal("451.72"),
             Decimal("22.59"),
-            Decimal("474.59"),
+            Decimal("474.31"),
         )
         observed_native_signed = tuple(
             Decimal(str(x))
@@ -2320,9 +2321,9 @@ class TestUaeFiscalCategoryMatrix(AccountTestInvoicingCommon):
             [Decimal(value) for value in line_vat_aed], [Decimal("0.22585875")] * 100
         )
         self.assertEqual(line_amounts["invoice_aed_vat_header"], ["22.59"])
-        self.assertEqual(line_amounts["invoice_aed_gross_header"], ["474.59"])
+        self.assertEqual(line_amounts["invoice_aed_gross_header"], ["474.31"])
         # This is pinned technical validation, not fiscal ratification of the AED
-        # line/header difference: raw gross sum 474.303375 differs from native 474.59.
+        # line/header difference: raw gross sum474.303375 differs from native474.31.
         self.assertTrue(report["valid"], report)
         invoice.action_l10n_ae_prepare()
         issue = invoice.l10n_ae_transmission_id
