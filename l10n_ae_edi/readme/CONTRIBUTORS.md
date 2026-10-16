@@ -1,1 +1,2 @@
 * KMEE
+  - Luis Felipe Miléo <mileo@kmee.com.br>
