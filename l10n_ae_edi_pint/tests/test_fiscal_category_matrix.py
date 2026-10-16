@@ -3098,6 +3098,7 @@ class TestUaeFiscalCategoryMatrix(AccountTestInvoicingCommon):
                     "currency_id": self.env.ref("base.AED").id,
                     "invoice_date": "2019-01-01",
                     "l10n_ae_binding_id": binding.id,
+                    "l10n_ae_fiscal_uuid": "b4ea18c0-2000-4000-8000-000000000100",
                     "invoice_line_ids": [
                         Command.create(
                             {
@@ -3244,6 +3245,7 @@ class TestUaeFiscalCategoryMatrix(AccountTestInvoicingCommon):
                         "currency_id": self.env.ref("base.AED").id,
                         "invoice_date": "2019-01-01",
                         "l10n_ae_binding_id": binding.id,
+                        "l10n_ae_fiscal_uuid": f"b4ea18c0-2000-4000-8000-{count:012d}",
                         "invoice_line_ids": [
                             Command.create(
                                 {
