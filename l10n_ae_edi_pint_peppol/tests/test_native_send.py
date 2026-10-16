@@ -1,6 +1,8 @@
 # Copyright 2026 KMEE
 # License AGPL-3.0 or later (https://www.gnu.org/licenses/agpl).
 
+from lxml import etree
+
 from odoo.exceptions import AccessError
 from odoo.tests import tagged
 
@@ -99,3 +101,29 @@ class TestUaePeppolSend(AccountTestInvoicingCommon):
         self.assertEqual(partner.peppol_verification_state, "not_verified")
         self.assertFalse(invoice.l10n_ae_transmission_ids)
         self.assertFalse(invoice.ubl_cii_xml_id)
+
+    def test_uae_contact_verify_explains_unavailable_native_service(self):
+        partner = self.partner_a.with_user(self.simple_accountman)
+        self.assertFalse(partner.env.su)
+        before = partner.read(["peppol_verification_state", "write_date"])
+        # Exercise the same public action selected by the native contact form.
+        # The existing button returns False silently; no new method is assumed.
+        form = partner.get_view(view_type="form")
+        buttons = etree.fromstring(form["arch"]).xpath(
+            "//button[@type='object'][@help=\"Verify partner's Peppol endpoint\"]"
+        )
+        self.assertEqual(len(buttons), 1)
+        action = getattr(partner, buttons[0].get("name"))()
+        self.assertEqual(
+            partner.read(["peppol_verification_state", "write_date"]), before
+        )
+        self.assertIsInstance(action, dict)
+        self.assertEqual(action["type"], "ir.actions.client")
+        self.assertEqual(action["tag"], "display_notification")
+        self.assertEqual(action["params"]["type"], "info")
+        self.assertIn("appointed service provider", action["params"]["message"])
+        self.assertEqual(
+            partner.peppol_verification_state,
+            False,
+            "An unavailable verification must not mark the endpoint verified.",
+        )
