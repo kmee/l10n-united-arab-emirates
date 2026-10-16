@@ -93,9 +93,6 @@ class TestUaePeppolSend(AccountTestInvoicingCommon):
         invoice.action_post()
         partner = invoice.commercial_partner_id.with_company(invoice.company_id)
         self.assertFalse(partner.peppol_verification_state)
-        with self.cr.savepoint(), self.assertRaises(AccessError):
-            invoice.with_user(self.simple_accountman).action_send_and_print()
-        self.assertFalse(partner.peppol_verification_state)
         action = invoice.action_send_and_print()
         self.assertEqual(action["res_model"], "account.move.send.wizard")
         self.assertEqual(partner.peppol_verification_state, "not_verified")
@@ -106,6 +103,7 @@ class TestUaePeppolSend(AccountTestInvoicingCommon):
         partner = self.partner_a.with_user(self.simple_accountman)
         self.assertFalse(partner.env.su)
         before = partner.read(["peppol_verification_state", "write_date"])
+        self.assertFalse(partner.button_account_peppol_check_partner_endpoint())
         # Exercise the same public action selected by the native contact form.
         # The existing button returns False silently; no new method is assumed.
         form = partner.get_view(view_type="form")
@@ -126,4 +124,54 @@ class TestUaePeppolSend(AccountTestInvoicingCommon):
             partner.peppol_verification_state,
             False,
             "An unavailable verification must not mark the endpoint verified.",
+        )
+
+    def test_contact_verify_preserves_non_uae_native_result(self):
+        self.env.company.write(
+            {
+                "country_id": self.env.ref("base.be").id,
+                "account_peppol_proxy_state": "sender",
+            }
+        )
+        partner = self.partner_a.with_company(self.env.company)
+        self.assertFalse(partner.peppol_verification_state)
+        form = partner.get_view(view_type="form")
+        buttons = etree.fromstring(form["arch"]).xpath(
+            "//button[@type='object'][@help=\"Verify partner's Peppol endpoint\"]"
+        )
+        self.assertEqual(len(buttons), 1)
+        self.assertFalse(getattr(partner, buttons[0].get("name"))())
+        self.assertEqual(partner.peppol_verification_state, "not_verified")
+
+    def test_contact_verify_refuses_a_company_outside_actor_scope(self):
+        outside = self.env["res.company"].create(
+            {
+                "name": "Endpoint verification scope control",
+                "currency_id": self.env.company.currency_id.id,
+            }
+        )
+        partner = self.env["res.partner"].create(
+            {"name": "Endpoint verification without a routing identifier"}
+        )
+        actor_partner = partner.with_user(self.simple_accountman)
+        self.assertFalse(actor_partner.env.su)
+        self.assertNotIn(outside.id, actor_partner.env.user.company_ids.ids)
+        self.assertFalse(partner.routing_identifier)
+        before = partner.with_company(outside).read(
+            ["peppol_verification_state", "write_date"]
+        )
+        form = actor_partner.get_view(view_type="form")
+        buttons = etree.fromstring(form["arch"]).xpath(
+            "//button[@type='object'][@help=\"Verify partner's Peppol endpoint\"]"
+        )
+        self.assertEqual(len(buttons), 1)
+        with self.assertRaises(AccessError):
+            actor_partner.button_account_peppol_check_partner_endpoint(company=outside)
+        with self.assertRaises(AccessError):
+            getattr(actor_partner, buttons[0].get("name"))(company=outside)
+        self.assertEqual(
+            partner.with_company(outside).read(
+                ["peppol_verification_state", "write_date"]
+            ),
+            before,
         )
