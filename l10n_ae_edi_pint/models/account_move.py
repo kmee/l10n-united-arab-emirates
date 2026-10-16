@@ -230,6 +230,15 @@ class AccountMove(models.Model):
     def _l10n_ae_check_pint_data(self):
         """Shared semantic preflight, extended by optional accounting bridges."""
         result = super().action_l10n_ae_validate()
+        for move in self.filtered(lambda record: record.country_code == "AE"):
+            if move.company_id.partner_id.routing_scheme != "0235":
+                raise UserError(
+                    self.env._(
+                        "The issuing UAE entity must use electronic address scheme "
+                        "0235. Review the company contact's Routing ID before "
+                        "preparing the e-invoice."
+                    )
+                )
         formatter = self.env["account.edi.ubl.kmee_ae"]
         for move in self:
             supplier, customer = (
