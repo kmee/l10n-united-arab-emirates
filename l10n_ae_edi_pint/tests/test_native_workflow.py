@@ -1636,6 +1636,129 @@ class TestUaeNativeWorkflow(UaePintTestCommon):
         self.env.company.partner_id.vat = False
         self._assert_native_partial_commercial_credit()
 
+    def test_native_ordinary_purchase_credit_posts_without_outbound_issue(self):
+        import logging
+
+        company = self.env.company
+        manager = new_test_user(
+            self.env,
+            login="uae-ordinary-credit-manager",
+            groups="account.group_account_manager",
+            company_id=company.id,
+            company_ids=[Command.set(company.ids)],
+        )
+        self.assertFalse(manager.has_group("base.group_system"))
+        self.assertEqual(manager.company_ids, company)
+        binding = self._reviewed_binding(
+            {
+                "name": "Synthetic ordinary-credit discrimination contract",
+                "fiscal_uuid_policy": "controlled_local",
+            },
+            capabilities=CONTROLLED_CAPABILITIES,
+            note="Complete controlled outbound contract for ordinary-credit control.",
+        )
+        company.write(
+            {"l10n_ae_edi_auto_prepare": True, "l10n_ae_edi_binding_id": binding.id}
+        )
+        bill = (
+            self.init_invoice("in_invoice", amounts=[100], taxes=self.tax_purchase_a)
+            .with_user(manager)
+            .with_context(allowed_company_ids=company.ids)
+        )
+        self.assertFalse(bill.env.su)
+        self.assertFalse(bill.is_self_billing or bill.l10n_ae_received_document)
+        self.assertFalse(bill.journal_id.is_self_billing)
+        bill.action_post()
+        self.assertFalse(bill.l10n_ae_transmission_ids or bill.l10n_ae_fiscal_uuid)
+        moves = bill.env["account.move"]
+        sale_refund_domain = [
+            ("company_id", "=", company.id),
+            ("move_type", "=", "out_refund"),
+        ]
+        before_sale_refunds = moves.search_count(sale_refund_domain)
+        reversal = (
+            bill.env["account.move.reversal"]
+            .with_context(active_model="account.move", active_ids=bill.ids)
+            .create(
+                {
+                    "reason": "Ordinary supplier consideration adjustment",
+                    "journal_id": bill.journal_id.id,
+                    "date": bill.invoice_date,
+                }
+            )
+        )
+        reversal.refund_moves()
+        credit = reversal.new_move_ids
+        self.assertFalse(credit.env.su)
+        self.assertEqual(credit.env.company, company)
+        self.assertEqual((credit.move_type, credit.state), ("in_refund", "draft"))
+        self.assertEqual(credit.reversed_entry_id, bill)
+        self.assertEqual(credit.partner_id, bill.partner_id)
+        self.assertFalse(credit.is_self_billing or credit.l10n_ae_received_document)
+        self.assertFalse(credit.l10n_ae_selfbilling_agreement_id)
+        credit.invoice_line_ids.price_unit = 40
+        ledger_fields = [
+            "account_id",
+            "debit",
+            "credit",
+            "amount_currency",
+            "tax_ids",
+            "quantity",
+            "price_unit",
+        ]
+        bill_ledger = bill.line_ids.sorted("id").read(ledger_fields)
+        credit_ledger = credit.line_ids.sorted("id").read(ledger_fields)
+        self.assertTrue(company.l10n_ae_edi_auto_prepare)
+        self.assertEqual(company.l10n_ae_edi_binding_id, binding)
+        self.assertEqual(
+            set(binding.capability_ids.mapped("code")), set(CONTROLLED_CAPABILITIES)
+        )
+        credit.action_post()
+        self.assertEqual((credit.move_type, credit.state), ("in_refund", "posted"))
+        self.assertEqual(
+            (credit.amount_untaxed, credit.amount_tax, credit.amount_total), (40, 2, 42)
+        )
+        self.assertEqual((bill.amount_residual, credit.amount_residual), (63, 0))
+        self.assertFalse(credit.is_self_billing or credit.l10n_ae_received_document)
+        self.assertFalse(credit.l10n_ae_transmission_ids or credit.l10n_ae_fiscal_uuid)
+        self.assertFalse(credit.l10n_ae_preparation_error)
+        self.assertFalse(credit.ubl_cii_xml_id)
+        self.assertEqual(moves.search_count(sale_refund_domain), before_sale_refunds)
+        self.assertEqual(bill.line_ids.sorted("id").read(ledger_fields), bill_ledger)
+        self.assertEqual(
+            credit.line_ids.sorted("id").read(ledger_fields), credit_ledger
+        )
+        with self.assertRaisesRegex(UserError, "self-billing purchase"):
+            credit.action_l10n_ae_prepare()
+        self.assertFalse(credit.l10n_ae_transmission_ids or credit.l10n_ae_fiscal_uuid)
+        self.assertEqual(credit.reversed_entry_id, bill)
+        self.assertEqual((credit.move_type, credit.state), ("in_refund", "posted"))
+        self.assertEqual(bill.line_ids.sorted("id").read(ledger_fields), bill_ledger)
+        self.assertEqual(
+            credit.line_ids.sorted("id").read(ledger_fields), credit_ledger
+        )
+        logging.getLogger(__name__).info(
+            "UAE_ORDINARY_PURCHASE_CREDIT=%s",
+            json.dumps(
+                {
+                    "move_type": "in_refund",
+                    "posted": True,
+                    "selfbilling": False,
+                    "received": False,
+                    "automatic_preparation": True,
+                    "full_outbound_contract": True,
+                    "outbound_intents": 0,
+                    "fiscal_uuid_created": False,
+                    "explicit_preparation_refused": True,
+                    "extra_sale_refunds": 0,
+                    "amounts": [40, 2, 42],
+                    "native_residuals": [63, 0],
+                    "selected_ledgers_preserved": True,
+                },
+                sort_keys=True,
+            ),
+        )
+
     @requires_normative_resources("1.0.4")
     def test_native_self_billed_partial_credit_requires_reviewed_agreement_and_261(
         self,
