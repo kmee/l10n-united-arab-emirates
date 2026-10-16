@@ -3209,3 +3209,86 @@ class TestUaeFiscalCategoryMatrix(AccountTestInvoicingCommon):
         )
         self.assertEqual(invoice.line_ids.read(ledger_fields), ledger)
         self.assertFalse(issue.attempt_ids or issue.event_ids or issue.remote_id)
+
+    @requires_normative_resources("1.0.4")
+    def test_two_fractional_aed_lines_reconcile_posted_totals(self):
+        # Minimal public reproduction: one line is a positive control; adding
+        # just one identical line exposes rounding before summation. Expected
+        # values are independently worked decimal examples, not export results.
+        self.env.company.tax_calculation_rounding_method = "round_globally"
+        self.env["decimal.precision"].search([("name", "=", "Product Unit")]).digits = 3
+        tax = self.tax_sale_a.copy(
+            {
+                "name": "Synthetic minimal S",
+                "amount": 5,
+                "ubl_cii_tax_category_code": "S",
+            }
+        )
+        binding = review_controlled_binding(
+            self.env["l10n_ae.edi.binding"].create(
+                {"name": "Synthetic minimal precision"}
+            ),
+            self.simple_accountman,
+            capabilities=CONTROLLED_CAPABILITIES,
+            note="Synthetic reviewed contract for minimal fractional source example.",
+        )
+        for count, expected in [(1, (1.23, 0.06, 1.29)), (2, (2.47, 0.12, 2.59))]:
+            invoice = (
+                self.env["account.move"]
+                .with_user(self.simple_accountman)
+                .create(
+                    {
+                        "move_type": "out_invoice",
+                        "partner_id": self.partner_a.id,
+                        "journal_id": self.company_data["default_journal_sale"].id,
+                        "currency_id": self.env.ref("base.AED").id,
+                        "invoice_date": "2019-01-01",
+                        "l10n_ae_binding_id": binding.id,
+                        "invoice_line_ids": [
+                            Command.create(
+                                {
+                                    "name": "Synthetic minimal fractional service",
+                                    "quantity": 0.125,
+                                    "price_unit": 9.8765,
+                                    "account_id": self.company_data[
+                                        "default_account_revenue"
+                                    ].id,
+                                    "tax_ids": [Command.set(tax.ids)],
+                                }
+                            )
+                            for _ in range(count)
+                        ],
+                    }
+                )
+            )
+            self.assertFalse(invoice.env.su)
+            invoice.action_post()
+            self.assertEqual(
+                (invoice.amount_untaxed, invoice.amount_tax, invoice.amount_total),
+                expected,
+            )
+            invoice.action_l10n_ae_prepare()
+            xml = etree.fromstring(invoice.l10n_ae_transmission_id.xml_content.encode())
+            monetary = xml.find("cac:LegalMonetaryTotal", NS)
+            values = {
+                key: monetary.findtext("cbc:" + key, namespaces=NS)
+                for key in (
+                    "LineExtensionAmount",
+                    "TaxExclusiveAmount",
+                    "TaxInclusiveAmount",
+                )
+            }
+            _logger.info(
+                "UAE_MINIMAL_PRECISE_SOURCE=%s",
+                json.dumps({"line_count": count, "posted": expected, "xml": values}),
+            )
+            self.assertEqual(
+                tuple(Decimal(values[key]) for key in values),
+                tuple(
+                    Decimal(str(value))
+                    for value in (expected[0], expected[0], expected[2])
+                ),
+            )
+            report = invoice.validate_l10n_ae_pint()
+            self.assertTrue(report["valid"], report)
+            self.assertTrue(report["xsd_valid"], report)
