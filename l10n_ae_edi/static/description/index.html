@@ -567,12 +567,29 @@ Community supports explicit reviewed header dates.</p>
 </div>
 <div class="section" id="known-issues-roadmap">
 <h1><a class="toc-backref" href="#toc-entry-2">Known issues / Roadmap</a></h1>
-<p>Complete the accepted specification in the KMEE brain repository,
-including operational scheduling, remaining batch recovery/backoff
-beyond expected local document validation, deployed authenticated event
-ingress and correction policy, complete inbound/self-billing,
-multi-currency, multiple credit references/advances, UUID assignment,
-Enterprise coexistence, accredited ASP contracts and release readiness.</p>
+<p>The integration is under development. The following release gates remain
+open:</p>
+<ul class="simple">
+<li>Complete end-to-end acceptance for sending, signed events, receiving
+and self-billing, including scheduler authority, company isolation and
+operational recovery.</li>
+<li>Qualify the remaining security, load, backup/restore (RPO/RTO),
+upgrade/rollback and PINT-AE ruleset transition scenarios on Odoo
+20.0, including Enterprise coexistence.</li>
+<li>Replace the KMEE-controlled ClearTax and Suntech/TCA simulations with
+documented, provider-reviewed adapters. Validate authorized ASP
+sandbox/pilot flows and fiscal reporting before production use;
+controlled mock acceptance is not FTA confirmation.</li>
+<li>Complete and review the English and Brazilian Portuguese user guides
+and site, plus the ten complete training videos by role with visible
+navigation, English narrative captions and no audio narration.</li>
+<li>Complete hosted CI, reproducible release packaging and deployment
+runbooks, then prepare the contribution for community review and a
+proposed OCA umbrella repository.</li>
+</ul>
+<p>Selected passing tests do not by themselves establish complete
+acceptance or production readiness. Public publication and deployment
+require their own readiness review.</p>
 </div>
 <div class="section" id="bug-tracker">
 <h1><a class="toc-backref" href="#toc-entry-3">Bug Tracker</a></h1>
@@ -593,7 +610,10 @@ If you spotted it first, help us to smash it by providing a detailed and welcome
 <div class="section" id="contributors">
 <h2><a class="toc-backref" href="#toc-entry-6">Contributors</a></h2>
 <ul class="simple">
-<li>KMEE</li>
+<li>KMEE<ul>
+<li>Luis Felipe Miléo <a class="reference external" href="mailto:mileo&#64;kmee.com.br">mileo&#64;kmee.com.br</a></li>
+</ul>
+</li>
 </ul>
 </div>
 <div class="section" id="maintainers">
