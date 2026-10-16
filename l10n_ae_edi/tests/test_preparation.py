@@ -122,6 +122,117 @@ class TestUaeInvoicePreparation(AccountTestInvoicingCommon):
         self.assertEqual(len(actor.l10n_ae_transmission_ids), 1)
         self.assertEqual(actor.line_ids.read(ledger_fields), ledger)
 
+    def test_missing_lookup_refuses_sending_and_preparation_until_manager_review(self):
+        guidance = (
+            "Ask an accounting manager to confirm reconciliation support and review "
+            "the binding's contract capabilities before preparing or enabling sending."
+        )
+        binding = (
+            self.env["l10n_ae.edi.binding"]
+            .create({"name": "Synthetic contract without reconciliation lookup"})
+            .with_user(self.simple_accountman)
+        )
+        self.assertFalse(binding.env.su)
+        self.assertTrue(binding.env.user.has_group("account.group_account_manager"))
+        self.assertFalse(binding.env.user.has_group("base.group_system"))
+        capabilities = binding.env["l10n_ae.edi.capability"].search(
+            [("code", "in", ["submit", "report", "billing_invoice"])]
+        )
+        self.assertEqual(
+            set(capabilities.mapped("code")),
+            {"submit", "report", "billing_invoice"},
+        )
+        with Form(binding) as form:
+            form.fiscal_uuid_policy = "controlled_local"
+            form.capability_profile = "kmee-controlled-1"
+            form.capability_review_note = (
+                "Synthetic contract intentionally omitting reconciliation lookup."
+            )
+            for capability in capabilities:
+                form.capability_ids.add(capability)
+        binding.action_review_capabilities()
+
+        # The public binding form cannot enable dispatch without reviewed lookup.
+        with (
+            self.assertRaisesRegex(ValidationError, "lookup") as enable_refusal,
+            self.cr.savepoint(),
+            Form(binding) as form,
+        ):
+            form.controlled_dispatch_enabled = True
+        self.assertIn(guidance, str(enable_refusal.exception))
+        binding.invalidate_recordset(["controlled_dispatch_enabled"])
+        self.assertFalse(binding.controlled_dispatch_enabled)
+
+        # Native posting remains accounting-successful, while automatic local
+        # preparation stores the explicit operational resolution diagnostic.
+        self.env.company.l10n_ae_edi_auto_prepare = True
+        invoice = self.init_invoice("out_invoice", amounts=[100], taxes=self.tax_sale_a)
+        invoice.l10n_ae_binding_id = binding
+        invoice_user = new_test_user(
+            self.env,
+            login="uae-missing-lookup-invoice-user",
+            groups="account.group_account_invoice",
+            company_id=self.env.company.id,
+            company_ids=[Command.set(self.env.company.ids)],
+        )
+        self.assertTrue(invoice_user.has_group("account.group_account_invoice"))
+        self.assertFalse(invoice_user.has_group("account.group_account_manager"))
+        self.assertFalse(invoice_user.has_group("base.group_system"))
+        self.assertEqual(invoice_user.company_ids, self.env.company)
+        actor = invoice.with_user(invoice_user)
+        self.assertFalse(actor.env.su)
+        actor.action_post()
+        self.assertEqual(actor.state, "posted")
+        self.assertEqual(actor.amount_total, 105)
+        self.assertEqual(actor.l10n_ae_preparation_state, "review")
+        self.assertIn("lookup", actor.l10n_ae_preparation_error)
+        self.assertIn(guidance, actor.l10n_ae_preparation_error)
+        self.assertFalse(actor.l10n_ae_transmission_ids)
+        self.assertFalse(actor.l10n_ae_fiscal_uuid)
+        ledger_fields = [
+            "balance",
+            "amount_currency",
+            "account_id",
+            "tax_ids",
+            "write_uid",
+            "write_date",
+        ]
+        posted_ledger = actor.line_ids.read(ledger_fields)
+
+        # The ordinary Invoice User's explicit public Prepare action gives the
+        # same actionable refusal and creates neither an original nor UUID.
+        with (
+            self.assertRaisesRegex(ValidationError, "lookup") as prepare_refusal,
+            self.cr.savepoint(),
+        ):
+            actor.action_l10n_ae_prepare()
+        self.assertIn(guidance, str(prepare_refusal.exception))
+        self.assertEqual(actor.state, "posted")
+        self.assertFalse(actor.l10n_ae_transmission_ids)
+        self.assertFalse(actor.l10n_ae_fiscal_uuid)
+        self.assertEqual(actor.line_ids.read(ledger_fields), posted_ledger)
+        self.assertFalse(binding.controlled_dispatch_enabled)
+
+        # A distinct manager adds/reviews lookup. The same posted invoice then
+        # queues; automatic sending remains off, with no HTTP attempt claimed.
+        with Form(binding) as form:
+            form.capability_ids.add(binding.env.ref("l10n_ae_edi.capability_lookup"))
+        binding.action_review_capabilities()
+        self.assertFalse(binding.controlled_dispatch_enabled)
+        actor.action_l10n_ae_prepare()
+        issue = actor.l10n_ae_transmission_id
+        self.assertEqual(actor.l10n_ae_preparation_state, "ready")
+        self.assertEqual(actor.state, "posted")
+        self.assertEqual(actor.amount_total, 105)
+        self.assertEqual(len(actor.l10n_ae_transmission_ids), 1)
+        self.assertEqual(issue.submission_state, "queued")
+        self.assertFalse(issue.attempt_ids)
+        self.assertFalse(issue.remote_id)
+        self.assertFalse(issue.validation_receipt)
+        self.assertFalse(actor.l10n_ae_preparation_error)
+        self.assertEqual(actor.line_ids.read(ledger_fields), posted_ledger)
+        self.assertFalse(binding.controlled_dispatch_enabled)
+
     def test_native_batch_frequency_defaults_preserve_explicit_values_and_clears(self):
         term = self.env["account.payment.term"].create(
             {

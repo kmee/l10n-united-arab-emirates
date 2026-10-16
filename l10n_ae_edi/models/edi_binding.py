@@ -239,7 +239,10 @@ class UaeEdiBinding(models.Model):
         if missing:
             raise ValidationError(
                 self.env._(
-                    "Missing required sending capabilities: %s.",
+                    "Missing required sending capabilities: %s. "
+                    "Ask an accounting manager to confirm reconciliation support "
+                    "and review the binding's contract capabilities before "
+                    "preparing or enabling sending.",
                     ", ".join(sorted(missing)),
                 )
             )
