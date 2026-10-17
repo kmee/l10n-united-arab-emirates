@@ -179,6 +179,12 @@
                         <field name="l10n_ae_dispatch_error_kind" readonly="True" />
                         <field name="l10n_ae_dispatch_review_at" readonly="True" />
                         <label
+                            for="l10n_ae_dispatch_error_kind"
+                            colspan="2"
+                            invisible="l10n_ae_dispatch_error_kind != 'conformance_policy'"
+                            string="Volume Discount (VD) remains paused for a documented fiscal/provider decision. The original passed formal validation; this does not resolve the reference policy. Preserve VD, authentic references and the frozen original. Repeating preparation does not authorize sending."
+                        />
+                        <label
                             for="l10n_ae_dispatch_review_required"
                             colspan="2"
                             string="Automatic sending is paused for this document. Use Check UAE Data to review the UAE data. This does not validate the preserved XML."

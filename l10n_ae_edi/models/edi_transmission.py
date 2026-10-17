@@ -104,6 +104,7 @@ class UaeEdiTransmission(models.Model):
     dispatch_error_kind = fields.Selection(
         [
             ("local_review", "Local Document Validation"),
+            ("conformance_policy", "Conformance Policy Review Required"),
             ("xml_integrity", "Frozen XML Integrity Review Required"),
             ("package_mismatch", "Pinned PINT Package Review Required"),
             ("endpoint_mismatch", "Original Controlled Endpoint Required"),
@@ -119,6 +120,13 @@ class UaeEdiTransmission(models.Model):
         copy=False,
         help="The first rejected formal report for this frozen XML. "
         "This is local evidence, not an ASP or FTA confirmation.",
+    )
+    dispatch_policy_receipt = fields.Text(
+        string="Pending Conformance Policy",
+        readonly=True,
+        copy=False,
+        help="The first local policy hold and its actual valid formal report. "
+        "This is not a validation rejection, fiscal approval or ASP response.",
     )
     attempt_ids = fields.One2many(
         "l10n_ae.edi.attempt", "transmission_id", readonly=True
@@ -383,6 +391,10 @@ class UaeEdiTransmission(models.Model):
             [self.id],
         )
         self.invalidate_recordset()
+        if error_kind == "conformance_policy" and self.submission_state != "queued":
+            # A queued validation can race with another worker's claim. A policy
+            # hold must never exclude an existing obligation from lookup.
+            return self.submission_state
         if self.submission_state == "accepted" or (
             self.submission_state == "sending"
             and self.lease_until
@@ -394,6 +406,22 @@ class UaeEdiTransmission(models.Model):
             "dispatch_error_kind": error_kind,
             "dispatch_review_at": now,
         }
+        if error_kind == "conformance_policy":
+            if not report or report["valid"] is not True:
+                raise UserError(
+                    self.env._("A conformance policy hold requires its valid report.")
+                )
+            if not self.dispatch_policy_receipt:
+                values["dispatch_policy_receipt"] = json.dumps(
+                    {
+                        "xml_sha256": self.xml_hash,
+                        "report": report,
+                        "checked_at": fields.Datetime.to_string(now),
+                        "error_kind": error_kind,
+                        "decision": "pending",
+                    },
+                    sort_keys=True,
+                )
         if (
             report is not None
             and report["valid"] is False
@@ -594,6 +622,7 @@ class UaeEdiTransmission(models.Model):
             "dispatch_error_kind",
             "dispatch_review_at",
             "dispatch_validation_receipt",
+            "dispatch_policy_receipt",
             "attempt_ids",
             "event_ids",
             "event_review_required",
