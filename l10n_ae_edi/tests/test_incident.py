@@ -2149,6 +2149,28 @@ class TestUaeIncident(AccountTestInvoicingCommon):
             self.assertEqual(
                 notice.with_user(reader).document.content, notice.document.content
             )
+            # Fault injection changes only the expected digest, then uses the
+            # same public download that an ordinary accounting reader requests.
+            digest = notice.document_sha256
+            try:
+                self.cr.execute(
+                    "UPDATE l10n_ae_edi_incident_notice "
+                    "SET document_sha256 = %s WHERE id = %s",
+                    ("0" * 64, notice.id),
+                )
+                notice.invalidate_recordset(["document_sha256", "document"])
+                with self._assert_user_error("failed integrity review"):
+                    _ = notice.with_user(reader).document
+            finally:
+                self.cr.execute(
+                    "UPDATE l10n_ae_edi_incident_notice "
+                    "SET document_sha256 = %s WHERE id = %s",
+                    (digest, notice.id),
+                )
+                notice.invalidate_recordset(["document_sha256", "document"])
+            self.assertEqual(
+                notice.with_user(reader).document.content, notice.document.content
+            )
             with (
                 self.cr.savepoint(),
                 self._assert_user_error("Supplied notice evidence is immutable"),
