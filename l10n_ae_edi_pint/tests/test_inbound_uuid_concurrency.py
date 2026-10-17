@@ -13,6 +13,7 @@ import hashlib
 import json
 import logging
 import os
+import queue
 import threading
 import time
 
@@ -227,44 +228,23 @@ class TestUaeInboundUuidConcurrency(BaseCase):
         self.assertEqual(len(data["inbox_ids"]), 2)
         barrier = threading.Barrier(2)
         outcomes = []
+        completed = queue.Queue()
         names = ["uae_native_uuid_worker_" + str(i) for i in range(2)]
 
-        def worker(index):
+        def worker(index, actor):
             try:
-                with self.registry.cursor() as cr:
-                    cr.execute(
-                        "SELECT set_config('application_name', %s, true)",
-                        [names[index]],
-                    )
-                    cr.execute(
-                        "SELECT pg_backend_pid(), "
-                        "current_setting('transaction_isolation')"
-                    )
-                    pid, isolation = cr.fetchone()
-                    actor = api.Environment(
-                        cr,
-                        data["manager_id"],
-                        {"allowed_company_ids": [data["company_id"]]},
-                    )
-                    self.assertFalse(actor.su)
-                    self.assertFalse(actor.user.has_group("base.group_system"))
-                    self.assertEqual(actor.user.company_ids.ids, [data["company_id"]])
-                    self.assertEqual(isolation, "repeatable read")
-                    inbox = actor["l10n_ae.edi.inbox"].browse(data["inbox_ids"][index])
-                    barrier.wait(timeout=20)
-                    processed = inbox.action_process()
-                    # Only this worker owns this real cursor; no shared test cursor.
-                    cr.commit()  # pylint: disable=invalid-commit
-                    outcomes.append(
-                        {
-                            "worker": index,
-                            "pid": pid,
-                            "isolation": isolation,
-                            "processed": processed,
-                        }
-                    )
+                self.assertFalse(actor.su)
+                self.assertFalse(actor.user.has_group("base.group_system"))
+                self.assertEqual(actor.user.company_ids.ids, [data["company_id"]])
+                barrier.wait(timeout=20)
+                processed = (
+                    actor["l10n_ae.edi.inbox"]
+                    .browse(data["inbox_ids"][index])
+                    .action_process()
+                )
+                completed.put({"worker": index, "processed": processed})
             except Exception as error:  # noqa: BLE001 - surface every worker failure
-                outcomes.append(
+                completed.put(
                     {
                         "worker": index,
                         "error_type": type(error).__name__,
@@ -272,40 +252,106 @@ class TestUaeInboundUuidConcurrency(BaseCase):
                     }
                 )
 
-        threads = [threading.Thread(target=worker, args=(i,)) for i in range(2)]
-        both_waiting = False
-        # SQL coordinates the real contention, never supplies the business oracle.
-        with self.registry.cursor() as coordinator:
-            coordinator.execute("SELECT pg_backend_pid()")
-            coordinator_pid = coordinator.fetchone()[0]
-            coordinator.execute(
-                "SELECT id FROM res_company WHERE id = %s FOR UPDATE",
-                [data["company_id"]],
-            )
-            for thread in threads:
-                thread.start()
-            try:
-                deadline = time.monotonic() + 30
-                with self.registry.cursor() as observer:
-                    while time.monotonic() < deadline:
-                        observer.execute("SELECT pg_stat_clear_snapshot()")
-                        observer.execute(
-                            "SELECT count(*) FROM pg_stat_activity "
-                            "WHERE datname = current_database() "
-                            "AND application_name = ANY(%s) "
-                            "AND wait_event_type = 'Lock' "
-                            "AND query LIKE 'SELECT id FROM res_company%%'",
-                            [names],
-                        )
-                        if observer.fetchone()[0] == 2:
-                            both_waiting = True
-                            break
-                        time.sleep(0.05)
-            finally:
-                coordinator.rollback()
-        for thread in threads:
-            thread.join(timeout=45)
-        self.assertTrue(all(not thread.is_alive() for thread in threads))
+        # Odoo's native server holds Registry._lock throughout post-install tests.
+        # Initialize each independent transaction on its owning main thread before
+        # handing it exclusively to one worker. Main resumes ownership only after
+        # that worker stops; commit/reset/close must stay on the main thread.
+        actors = []
+        worker_cursors = []
+        connections = []
+        threads = []
+        try:
+            for index in range(2):
+                cr = self.registry.cursor()
+                worker_cursors.append(cr)
+                cr.execute(
+                    "SELECT set_config('application_name', %s, true)", [names[index]]
+                )
+                cr.execute(
+                    "SELECT pg_backend_pid(), current_setting('transaction_isolation')"
+                )
+                pid, isolation = cr.fetchone()
+                self.assertEqual(isolation, "repeatable read")
+                connections.append({"pid": pid, "isolation": isolation})
+                actors.append(
+                    api.Environment(
+                        cr,
+                        data["manager_id"],
+                        {"allowed_company_ids": [data["company_id"]]},
+                    )
+                )
+            threads = [
+                threading.Thread(target=worker, args=(i, actors[i]), daemon=True)
+                for i in range(2)
+            ]
+            both_waiting = False
+            # SQL coordinates real contention, never the business oracle.
+            with self.registry.cursor() as coordinator:
+                coordinator.execute("SELECT pg_backend_pid()")
+                coordinator_pid = coordinator.fetchone()[0]
+                coordinator.execute(
+                    "SELECT id FROM res_company WHERE id = %s FOR UPDATE",
+                    [data["company_id"]],
+                )
+                for thread in threads:
+                    thread.start()
+                try:
+                    deadline = time.monotonic() + 30
+                    with self.registry.cursor() as observer:
+                        while time.monotonic() < deadline:
+                            observer.execute("SELECT pg_stat_clear_snapshot()")
+                            observer.execute(
+                                "SELECT count(*) FROM pg_stat_activity "
+                                "WHERE datname = current_database() "
+                                "AND application_name = ANY(%s) "
+                                "AND wait_event_type = 'Lock' "
+                                "AND query LIKE 'SELECT id FROM res_company%%'",
+                                [names],
+                            )
+                            if observer.fetchone()[0] == 2:
+                                both_waiting = True
+                                break
+                            time.sleep(0.05)
+                finally:
+                    coordinator.rollback()
+            # Commit the first completed import before awaiting the other: its
+            # database locks are legitimately needed by the losing transaction.
+            for _index in range(2):
+                outcome = completed.get(timeout=45)
+                index = outcome["worker"]
+                threads[index].join(timeout=5)
+                self.assertFalse(threads[index].is_alive())
+                actor = actors[index]
+                if "error_type" in outcome:
+                    actor.cr.rollback()
+                else:
+                    actor.cr.commit()  # pylint: disable=invalid-commit
+                outcomes.append({**outcome, **connections[index]})
+        finally:
+            # Even a failed witness/timeout must not close a cursor still owned by
+            # a running importer. Cancel only this case's matching backend queries,
+            # then regain exclusive ownership after each worker has terminated.
+            live = [i for i, thread in enumerate(threads) if thread.is_alive()]
+            if live:
+                barrier.abort()
+                with self.registry.cursor() as control:
+                    control.execute(
+                        "SELECT pg_cancel_backend(pid) FROM pg_stat_activity "
+                        "WHERE datname = current_database() "
+                        "AND pid = ANY(%s) AND application_name = ANY(%s)",
+                        [[connections[i]["pid"] for i in live], names],
+                    )
+                for index in live:
+                    threads[index].join(timeout=10)
+            live = [i for i, thread in enumerate(threads) if thread.is_alive()]
+            # Retain any still-active cursor until this failed owned process ends;
+            # never race its worker with rollback/close from the test thread.
+            self._unclosed_worker_cursors = [worker_cursors[i] for i in live]
+            for index, cr in enumerate(worker_cursors):
+                if index not in live:
+                    cr.rollback()
+                    cr.close()
+            self.assertFalse(live, "An importer failed to stop after cancellation.")
         self.assertTrue(
             both_waiting, "Both actual importers must overlap at the company lock."
         )
