@@ -53,7 +53,8 @@ class TestUaeInvoicePreparation(AccountTestInvoicingCommon):
         )
         invoice.l10n_ae_binding_id = self.binding
         invoice.action_l10n_ae_prepare()
-        transmission = invoice.l10n_ae_transmission_id
+        # Match the authenticated receiver's privileged internal application.
+        transmission = invoice.l10n_ae_transmission_id.sudo()
         frozen_fields = [
             "remote_id",
             "payload",
