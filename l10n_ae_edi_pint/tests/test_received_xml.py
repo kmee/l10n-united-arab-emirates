@@ -83,6 +83,10 @@ class TestUaeReceivedXml(UaePintTestCommon):
         ]
         ledger_fields = ["account_id", "balance", "write_uid", "write_date"]
         self.env.flush_all()
+        # Observe stored fixture facts after native computations, not older
+        # writer values retained in the setup environments' field caches.
+        moves.invalidate_recordset(fields)
+        moves.line_ids.invalidate_recordset(ledger_fields)
         before_moves = moves.read(fields)
         before_ledger = moves.line_ids.sorted("id").read(ledger_fields)
 
