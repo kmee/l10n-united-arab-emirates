@@ -20,14 +20,17 @@ class UnreadableReceivedReplay(AccessError):
 class ControlledInboxWorker:
     """Loopback receipt of a known original or a retained recipient queue page."""
 
-    def __init__(self, registry, uid, company_id, endpoint, token):
+    def __init__(self, registry, uid, company_id, endpoint, token, *, scheduled=False):
         self.registry, self.uid, self.company_id = registry, uid, company_id
         self.endpoint, self.token = endpoint, token
+        self.scheduled = scheduled
 
     def _binding(self, cursor, binding_id, process=False):
         env = api.Environment(
             cursor, self.uid, {"allowed_company_ids": [self.company_id]}
         )
+        if self.scheduled:
+            env["l10n_ae.edi.binding"]._check_controlled_receiving_scheduler_actor()
         principal = env.user.exists()
         if (
             not principal

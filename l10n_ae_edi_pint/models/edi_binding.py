@@ -83,35 +83,9 @@ class UaeEdiBinding(models.Model):
             }
         )
 
-    def _finish_controlled_receive_review(self, binding_id, company_id, code=False):
-        """Write route diagnostics after worker commits, in a fresh transaction."""
-        with self.env.registry.cursor() as cursor:
-            env = api.Environment(
-                cursor, self.env.uid, {"allowed_company_ids": [company_id]}
-            )
-            principal = env.user.exists()
-            if (
-                not principal
-                or not principal.active
-                or company_id not in principal.company_ids.ids
-                or not (
-                    principal.has_group("l10n_ae_edi_pint.group_document_receiver")
-                    or principal.has_group("account.group_account_manager")
-                )
-            ):
-                return
-            binding = env["l10n_ae.edi.binding"].browse(binding_id).exists()
-            if not binding or binding.company_id.id != company_id:
-                return
-            binding._record_controlled_receive_review(code)
-            cursor.commit()
-
     @api.model
-    def _cron_receive_controlled(self):
-        if not self.env.context.get("cron_id"):
-            raise UserError(
-                self.env._("Use the native UAE receiving scheduled action.")
-            )
+    def _check_controlled_receiving_scheduler_actor(self):
+        """Apply the scheduler policy again whenever a fresh transaction starts."""
         principal = self.env.user.exists()
         if principal.has_group("base.group_system") or principal.has_group(
             "base.group_erp_manager"
@@ -134,6 +108,35 @@ class UaeEdiBinding(models.Model):
                     "An active authorized UAE document receiving account is required."
                 )
             )
+        return principal
+
+    def _finish_controlled_receive_review(self, binding_id, company_id, code=False):
+        """Write route diagnostics after worker commits, in a fresh transaction."""
+        with self.env.registry.cursor() as cursor:
+            env = api.Environment(
+                cursor, self.env.uid, {"allowed_company_ids": [company_id]}
+            )
+            try:
+                principal = env[
+                    "l10n_ae.edi.binding"
+                ]._check_controlled_receiving_scheduler_actor()
+            except AccessError:
+                return
+            if company_id not in principal.company_ids.ids:
+                return
+            binding = env["l10n_ae.edi.binding"].browse(binding_id).exists()
+            if not binding or binding.company_id.id != company_id:
+                return
+            binding._record_controlled_receive_review(code)
+            cursor.commit()
+
+    @api.model
+    def _cron_receive_controlled(self):
+        if not self.env.context.get("cron_id"):
+            raise UserError(
+                self.env._("Use the native UAE receiving scheduled action.")
+            )
+        self._check_controlled_receiving_scheduler_actor()
         self._check_transport_allowed()
         bindings = self.search(
             [
@@ -171,7 +174,7 @@ class UaeEdiBinding(models.Model):
             else:
                 try:
                     ControlledInboxWorker(
-                        registry, uid, company_id, endpoint, token
+                        registry, uid, company_id, endpoint, token, scheduled=True
                     ).run_page(binding_id)
                 except ControlledAspError:
                     self._finish_controlled_receive_review(
