@@ -123,6 +123,24 @@ class AccountEdiUblUae(models.AbstractModel):
         transaction_type = document.findtext("{*}ProfileExecutionID") or ""
         if (
             len(transaction_type) == 8
+            and transaction_type[6] == "1"
+            and any(
+                document.find("{*}Delivery/{*}DeliveryLocation/{*}Address/{*}" + name)
+                is None
+                for name in ("StreetName", "CityName", "CountrySubentity")
+            )
+        ):
+            # Match IBR-142-AE on the actual public-core delivery XML. Its
+            # partner selection differs for billing and self-billing.
+            errors.add(
+                self.env._(
+                    "IBR-142-AE: e-commerce requires a delivery street, city and "
+                    "state/emirate. Review the Shipping Address before preparing "
+                    "the document; keep the buyer's legal address separate."
+                )
+            )
+        if (
+            len(transaction_type) == 8
             and transaction_type[2] == "1"
             and any(
                 (node.text or "").strip() != "N"
