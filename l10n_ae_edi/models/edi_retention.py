@@ -91,7 +91,8 @@ class UaeEdiRetention(models.Model):
         principal = self.env["res.users"].browse(self.env.uid)
         if (
             not principal.active
-            or document.company_id.id not in principal.company_ids.ids
+            or document.company_id.id
+            not in principal.with_context(active_test=False).company_ids.ids
         ):
             raise AccessError(
                 self.env._(

@@ -295,10 +295,15 @@ class UaeEdiTransmission(models.Model):
             actual = record.with_user(self.env.uid)
             actual.check_access("read")
             principal = actual.env.user
+            company_is_selected = actual.company_id.id in actual.env.companies.ids
+            archived_auditor = not actual.company_id.active and principal.has_group(
+                "l10n_ae_edi.group_fiscal_auditor"
+            )
             if (
                 not principal.active
-                or actual.company_id.id not in principal.company_ids.ids
-                or actual.company_id.id not in actual.env.companies.ids
+                or actual.company_id.id
+                not in principal.with_context(active_test=False).company_ids.ids
+                or not (company_is_selected or archived_auditor)
             ):
                 raise AccessError(self.env._("This UAE PDF company is not accessible."))
             original = actual.sudo().conventional_pdf_original_content
