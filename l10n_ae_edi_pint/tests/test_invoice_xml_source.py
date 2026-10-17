@@ -1,6 +1,7 @@
 # Copyright 2026 KMEE
 # License AGPL-3.0 or later (https://www.gnu.org/licenses/agpl).
 
+import base64
 import hashlib
 import io
 import json
@@ -11,6 +12,7 @@ from contextlib import closing
 
 from lxml import etree
 
+from odoo import Command
 from odoo.exceptions import AccessError, UserError, ValidationError
 from odoo.tests import Form, tagged
 from odoo.tests.common import new_test_user
@@ -2723,3 +2725,125 @@ class TestUaeInvoiceXmlSource(UaePintTestCommon):
             "Synthetic buyer street", invoice.l10n_ae_transmission_id.xml_content
         )
         self.assertEqual(invoice.preview_l10n_ae_pint(), expected)
+
+    def test_existing_auditor_recovers_original_after_legal_company_archival(self):
+        """Archival preserves evidence access without reopening accounting scope."""
+        original_company = self.env.company
+        active_company = self.env["res.company"].create(
+            {
+                "name": "Synthetic active audit home after archival",
+                "country_id": self.env.ref("base.ae").id,
+                "currency_id": self.env.ref("base.AED").id,
+            }
+        )
+        invoice = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
+        )
+        binding = self._reviewed_binding(
+            {"name": "Synthetic original before company archival"},
+            capabilities=CONTROLLED_CAPABILITIES,
+            note="Synthetic local contract; no actual ASP approval.",
+        )
+        invoice.l10n_ae_binding_id = binding
+        invoice.action_l10n_ae_prepare()
+        issue = invoice.l10n_ae_transmission_id
+        auditor = new_test_user(
+            self.env,
+            login="synthetic-existing-archived-company-auditor",
+            groups=(
+                "base.group_user,base.group_allow_export,"
+                "l10n_ae_edi.group_fiscal_auditor"
+            ),
+            company_id=active_company.id,
+            company_ids=[original_company.id, active_company.id],
+        ).with_context(allowed_company_ids=active_company.ids)
+        memberships = sorted(auditor.company_ids.ids)
+        roles = sorted(auditor.group_ids.ids)
+        fields = ["xml_download", "evidence_archive"]
+        before = (
+            issue.with_user(auditor)
+            .with_context(allowed_company_ids=original_company.ids)
+            .read(fields)[0]
+        )
+        xml = base64.b64decode(before["xml_download"]["content"])
+        package = base64.b64decode(before["evidence_archive"]["content"])
+        self.assertEqual(xml, issue.xml_content.encode())
+        self.assertEqual(hashlib.sha256(xml).hexdigest(), issue.xml_hash)
+        identity = (issue.payload, issue.idempotency_key, invoice.l10n_ae_fiscal_uuid)
+        ledger = invoice.line_ids.read(
+            ["debit", "credit", "balance", "amount_currency", "write_date"]
+        )
+
+        # Native Odoo forbids archiving any active user's default company.
+        # Relocate those defaults legitimately before archival, without changing
+        # this auditor's pre-existing memberships, roles or active home company.
+        defaults = self.env["res.users"].search(
+            [("active", "=", True), ("company_id", "=", original_company.id)]
+        )
+        defaults.write(
+            {
+                "company_ids": [Command.link(active_company.id)],
+                "company_id": active_company.id,
+            }
+        )
+        original_company.with_context(
+            allowed_company_ids=active_company.ids
+        ).action_archive()
+        archived_company = original_company.with_context(
+            allowed_company_ids=active_company.ids
+        )
+        self.assertFalse(archived_company.active)
+        self.assertEqual(sorted(auditor.company_ids.ids), memberships)
+        self.assertEqual(sorted(auditor.group_ids.ids), roles)
+        self.assertEqual(auditor.company_id, active_company)
+        self.assertFalse(auditor.has_group("base.group_system"))
+        self.assertFalse(auditor.has_group("account.group_account_invoice"))
+        self.env.invalidate_all()
+        archived = issue.with_user(auditor).with_context(
+            allowed_company_ids=active_company.ids
+        )
+        try:
+            after = archived.read(fields)[0]
+        except AccessError as error:
+            self.fail(
+                "Previously authorized fiscal auditor cannot recover the "
+                f"archived company original: {error}"
+            )
+        self.assertEqual(base64.b64decode(after["xml_download"]["content"]), xml)
+        self.assertEqual(
+            base64.b64decode(after["evidence_archive"]["content"]), package
+        )
+        # The accounting preservation oracle is separate from the auditor's
+        # evidence-only reads; no new accounting permission is granted to them.
+        current = issue.sudo().with_context(allowed_company_ids=active_company.ids)
+        self.assertEqual(
+            (
+                current.payload,
+                current.idempotency_key,
+                current.move_id.l10n_ae_fiscal_uuid,
+            ),
+            identity,
+        )
+        self.assertEqual(
+            current.move_id.line_ids.read(
+                ["debit", "credit", "balance", "amount_currency", "write_date"]
+            ),
+            ledger,
+        )
+        _logger.info(
+            "UAE_ARCHIVED_COMPANY_AUDIT=%s",
+            json.dumps(
+                {
+                    "company_id": original_company.id,
+                    "active_home_company_id": active_company.id,
+                    "auditor_id": auditor.id,
+                    "issue_id": issue.id,
+                    "xml_sha256": hashlib.sha256(xml).hexdigest(),
+                    "package_sha256": hashlib.sha256(package).hexdigest(),
+                    "memberships_and_roles_preserved": True,
+                    "archived_company_stays_inactive": not archived_company.active,
+                    "accounting_and_original_preserved": True,
+                },
+                sort_keys=True,
+            ),
+        )
