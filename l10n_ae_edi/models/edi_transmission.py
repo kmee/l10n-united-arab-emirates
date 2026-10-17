@@ -6,10 +6,11 @@ import uuid
 from datetime import timedelta
 
 from odoo import api, fields, models
-from odoo.exceptions import UserError
+from odoo.exceptions import UserError, ValidationError
 from odoo.fields import Domain
 from odoo.tools.binary import BinaryBytes
 
+from ..tools.controlled_events import DIMENSION_STATES
 from ..tools.errors import UaeControlledEndpointMismatch
 
 
@@ -310,7 +311,13 @@ class UaeEdiTransmission(models.Model):
 
     def _apply_controlled_event(self, event):
         self.ensure_one()
-        return super().write({event.dimension: event.fact_state})
+        dimension = event.dimension
+        state = event.fact_state
+        if state not in DIMENSION_STATES.get(dimension, set()):
+            raise ValidationError(
+                self.env._("The controlled event fact is not supported.")
+            )
+        return super().write({dimension: state})
 
     def _validate_controlled_document(self):
         raise UserError(
