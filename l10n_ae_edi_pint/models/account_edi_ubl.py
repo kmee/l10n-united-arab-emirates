@@ -141,6 +141,30 @@ class AccountEdiUblUae(models.AbstractModel):
             )
         if (
             len(transaction_type) == 8
+            and transaction_type[7] == "1"
+            and not any(
+                node.text == "AE"
+                for node in document.findall(
+                    "{*}Delivery/{*}DeliveryLocation/{*}Address/{*}Country/"
+                    "{*}IdentificationCode"
+                )
+            )
+            and any(
+                document.find("{*}Delivery/{*}DeliveryLocation/{*}Address/{*}" + name)
+                is None
+                for name in ("StreetName", "CityName", "CountrySubentity")
+            )
+        ):
+            # IBR-152-AE explicitly exempts country AE in its predicate.
+            errors.add(
+                self.env._(
+                    "IBR-152-AE: export requires a delivery street, city and "
+                    "state/region when delivery country is not AE. Review the "
+                    "Delivery Address; keep the buyer's legal address separate."
+                )
+            )
+        if (
+            len(transaction_type) == 8
             and transaction_type[2] == "1"
             and any(
                 (node.text or "").strip() != "N"
