@@ -2427,7 +2427,18 @@ class TestUaeInvoiceXmlConformance(UaePintTestCommon):
 
     @requires_normative_resources("1.0.4")
     def test_commercial_invoice_without_supplier_vat_passes_official_rules(self):
-        self.env.company.partner_id.vat = False
+        issuer = self.env.company.partner_id
+        issuer.vat = False
+        self.assertFalse(issuer.vat)
+        self.assertEqual(issuer.routing_endpoint, self.env.company.l10n_ae_tin)
+        binding = self._reviewed_binding(
+            {
+                "name": "Synthetic non-VAT commercial contract",
+                "fiscal_uuid_policy": "controlled_local",
+            },
+            capabilities=("submit", "lookup", "report", "billing_invoice"),
+            note="Reviewed synthetic non-VAT/outside-scope commercial hypothesis.",
+        )
         outside_scope = self.tax_sale_a.copy(
             {
                 "name": "Synthetic Out of Scope",
@@ -2435,15 +2446,45 @@ class TestUaeInvoiceXmlConformance(UaePintTestCommon):
                 "ubl_cii_tax_category_code": "O",
             }
         )
-        invoice = self.init_invoice("out_invoice", amounts=[100], taxes=outside_scope)
+        invoice = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=outside_scope
+        ).with_user(self.simple_accountman)
+        self.assertFalse(invoice.env.su)
+        self.assertFalse(invoice.env.user.has_group("base.group_system"))
         invoice.write(
             {
                 "l10n_ae_document_category": "commercial",
-                "l10n_ae_fiscal_uuid": "77777777-7777-4777-8777-777777777777",
+                "l10n_ae_binding_id": binding.id,
             }
         )
+        invoice.action_l10n_ae_validate()
         invoice.action_post()
-        xml = etree.fromstring(invoice.preview_l10n_ae_pint().encode())
+        ledger = invoice.line_ids.read(
+            ["debit", "credit", "amount_currency", "write_date"]
+        )
+        invoice.action_l10n_ae_prepare()
+        issue = invoice.l10n_ae_transmission_id
+        original = issue.xml_content.encode()
+        xml = etree.fromstring(original)
+        self.assertEqual(
+            xml.findtext("cbc:ProfileExecutionID", namespaces=NS), "00000000"
+        )
+        self.assertEqual(
+            xml.findtext("cbc:CustomizationID", namespaces=NS),
+            "urn:peppol:pint:billing-1@ae-1",
+        )
+        self.assertEqual(
+            xml.findtext("cbc:ProfileID", namespaces=NS), "urn:peppol:bis:billing"
+        )
+        legal = xml.find(
+            "cac:AccountingSupplierParty/cac:Party/cac:PartyLegalEntity/cbc:CompanyID",
+            NS,
+        )
+        self.assertIsNotNone(legal)
+        self.assertEqual(
+            (legal.text, legal.get("schemeAgencyID"), legal.get("schemeAgencyName")),
+            ("SYNTH-TRADE-0001", "TL", "Synthetic Free Zone Authority"),
+        )
         self.assertEqual(xml.findtext("cbc:InvoiceTypeCode", namespaces=NS), "480")
         self.assertEqual(
             xml.findtext(
@@ -2464,6 +2505,52 @@ class TestUaeInvoiceXmlConformance(UaePintTestCommon):
         )
         report = invoice.validate_l10n_ae_pint()
         self.assertTrue(report["valid"], report)
+
+        # A missing VAT TRN is legitimate in this reviewed 480 hypothesis.
+        # Missing legal identity is different: remove only that element in a
+        # separate validation input, preserving the frozen business original.
+        legal.getparent().remove(legal)
+        negative = OfflinePintValidator(self.normative_directories["1.0.4"]).validate(
+            etree.tostring(xml)
+        )
+        self.assertFalse(negative["valid"])
+        self.assertTrue(negative["xsd_valid"])
+        failures = [
+            failure["code"]
+            for layer in negative["layers"]
+            for failure in layer["failures"]
+        ]
+        self.assertIn("ibr-150-ae", failures)
+        self.assertEqual(issue.xml_content.encode(), original)
+        self.assertEqual(invoice.preview_l10n_ae_pint().encode(), original)
+        self.assertEqual(
+            invoice.line_ids.read(["debit", "credit", "amount_currency", "write_date"]),
+            ledger,
+        )
+        self.assertFalse(issue.attempt_ids or issue.event_ids or issue.remote_id)
+        self.assertEqual(invoice.l10n_ae_document_category, "commercial")
+        self.assertEqual(json.loads(issue.payload)["company"]["vat"], None)
+        _logger.info(
+            "UAE_COMMERCIAL_NO_VAT_EVIDENCE=%s",
+            json.dumps(
+                {
+                    "type": "480",
+                    "totals": [
+                        invoice.amount_untaxed,
+                        invoice.amount_tax,
+                        invoice.amount_total,
+                    ],
+                    "supplier_vat": False,
+                    "supplier_tin": self.env.company.l10n_ae_tin,
+                    "legal_id": "SYNTH-TRADE-0001",
+                    "formal_valid": report["valid"],
+                    "missing_legal_id_failures": failures,
+                    "xml_sha256": issue.xml_hash,
+                    "same_original_and_ledger": True,
+                },
+                sort_keys=True,
+            ),
+        )
 
     @requires_normative_resources("1.0.4")
     def test_tax_invoice_without_supplier_vat_is_rejected_instead_of_using_tin(self):
