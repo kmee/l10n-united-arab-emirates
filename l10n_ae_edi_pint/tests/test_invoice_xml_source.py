@@ -3236,3 +3236,205 @@ class TestUaeInvoiceXmlSource(UaePintTestCommon):
                 sort_keys=True,
             ),
         )
+
+    def test_archived_retention_package_refuses_hidden_obligation_or_hold(self):
+        """Global restrictions remain conjunctive for the complete audit package."""
+        fixture = self._archived_audit_fixture("hidden-child", reviewed_retention=True)
+        archived = self._archived_audit_as_actor(fixture)
+        self._assert_archived_audit_downloads(fixture)
+        for hidden in (fixture["policies"][1], fixture["holds"]):
+            restriction = fixture["admin"]["ir.access"].create(
+                {
+                    "name": "Synthetic required archived retention child",
+                    "model_id": self.env["ir.model"]._get(hidden._name).id,
+                    "operation": "r",
+                    "domain": f"[('id', '!=', {hidden.id})]",
+                }
+            )
+            try:
+                # New global rule is a setup change, separate from actor revocation.
+                self.env.invalidate_all()
+                for original in (archived, archived.sudo()):
+                    with self.assertRaises(AccessError):
+                        original.read(["evidence_archive"])
+                    with self.assertRaises(AccessError):
+                        original.get_retention_status("2034-01-01")
+                xml = archived.read(["xml_download"])[0]
+                self.assertEqual(
+                    base64.b64decode(xml["xml_download"]["content"]), fixture["xml"]
+                )
+            finally:
+                restriction.unlink()
+                self.env.invalidate_all()
+            self._assert_archived_audit_downloads(fixture)
+        self._assert_archived_audit_preserved(fixture)
+        _logger.info(
+            "UAE_ARCHIVED_CHILD_SECURITY=%s",
+            json.dumps(
+                {
+                    "case": "required_rows",
+                    "complete_original_preserved": True,
+                    "actual_uid_and_elevated_omission_refused": True,
+                }
+            ),
+        )
+
+    def test_archived_retention_reads_recheck_membership_and_editor_scope(self):
+        """Read grants expire with authority and do not reopen CUD or accounting."""
+        fixture = self._archived_audit_fixture(
+            "child-revocations", reviewed_retention=True
+        )
+        admin = fixture["admin"]
+        auditor = fixture["auditor"].with_env(admin)
+        role = admin.ref("l10n_ae_edi.group_fiscal_auditor")
+        policy_fields = [
+            "name",
+            "state",
+            "retain_until",
+            "approved_by_id",
+            "approved_at",
+        ]
+        hold_fields = [
+            "reason",
+            "source_reference",
+            "state",
+            "placed_by_id",
+            "placed_at",
+            "released_by_id",
+            "released_at",
+        ]
+        expected = [
+            fixture["policies"].with_env(admin).read(policy_fields),
+            fixture["holds"].with_env(admin).read(hold_fields),
+        ]
+
+        def rows(actor):
+            return [
+                fixture["policies"]
+                .with_user(actor)
+                .sudo(False)
+                .with_context(allowed_company_ids=fixture["company_b"].ids),
+                fixture["holds"]
+                .with_user(actor)
+                .sudo(False)
+                .with_context(allowed_company_ids=fixture["company_b"].ids),
+            ]
+
+        def allowed(actor=auditor):
+            self._assert_archived_audit_downloads(fixture, actor)
+            self.assertEqual(
+                [
+                    record.read(names)
+                    for record, names in zip(
+                        rows(actor), [policy_fields, hold_fields], strict=True
+                    )
+                ],
+                expected,
+            )
+
+        def denied(actor=auditor):
+            self._assert_archived_audit_denied(fixture, actor)
+            for record, names in zip(
+                rows(actor), [policy_fields, hold_fields], strict=True
+            ):
+                with self.assertRaises(AccessError):
+                    record.read(names)
+
+        allowed()
+        auditor.group_ids = [Command.unlink(role.id)]
+        denied()
+        auditor.group_ids = [Command.link(role.id)]
+        allowed()
+        auditor.with_context(active_test=False).write(
+            {"company_ids": [Command.unlink(fixture["company_a"].id)]}
+        )
+        self.assertNotIn(
+            fixture["company_a"].id,
+            auditor.with_context(active_test=False).company_ids.ids,
+        )
+        denied()
+        auditor.with_context(active_test=False).write(
+            {"company_ids": [Command.link(fixture["company_a"].id)]}
+        )
+        self.assertIn(
+            fixture["company_a"].id,
+            auditor.with_context(active_test=False).company_ids.ids,
+        )
+        allowed()
+        auditor.active = False
+        denied()
+        auditor.active = True
+        allowed()
+        fixture["company_a"].with_env(admin).action_unarchive()
+        denied()
+        fixture["company_a"].with_env(admin).action_archive()
+        allowed()
+        manager_auditor = new_test_user(
+            admin,
+            login="synthetic-archived-child-manager-auditor",
+            groups=(
+                "base.group_user,account.group_account_manager,"
+                "l10n_ae_edi.group_fiscal_auditor,base.group_allow_export"
+            ),
+            company_id=fixture["company_b"].id,
+            company_ids=[fixture["company_a"].id, fixture["company_b"].id],
+        )
+        allowed(manager_auditor)
+        policy, hold = rows(manager_auditor)
+        for record in (policy, hold):
+            with self.assertRaises(AccessError):
+                record.check_access("write")
+            with self.assertRaises(AccessError):
+                record.check_access("unlink")
+        for operation in (
+            lambda: policy[0].write({"name": "Forged archived reviewed name"}),
+            lambda: policy[0].action_approve(),
+            lambda: hold.action_release("Forged archived release"),
+            lambda: policy[0].unlink(),
+            lambda: hold.unlink(),
+            lambda: policy.env["l10n_ae.edi.retention"].create(
+                {
+                    "name": "Forged archived additional obligation",
+                    "transmission_id": fixture["issue"].id,
+                    "record_class": "invoice",
+                    "tax_purpose": "vat",
+                    "anchor_kind": "tax_period_end",
+                    "period_start": "2026-01-01",
+                    "anchor_date": "2026-12-31",
+                    "retention_years": 5,
+                    "source_reference": "Forged source",
+                    "policy_version": "forged",
+                    "review_note": "Forged archived review",
+                }
+            ),
+            lambda: hold.env["l10n_ae.edi.retention.hold"].create(
+                {
+                    "retention_id": policy[0].id,
+                    "reason": "Forged additional hold",
+                    "source_reference": "Forged archived source",
+                }
+            ),
+        ):
+            with self.assertRaises((AccessError, UserError)), self.cr.savepoint():
+                operation()
+        allowed(manager_auditor)
+        for model, ids in [
+            ("account.move", fixture["invoice"].ids),
+            ("account.move.line", fixture["ledger_ids"]),
+        ]:
+            with self.assertRaises(AccessError):
+                admin[model].with_user(manager_auditor).sudo(False).browse(ids).read(
+                    ["id"]
+                )
+        self._assert_archived_audit_preserved(fixture)
+        _logger.info(
+            "UAE_ARCHIVED_CHILD_SECURITY=%s",
+            json.dumps(
+                {
+                    "case": "warm_authority_and_editors",
+                    "complete_original_preserved": True,
+                    "current_authority_rechecked": True,
+                    "archived_cud_and_accounting_refused": True,
+                }
+            ),
+        )
