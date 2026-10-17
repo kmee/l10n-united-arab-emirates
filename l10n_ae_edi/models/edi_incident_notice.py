@@ -269,7 +269,7 @@ class UaeEdiIncidentNotice(models.Model):
         # Parent action has checked the actual actor, company and reviewed case.
         # Elevation persists only immutable evidence, never an accounting entry.
         return (
-            super(UaeEdiIncidentNotice, self.sudo())
+            super(UaeEdiIncidentNotice, self.sudo().with_company(incident.company_id))
             .create(
                 {
                     **values,
