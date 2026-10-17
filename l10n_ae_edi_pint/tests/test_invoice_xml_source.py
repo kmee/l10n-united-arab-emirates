@@ -2987,9 +2987,23 @@ class TestUaeInvoiceXmlSource(UaePintTestCommon):
         auditor.write({"group_ids": [Command.link(role.id)]})
         self._assert_archived_audit_downloads(fixture)
 
-        auditor.write({"company_ids": [Command.unlink(fixture["company_a"].id)]})
+        # Native Many2many writes preserve inactive relations unless the
+        # administrator explicitly includes them in the write's scope.
+        auditor.with_context(active_test=False).write(
+            {"company_ids": [Command.unlink(fixture["company_a"].id)]}
+        )
+        self.assertNotIn(
+            fixture["company_a"].id,
+            auditor.with_context(active_test=False).company_ids.ids,
+        )
         self._assert_archived_audit_denied(fixture)
-        auditor.write({"company_ids": [Command.link(fixture["company_a"].id)]})
+        auditor.with_context(active_test=False).write(
+            {"company_ids": [Command.link(fixture["company_a"].id)]}
+        )
+        self.assertIn(
+            fixture["company_a"].id,
+            auditor.with_context(active_test=False).company_ids.ids,
+        )
         self._assert_archived_audit_downloads(fixture)
 
         auditor.write({"active": False})
