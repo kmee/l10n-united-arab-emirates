@@ -186,6 +186,8 @@ class TestUaeReceivedXml(UaePintTestCommon):
         self.assertEqual(original.xml_hash, hashlib.sha256(content).hexdigest())
         history = original.processing_history_ids
         self.assertEqual(len(history), 1)
+        self.assertEqual(history.outcome, "review")
+        self.assertFalse(history.move_id)
         report = json.loads(history.validation_report)
         self.assertTrue(report["xsd_valid"], report)
         self.assertFalse(report["valid"], report)
