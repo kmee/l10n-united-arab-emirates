@@ -2132,8 +2132,49 @@ class TestUaeIncident(AccountTestInvoicingCommon):
             "document_filename": "synthetic-taxpayer-notice.txt",
             "document": base64.b64encode(taxpayer_content).decode(),
         }
-        taxpayer_result = incident.record_notice(taxpayer_evidence)
+        other_company = self.env["res.company"].create(
+            {
+                "name": "Synthetic other current company",
+                "country_id": self.env.ref("base.ae").id,
+            }
+        )
+        manager.company_ids = [Command.link(other_company.id)]
+        taxpayer_result = incident.with_company(other_company).record_notice(
+            taxpayer_evidence
+        )
         taxpayer_notice = asp_notice.browse(taxpayer_result["id"])
+        original_attachment = (
+            self.env["ir.attachment"]
+            .sudo()
+            .search(
+                [
+                    ("res_model", "=", taxpayer_notice._name),
+                    ("res_id", "=", taxpayer_notice.id),
+                    ("res_field", "=", "document_content"),
+                ]
+            )
+        )
+        self.assertEqual(len(original_attachment), 1)
+        self.assertEqual(
+            original_attachment.company_id,
+            incident.company_id,
+            "The preserved original must belong to the incident company",
+        )
+        self.assertFalse(original_attachment.public)
+        self.assertFalse(original_attachment.access_token)
+        for actor in (manager, reader):
+            with (
+                self.subTest(raw_original_actor=actor.login),
+                self.cr.savepoint(),
+                self.assertRaises(AccessError),
+            ):
+                taxpayer_notice.with_user(actor).read(["document_content"])
+            with (
+                self.subTest(direct_attachment_actor=actor.login),
+                self.cr.savepoint(),
+                self.assertRaises(AccessError),
+            ):
+                original_attachment.with_user(actor).read(["raw"])
         self.assertNotEqual(asp_notice, taxpayer_notice)
         self.assertEqual(taxpayer_notice.document.content, taxpayer_content)
         self.assertEqual(taxpayer_notice.document_sha256, taxpayer_digest)
