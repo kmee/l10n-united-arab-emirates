@@ -2757,7 +2757,7 @@ class TestUaeInvoiceXmlSource(UaePintTestCommon):
             company_id=active_company.id,
             company_ids=[original_company.id, active_company.id],
         ).with_context(allowed_company_ids=active_company.ids)
-        memberships = sorted(auditor.company_ids.ids)
+        memberships = sorted(auditor.with_context(active_test=False).company_ids.ids)
         roles = sorted(auditor.group_ids.ids)
         fields = ["xml_download", "evidence_archive"]
         before = (
@@ -2793,7 +2793,10 @@ class TestUaeInvoiceXmlSource(UaePintTestCommon):
             allowed_company_ids=active_company.ids
         )
         self.assertFalse(archived_company.active)
-        self.assertEqual(sorted(auditor.company_ids.ids), memberships)
+        self.assertEqual(
+            sorted(auditor.with_context(active_test=False).company_ids.ids),
+            memberships,
+        )
         self.assertEqual(sorted(auditor.group_ids.ids), roles)
         self.assertEqual(auditor.company_id, active_company)
         self.assertFalse(auditor.has_group("base.group_system"))
