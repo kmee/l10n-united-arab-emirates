@@ -2484,6 +2484,48 @@ class TestUaeInvoiceXmlSource(UaePintTestCommon):
             self.assertEqual(
                 issue.with_user(reader).conventional_pdf_content.content, content
             )
+        for role in (
+            "group_controlled_sender",
+            "group_billing_reader",
+            "group_fiscal_auditor",
+            "group_event_receiver",
+        ):
+            actor = new_test_user(
+                self.env,
+                login="synthetic-pdf-" + role,
+                groups="l10n_ae_edi." + role,
+                company_ids=company.ids,
+                company_id=company.id,
+            )
+            actual = issue.with_user(actor)
+            self.assertFalse(actual.env["account.move"].has_access("read"))
+            self.assertEqual(actual.conventional_pdf_content.content, content)
+            with self.assertRaises(AccessError):
+                actual.read(["conventional_pdf_original_content"])
+        outsider = new_test_user(
+            self.env,
+            login="synthetic-pdf-no-transmission-rights",
+            groups="base.group_user",
+            company_ids=company.ids,
+            company_id=company.id,
+        )
+        foreign_reader = new_test_user(
+            self.env,
+            login="synthetic-pdf-foreign-company",
+            groups="account.group_account_readonly",
+            company_ids=other_company.ids,
+            company_id=other_company.id,
+        )
+        # Warmed content must not cross actual UID/company boundaries under sudo.
+        for candidate in (
+            issue.with_user(outsider),
+            issue.with_user(foreign_reader).with_context(
+                allowed_company_ids=other_company.ids
+            ),
+            issue.with_context(allowed_company_ids=other_company.ids),
+        ):
+            with self.assertRaises(AccessError):
+                _ = candidate.sudo().conventional_pdf_content
 
     def test_pdf_issue_cannot_be_attached_to_another_invoice(self):
         original = self.init_invoice(
@@ -2595,6 +2637,7 @@ class TestUaeInvoiceXmlSource(UaePintTestCommon):
                 self.assertEqual(invoice.l10n_ae_transmission_id.payload, payload)
                 self.assertEqual(invoice.preview_l10n_ae_pint(), xml)
         for field in presentation_fields + [
+            "conventional_pdf_original_content",
             "conventional_pdf_content",
             "conventional_pdf_hash",
             "conventional_pdf_generated_at",
