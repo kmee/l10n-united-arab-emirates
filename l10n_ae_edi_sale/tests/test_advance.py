@@ -1251,6 +1251,79 @@ class TestUaeSalesAdvance(AccountTestInvoicingCommon):
         self.assertEqual((first.state, first.amount_total), ("posted", 9450))
         self.assertFalse(first.l10n_ae_transmission_id)
 
+    def test_local_correction_advance_summary_excludes_its_frozen_issue_during_onchange(
+        self,
+    ):
+        order = self.env["sale.order"].create(
+            {
+                "partner_id": self.partner_a.id,
+                "order_line": [
+                    Command.create(
+                        {
+                            "product_id": self.product_a.id,
+                            "product_uom_qty": 1,
+                            "price_unit": 10000,
+                            "tax_ids": [Command.set(self.tax_sale_a.ids)],
+                        }
+                    )
+                ],
+            }
+        )
+        order.action_confirm()
+        advance = self._create_invoice(order, "percentage", 10).with_user(
+            self.simple_accountman
+        )
+        advance.action_post()
+        advance.action_l10n_ae_prepare()
+        final = self._create_invoice(order, "delivered").with_user(
+            self.simple_accountman
+        )
+        final.action_post()
+        final.action_l10n_ae_prepare()
+
+        frozen_issue = final.l10n_ae_transmission_id
+        frozen_identity = frozen_issue.read(
+            ["payload", "payload_hash", "xml_content", "xml_hash", "idempotency_key"]
+        )
+        self.assertEqual(
+            (advance.amount_untaxed, advance.amount_tax, advance.amount_total),
+            (1000, 50, 1050),
+        )
+        self.assertEqual(
+            (final.amount_untaxed, final.amount_tax, final.amount_total),
+            (9000, 450, 9450),
+        )
+
+        # The public reset action starts the supported editing correction. Its
+        # original issue remains reserved while the replacement is still a draft.
+        final.button_draft()
+        correction = final.l10n_ae_correction_id
+        self.assertEqual(correction.state, "editing")
+        self.assertEqual(correction.source_transmission_id, frozen_issue)
+        self.assertFalse(correction.replacement_transmission_id)
+        self.assertFalse(final.l10n_ae_transmission_id)
+        self.assertEqual(
+            frozen_issue.read(
+                ["payload", "payload_hash", "xml_content", "xml_hash", "idempotency_key"]
+            ),
+            frozen_identity,
+        )
+
+        expected = (
+            f"{advance.name} | {advance.invoice_date} | "
+            "Net: 1000.00 | VAT: 50.00 AED"
+        )
+        # A persisted draft is the self-exclusion control: its own reserved
+        # history must not be counted as a different invoice's consumption.
+        self.assertEqual(final.l10n_ae_advance_reference_summary, expected)
+
+        # Odoo's onchange record is a NewId whose _origin is this persisted
+        # draft. Build it through the public ORM new() seam with the form values.
+        form_values = final.copy_data()[0]
+        self.assertFalse(form_values.get("l10n_ae_transmission_id"))
+        onchange_final = final.env["account.move"].new(form_values, origin=final)
+        self.assertEqual(onchange_final.l10n_ae_advance_reference_summary, expected)
+
     def test_replaced_final_without_deduction_releases_advance_reset(self):
         # Independent amounts: 10000 + VAT 500, advance 1000 + VAT 50,
         # deducted final 9000 + VAT 450. Removing the deduction restores 10500.
