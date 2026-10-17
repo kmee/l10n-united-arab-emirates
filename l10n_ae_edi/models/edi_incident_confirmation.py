@@ -42,7 +42,7 @@ class UaeEdiIncidentConfirmation(models.Model):
     source_reference = fields.Text(required=True, readonly=True)
     review_note = fields.Text(required=True, readonly=True)
     document_content = fields.Binary(
-        required=True, readonly=True, attachment=False, groups="base.group_system"
+        required=True, readonly=True, attachment=True, groups="base.group_system"
     )
     document = fields.Binary(
         compute="_compute_document", compute_sudo=False, attachment=False
@@ -181,7 +181,10 @@ class UaeEdiIncidentConfirmation(models.Model):
             )
         # The parent action holds the incident row lock and checks the actual actor.
         return (
-            super(UaeEdiIncidentConfirmation, self.sudo())
+            super(
+                UaeEdiIncidentConfirmation,
+                self.sudo().with_company(incident.company_id),
+            )
             .create(
                 {
                     **values,
