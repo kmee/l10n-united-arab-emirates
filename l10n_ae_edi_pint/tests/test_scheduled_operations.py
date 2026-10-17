@@ -32,7 +32,7 @@ class TestUaeControlledCronDefaults(TransactionCase):
             self.assertEqual(result["tag"], "display_exception")
             self.assertIn(
                 "non-administrator",
-                result["params"]["data"]["message"],
+                result["params"]["data"]["debug"],
             )
         self.assertEqual(
             self.env["l10n_ae.edi.inbox"]
