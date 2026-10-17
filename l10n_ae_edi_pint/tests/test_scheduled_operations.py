@@ -54,8 +54,10 @@ class TestUaeControlledCronDefaults(TransactionCase):
             )
             self.assertEqual(cron.interval_number, 1)
             self.assertEqual(cron.interval_type, "minutes")
-        for xmlid in (
-            "l10n_ae_edi.ir_cron_deadline_reminders",
-            "l10n_ae_edi_pint.ir_cron_incoming_review",
-        ):
-            self.assertTrue(self.env.ref(xmlid).active)
+        self.assertTrue(self.env.ref("l10n_ae_edi.ir_cron_deadline_reminders").active)
+
+    def test_incoming_review_waits_for_explicit_scheduler_configuration(self):
+        self.assertFalse(
+            self.env.ref("l10n_ae_edi_pint.ir_cron_incoming_review").active,
+            "Fresh incoming review must wait for an ordinary scheduler account.",
+        )
