@@ -6,7 +6,7 @@ import uuid
 from datetime import timedelta
 
 from odoo import api, fields, models
-from odoo.exceptions import UserError, ValidationError
+from odoo.exceptions import AccessError, UserError, ValidationError
 from odoo.fields import Domain
 from odoo.tools.binary import BinaryBytes
 
@@ -69,8 +69,13 @@ class UaeEdiTransmission(models.Model):
         "ir.actions.report", readonly=True, copy=False, ondelete="restrict"
     )
     conventional_filename = fields.Char(readonly=True, copy=False)
+    conventional_pdf_original_content = fields.Binary(
+        readonly=True, copy=False, attachment=True, groups="base.group_system"
+    )
     conventional_pdf_content = fields.Binary(
-        readonly=True, copy=False, attachment=False
+        compute="_compute_conventional_pdf_content",
+        compute_sudo=False,
+        attachment=False,
     )
     conventional_pdf_hash = fields.Char(readonly=True, copy=False)
     conventional_pdf_generated_at = fields.Datetime(readonly=True, copy=False)
@@ -270,6 +275,35 @@ class UaeEdiTransmission(models.Model):
     def _mark_controlled_event_review(self):
         return super().write({"event_review_required": True})
 
+    @api.depends_context("uid", "allowed_company_ids")
+    @api.depends(
+        "conventional_pdf_original_content",
+        "conventional_pdf_hash",
+        "conventional_filename",
+        "company_id",
+    )
+    def _compute_conventional_pdf_content(self):
+        for record in self:
+            actual = record.with_user(self.env.uid)
+            actual.check_access("read")
+            principal = actual.env.user
+            if (
+                not principal.active
+                or actual.company_id.id not in principal.company_ids.ids
+                or actual.company_id.id not in actual.env.companies.ids
+            ):
+                raise AccessError(self.env._("This UAE PDF company is not accessible."))
+            original = actual.sudo().conventional_pdf_original_content
+            content = original.content if original else b""
+            if not content and actual.conventional_pdf_hash:
+                # Lost or unmigrated originals must not be silently regenerated.
+                raise UserError(self.env._("The preserved invoice PDF is corrupt."))
+            record.conventional_pdf_content = (
+                BinaryBytes(content, filename=actual.conventional_filename)
+                if content
+                else False
+            )
+
     def _ensure_conventional_pdf(self):
         """Render preserved content once; no invoice recalculation or delivery."""
         self.ensure_one()
@@ -299,9 +333,9 @@ class UaeEdiTransmission(models.Model):
         if not content.startswith(b"%PDF-"):
             raise UserError(self.env._("The report engine did not return a PDF."))
         # Only this checked invoice action may append the first PDF artifact.
-        super().write(
+        super(UaeEdiTransmission, self.with_company(self.company_id)).write(
             {
-                "conventional_pdf_content": BinaryBytes(
+                "conventional_pdf_original_content": BinaryBytes(
                     content, filename=self.conventional_filename
                 ),
                 "conventional_pdf_hash": hashlib.sha256(content).hexdigest(),
@@ -542,6 +576,7 @@ class UaeEdiTransmission(models.Model):
             "conventional_html_hash",
             "conventional_report_id",
             "conventional_filename",
+            "conventional_pdf_original_content",
             "conventional_pdf_content",
             "conventional_pdf_hash",
             "conventional_pdf_generated_at",
