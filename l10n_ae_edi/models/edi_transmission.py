@@ -296,8 +296,12 @@ class UaeEdiTransmission(models.Model):
             actual.check_access("read")
             principal = actual.env.user
             company_is_selected = actual.company_id.id in actual.env.companies.ids
-            archived_auditor = not actual.company_id.active and principal.has_group(
-                "l10n_ae_edi.group_fiscal_auditor"
+            # The native company itself stays outside the auditor's selectable
+            # companies. Read only its archival flag after original read access
+            # passed; do not grant access to live company configuration.
+            archived_auditor = (
+                not actual.company_id.sudo().active
+                and principal.has_group("l10n_ae_edi.group_fiscal_auditor")
             )
             if (
                 not principal.active
