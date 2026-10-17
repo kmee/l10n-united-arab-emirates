@@ -2,6 +2,8 @@
 # License AGPL-3.0 or later (https://www.gnu.org/licenses/agpl).
 import json
 
+from lxml import etree
+
 from odoo import fields, models
 from odoo.exceptions import UserError
 
@@ -59,4 +61,27 @@ class UaeEdiTransmission(models.Model):
             if report["valid"] or error.__class__ is not UserError:
                 raise
             raise UaeDocumentValidationError(str(error), report=report) from error
+        if self.submission_state == "queued" and self.process == "billing":
+            # Classify only the preserved document. An irrelevant credit-reason
+            # value on an ordinary invoice must not become a sending policy.
+            tree = etree.fromstring(
+                self.xml_content.encode(),
+                parser=etree.XMLParser(
+                    resolve_entities=False, no_network=True, load_dtd=False
+                ),
+            )
+            if tree.findtext("./{*}CreditNoteTypeCode") in {"381", "81"} and (
+                tree.findtext("./{*}DiscrepancyResponse/{*}ResponseCode") == "VD"
+            ):
+                raise UaeDocumentValidationError(
+                    self.env._(
+                        "Volume Discount (VD) remains paused for a documented "
+                        "fiscal/provider conformance decision. PINT-AE passes "
+                        "this original, but its reference policy is unresolved. "
+                        "Preserve VD, any authentic references and the frozen "
+                        "original; do not change them to force acceptance."
+                    ),
+                    report=report,
+                    kind="conformance_policy",
+                )
         return report
