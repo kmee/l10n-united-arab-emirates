@@ -1304,14 +1304,19 @@ class TestUaeSalesAdvance(AccountTestInvoicingCommon):
         self.assertFalse(final.l10n_ae_transmission_id)
         self.assertEqual(
             frozen_issue.read(
-                ["payload", "payload_hash", "xml_content", "xml_hash", "idempotency_key"]
+                [
+                    "payload",
+                    "payload_hash",
+                    "xml_content",
+                    "xml_hash",
+                    "idempotency_key",
+                ]
             ),
             frozen_identity,
         )
 
         expected = (
-            f"{advance.name} | {advance.invoice_date} | "
-            "Net: 1000.00 | VAT: 50.00 AED"
+            f"{advance.name} | {advance.invoice_date} | Net: 1000.00 | VAT: 50.00 AED"
         )
         # A persisted draft is the self-exclusion control: its own reserved
         # history must not be counted as a different invoice's consumption.
