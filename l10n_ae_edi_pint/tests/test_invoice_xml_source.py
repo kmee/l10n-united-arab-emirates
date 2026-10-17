@@ -2374,9 +2374,14 @@ class TestUaeInvoiceXmlSource(UaePintTestCommon):
         before = invoice.read(["state", "amount_untaxed", "amount_tax", "amount_total"])
         ledger_fields = ["debit", "credit", "balance", "amount_currency", "write_date"]
         ledger = invoice.line_ids.sorted("id").read(ledger_fields)
-        action = invoice.with_context(
+        current = invoice.with_context(
             allowed_company_ids=(other_company | company).ids
-        ).action_l10n_ae_generate_conventional_pdf()
+        )
+        self.assertEqual(current.env.company, other_company)
+        self.assertEqual(issue.company_id, company)
+        # Let the real renderer request its assets through the native test server.
+        with self.allow_pdf_render():
+            action = current.action_l10n_ae_generate_conventional_pdf()
         expected_url = (
             f"/web/content/l10n_ae.edi.transmission/{issue.id}/"
             "conventional_pdf_content?download=true&filename_field=conventional_filename"
