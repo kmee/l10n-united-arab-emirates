@@ -7,12 +7,14 @@ import json
 import logging
 import sys
 import uuid
+from contextlib import closing
 
 from lxml import etree
 
 from odoo.exceptions import AccessError, UserError, ValidationError
 from odoo.tests import Form, tagged
 from odoo.tests.common import new_test_user
+from odoo.tools.binary import BinaryBytes
 from odoo.tools.pdf import PdfReader
 
 from odoo.addons.l10n_ae_edi.tests.common import (
@@ -2449,6 +2451,39 @@ class TestUaeInvoiceXmlSource(UaePintTestCommon):
                     self.assertRaises(AccessError),
                 ):
                     record.read([field])
+        # Storage faults are fixture injections; the public field observes refusal.
+        for fault in ("hash", "bytes"):
+            with closing(self.cr.savepoint()):
+                if fault == "hash":
+                    self.cr.execute(
+                        "UPDATE l10n_ae_edi_transmission "
+                        "SET conventional_pdf_hash = %s WHERE id = %s",
+                        ["0" * 64, issue.id],
+                    )
+                else:
+                    attachment.write({"raw": BinaryBytes(b"Corrupt PDF original\n")})
+                issue.invalidate_recordset(
+                    [
+                        "conventional_pdf_content",
+                        "conventional_pdf_original_content",
+                        "conventional_pdf_hash",
+                    ]
+                )
+                with self.assertRaisesRegex(
+                    UserError, "preserved invoice PDF is corrupt"
+                ) as error:
+                    _ = issue.with_user(reader).conventional_pdf_content
+                self.assertIs(type(error.exception), UserError)
+            issue.invalidate_recordset(
+                [
+                    "conventional_pdf_content",
+                    "conventional_pdf_original_content",
+                    "conventional_pdf_hash",
+                ]
+            )
+            self.assertEqual(
+                issue.with_user(reader).conventional_pdf_content.content, content
+            )
 
     def test_pdf_issue_cannot_be_attached_to_another_invoice(self):
         original = self.init_invoice(
