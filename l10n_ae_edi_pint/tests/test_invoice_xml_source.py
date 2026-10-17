@@ -8,6 +8,7 @@ import json
 import logging
 import sys
 import uuid
+import zipfile
 from contextlib import closing
 
 from lxml import etree
@@ -2851,7 +2852,7 @@ class TestUaeInvoiceXmlSource(UaePintTestCommon):
             ),
         )
 
-    def _archived_audit_fixture(self, suffix):
+    def _archived_audit_fixture(self, suffix, *, reviewed_retention=False):
         company_a = self.env.company
         company_b = self.env["res.company"].create(
             {
@@ -2871,6 +2872,40 @@ class TestUaeInvoiceXmlSource(UaePintTestCommon):
         invoice.l10n_ae_binding_id = binding
         invoice.action_l10n_ae_prepare()
         issue = invoice.l10n_ae_transmission_id
+        policies = self.env["l10n_ae.edi.retention"]
+        holds = self.env["l10n_ae.edi.retention.hold"]
+        if reviewed_retention:
+            # Real public review actions before company archival; no fabricated
+            # approval or original child state and no later grant to the auditor.
+            reviewer = self.simple_accountman
+            self.assertFalse(reviewer.has_group("base.group_system"))
+            for purpose, years in (("vat", 5), ("corporate_tax", 7)):
+                policy = policies.with_user(reviewer).create(
+                    {
+                        "name": "Synthetic archived original " + purpose,
+                        "transmission_id": issue.id,
+                        "record_class": "invoice",
+                        "tax_purpose": purpose,
+                        "anchor_kind": "tax_period_end",
+                        "period_start": "2026-01-01",
+                        "anchor_date": "2026-12-31",
+                        "retention_years": years,
+                        "source_reference": "Synthetic reviewed source, not ratified",
+                        "policy_version": "synthetic-archive-2026-1",
+                        "review_note": "Engineering interval; no production policy.",
+                    }
+                )
+                policy.action_approve()
+                self.assertEqual(policy.approved_by_id, reviewer)
+                policies |= policy.with_user(self.env.uid)
+            holds = holds.with_user(reviewer).create(
+                {
+                    "retention_id": policies[0].id,
+                    "reason": "Synthetic continuing archive audit",
+                    "source_reference": "Synthetic retained audit request",
+                }
+            )
+            self.assertEqual(holds.placed_by_id, reviewer)
         auditor = new_test_user(
             self.env,
             login="synthetic-archive-negative-" + suffix,
@@ -2924,6 +2959,8 @@ class TestUaeInvoiceXmlSource(UaePintTestCommon):
             "original": original,
             "ledger": ledger,
             "ledger_ids": [row["id"] for row in ledger],
+            "policies": policies,
+            "holds": holds,
         }
 
     def _archived_audit_as_actor(self, fixture, user=None):
@@ -3124,5 +3161,78 @@ class TestUaeInvoiceXmlSource(UaePintTestCommon):
                     ],
                     "original_and_ledger_preserved": True,
                 }
+            ),
+        )
+
+    def test_archived_auditor_recovers_reviewed_obligations_and_hold_without_omission(
+        self,
+    ):
+        """Assigned archived originals include every reviewed retention child."""
+        fixture = self._archived_audit_fixture(
+            "reviewed-children", reviewed_retention=True
+        )
+        archived = self._archived_audit_as_actor(fixture)
+        self.assertFalse(archived.env.su)
+        xml = archived.read(["xml_download"])[0]
+        self.assertEqual(
+            base64.b64decode(xml["xml_download"]["content"]), fixture["xml"]
+        )
+        try:
+            result = archived.read(["evidence_archive"])[0]
+        except AccessError as error:
+            self.fail(
+                "Assigned archived auditor cannot recover complete reviewed "
+                f"retention and hold evidence: {error}"
+            )
+        package = base64.b64decode(result["evidence_archive"]["content"])
+        self.assertEqual(package, fixture["package"])
+        with zipfile.ZipFile(io.BytesIO(package)) as archive:
+            self.assertIsNone(archive.testzip())
+            self.assertEqual(archive.read("document.xml"), fixture["xml"])
+            retention = json.loads(archive.read("retention.json"))
+        self.assertEqual(
+            [row["id"] for row in retention["obligations"]],
+            fixture["policies"].ids,
+        )
+        self.assertEqual(
+            [
+                (row["tax_purpose"], row["retain_until"], row["state"])
+                for row in retention["obligations"]
+            ],
+            [
+                ("vat", "2031-12-31", "approved"),
+                ("corporate_tax", "2033-12-31", "approved"),
+            ],
+        )
+        self.assertEqual(
+            [row["id"] for row in retention["holds"]], fixture["holds"].ids
+        )
+        self.assertEqual(retention["holds"][0]["state"], "active")
+        status = archived.get_retention_status("2034-01-01")
+        self.assertEqual(
+            (
+                status["state"],
+                status["retain_until"],
+                status["obligation_count"],
+                status["active_hold_count"],
+                status["disposition_reviewable"],
+            ),
+            ("held", "2033-12-31", 2, 1, False),
+        )
+        self._assert_archived_audit_preserved(fixture)
+        _logger.info(
+            "UAE_ARCHIVED_REVIEWED_CHILDREN=%s",
+            json.dumps(
+                {
+                    "issue_id": archived.id,
+                    "auditor_id": archived.env.uid,
+                    "obligation_ids": fixture["policies"].ids,
+                    "hold_ids": fixture["holds"].ids,
+                    "xml_sha256": hashlib.sha256(fixture["xml"]).hexdigest(),
+                    "package_sha256": hashlib.sha256(package).hexdigest(),
+                    "complete_children_preserved": True,
+                    "archive_stays_inactive": True,
+                },
+                sort_keys=True,
             ),
         )
