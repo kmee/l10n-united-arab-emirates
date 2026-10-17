@@ -81,11 +81,6 @@
                             readonly="state == 'open' or fta_confirmation_ids"
                             invisible="incident_kind != 'registration_change'"
                         />
-                        <field
-                            name="confirmation_intake_mode"
-                            readonly="1"
-                            invisible="incident_kind != 'registration_change'"
-                        />
                         <field name="reason" readonly="state == 'open'" />
                         <field
                             name="responsible_id"
@@ -96,12 +91,6 @@
                     </group>
                     <p class="text-muted">
                         Times are shown in your Odoo time zone. Deadlines use the legal event date in Asia/Dubai: failure occurrence or receipt of the FTA registration confirmation.
-                    </p>
-                    <p
-                        class="text-muted"
-                        invisible="incident_kind != 'registration_change' or confirmation_intake_mode != 'legacy_opened'"
-                    >
-                        This case was already open without a retained original before the intake upgrade. Its reviewed deadline and history are preserved. The upgrade does not fabricate or verify an FTA confirmation.
                     </p>
                     <p class="text-muted" invisible="state != 'draft'">
                         Select a reviewed calendar version before opening. Typed calendar details alone do not approve a version.
