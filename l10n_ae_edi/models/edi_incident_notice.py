@@ -75,7 +75,12 @@ class UaeEdiIncidentNotice(models.Model):
     )
     external_reference = fields.Text(required=True, readonly=True)
     review_note = fields.Text(required=True, readonly=True)
-    document = fields.Binary(required=True, readonly=True, attachment=False)
+    document_content = fields.Binary(
+        required=True, readonly=True, attachment=True, groups="base.group_system"
+    )
+    document = fields.Binary(
+        compute="_compute_document", compute_sudo=False, attachment=False
+    )
     document_filename = fields.Char(required=True, readonly=True)
     document_sha256 = fields.Char(required=True, readonly=True)
     evidence_hash = fields.Char(required=True, readonly=True)
@@ -103,6 +108,21 @@ class UaeEdiIncidentNotice(models.Model):
         "document",
     }
     _max_document_bytes = 10 * 1024 * 1024
+
+    @api.depends_context("uid", "allowed_company_ids")
+    @api.depends("document_content", "document_sha256", "incident_id")
+    def _compute_document(self):
+        for record in self:
+            actual = record.with_user(self.env.uid)
+            actual.check_access("read")
+            actual.incident_id._check_actor("read")
+            original = actual.sudo().document_content
+            content = original.content if original else b""
+            if hashlib.sha256(content).hexdigest() != actual.document_sha256:
+                raise UserError(
+                    self.env._("The stored notice failed integrity review.")
+                )
+            record.document = BinaryBytes(content)
 
     @api.model_create_multi
     def create(self, vals_list):
@@ -203,7 +223,7 @@ class UaeEdiIncidentNotice(models.Model):
         values["evidence_hash"] = hashlib.sha256(
             json.dumps(values, sort_keys=True, ensure_ascii=False).encode()
         ).hexdigest()
-        values["document"] = BinaryBytes(content)
+        values["document_content"] = BinaryBytes(content)
         return values
 
     @api.model
