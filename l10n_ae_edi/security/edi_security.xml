@@ -73,14 +73,40 @@
     <record id="edi_retention_company_rule" model="ir.access">
         <field name="name">UAE retention company isolation</field>
         <field name="model_id" ref="model_l10n_ae_edi_retention" />
-        <field name="operation">crud</field>
+        <field name="operation">cud</field>
         <field name="domain">[('company_id', 'in', company_ids)]</field>
+    </record>
+    <record id="edi_retention_evidence_read_rule" model="ir.access">
+        <field
+            name="name"
+        >UAE reviewed retention: selected or assigned archived audit evidence</field>
+        <field name="model_id" ref="model_l10n_ae_edi_retention" />
+        <field name="operation">r</field>
+        <field name="domain">
+            ['|', ('company_id', 'in', company_ids), '&amp;',
+            ('company_id.active', '=', False),
+            ('company_id', 'in', user.with_context(active_test=False).company_ids.ids
+            if user.active and user.has_group('l10n_ae_edi.group_fiscal_auditor') else [])]
+        </field>
     </record>
     <record id="edi_retention_hold_company_rule" model="ir.access">
         <field name="name">UAE hold history company isolation</field>
         <field name="model_id" ref="model_l10n_ae_edi_retention_hold" />
-        <field name="operation">crud</field>
+        <field name="operation">cud</field>
         <field name="domain">[('company_id', 'in', company_ids)]</field>
+    </record>
+    <record id="edi_retention_hold_evidence_read_rule" model="ir.access">
+        <field
+            name="name"
+        >UAE retained hold history: selected or assigned archived audit evidence</field>
+        <field name="model_id" ref="model_l10n_ae_edi_retention_hold" />
+        <field name="operation">r</field>
+        <field name="domain">
+            ['|', ('company_id', 'in', company_ids), '&amp;',
+            ('company_id.active', '=', False),
+            ('company_id', 'in', user.with_context(active_test=False).company_ids.ids
+            if user.active and user.has_group('l10n_ae_edi.group_fiscal_auditor') else [])]
+        </field>
     </record>
     <record id="edi_billing_request_company_rule" model="ir.access">
         <field name="name">UAE original billing request company isolation</field>
