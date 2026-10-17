@@ -295,8 +295,11 @@ class UaeEdiTransmission(models.Model):
                 raise AccessError(self.env._("This UAE PDF company is not accessible."))
             original = actual.sudo().conventional_pdf_original_content
             content = original.content if original else b""
-            if not content and actual.conventional_pdf_hash:
-                # Lost or unmigrated originals must not be silently regenerated.
+            if (content or actual.conventional_pdf_hash) and (
+                not content
+                or hashlib.sha256(content).hexdigest() != actual.conventional_pdf_hash
+            ):
+                # Lost/unmigrated originals must not be silently regenerated.
                 raise UserError(self.env._("The preserved invoice PDF is corrupt."))
             record.conventional_pdf_content = (
                 BinaryBytes(content, filename=actual.conventional_filename)
