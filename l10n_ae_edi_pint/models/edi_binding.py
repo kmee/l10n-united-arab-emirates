@@ -113,6 +113,14 @@ class UaeEdiBinding(models.Model):
                 self.env._("Use the native UAE receiving scheduled action.")
             )
         principal = self.env.user.exists()
+        if principal.has_group("base.group_system") or principal.has_group(
+            "base.group_erp_manager"
+        ):
+            raise AccessError(
+                self.env._(
+                    "Select a non-administrator UAE receiving scheduler account."
+                )
+            )
         if (
             not principal
             or not principal.active
