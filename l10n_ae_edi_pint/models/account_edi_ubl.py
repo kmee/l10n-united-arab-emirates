@@ -135,7 +135,7 @@ class AccountEdiUblUae(models.AbstractModel):
             errors.add(
                 self.env._(
                     "IBR-142-AE: e-commerce requires a delivery street, city and "
-                    "state/emirate. Review the Shipping Address before preparing "
+                    "state/emirate. Review the Delivery Address before preparing "
                     "the document; keep the buyer's legal address separate."
                 )
             )
