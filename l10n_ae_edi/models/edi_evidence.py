@@ -10,6 +10,18 @@ from odoo.exceptions import AccessError, UserError
 from odoo.tools.binary import BinaryBytes
 
 
+def _read_evidence_records(issue, model_name, domain):
+    # Discover complete membership before applying actual-user access. Native
+    # relational reads and ordinary searches can silently omit restricted rows.
+    model = issue.env[model_name]
+    ids = model.sudo().search(domain, order="id").ids
+    records = model.with_user(issue.env.uid).sudo(False).browse(ids)
+    records.check_access("read")
+    if any(record.company_id != issue.company_id for record in records):
+        raise UserError(issue.env._("Fiscal evidence has an inconsistent company."))
+    return records
+
+
 def _evidence_metadata(records, names):
     records.check_access("read")
     # No display names or live accounting/configuration are traversed.
@@ -124,7 +136,11 @@ class UaeEdiEvidence(models.Model):
                 "local-conformance-policy.json",
                 json.loads(issue.dispatch_policy_receipt),
             )
-        attempts = issue.attempt_ids
+        attempts = _read_evidence_records(
+            issue,
+            "l10n_ae.edi.attempt",
+            [("transmission_id", "=", issue.id)],
+        )
         preserve_json(
             "attempts.json",
             _evidence_metadata(
@@ -143,7 +159,11 @@ class UaeEdiEvidence(models.Model):
                 ],
             ),
         )
-        events = issue.event_ids
+        events = _read_evidence_records(
+            issue,
+            "l10n_ae.edi.event",
+            [("transmission_id", "=", issue.id)],
+        )
         event_metadata = _evidence_metadata(
             events,
             [
@@ -165,7 +185,9 @@ class UaeEdiEvidence(models.Model):
             preserve(
                 f"events/{event.id}.json", event.original_body.encode(), event.body_hash
             )
-        receipts = issue.env["l10n_ae.edi.billing.request"].search(
+        receipts = _read_evidence_records(
+            issue,
+            "l10n_ae.edi.billing.request",
             [
                 ("move_id", "=", issue.move_id.id),
                 ("company_id", "=", issue.company_id.id),
@@ -173,7 +195,7 @@ class UaeEdiEvidence(models.Model):
                 ("process", "=", issue.process),
                 ("origin_system", "=", issue.origin_system),
                 ("origin_document_id", "=", issue.origin_document_id),
-            ]
+            ],
         )
         preserve_json(
             "billing-receipts.json",
@@ -192,13 +214,15 @@ class UaeEdiEvidence(models.Model):
                 ],
             ),
         )
-        corrections = issue.env["l10n_ae.edi.correction"].search(
+        corrections = _read_evidence_records(
+            issue,
+            "l10n_ae.edi.correction",
             [
                 ("company_id", "=", issue.company_id.id),
                 "|",
                 ("source_transmission_id", "=", issue.id),
                 ("replacement_transmission_id", "=", issue.id),
-            ]
+            ],
         )
         preserve_json(
             "corrections.json",
