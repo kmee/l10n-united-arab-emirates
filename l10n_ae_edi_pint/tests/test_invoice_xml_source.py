@@ -3303,9 +3303,12 @@ class TestUaeInvoiceXmlSource(UaePintTestCommon):
             "released_by_id",
             "released_at",
         ]
+        # Independent preservation oracle, matching the ledger oracle below.
+        # The configuration actor has active home B and deliberately receives
+        # no evidence read grant for archived A; all exercised reads use rows().
         expected = [
-            fixture["policies"].with_env(admin).read(policy_fields),
-            fixture["holds"].with_env(admin).read(hold_fields),
+            fixture["policies"].with_env(admin).sudo().read(policy_fields),
+            fixture["holds"].with_env(admin).sudo().read(hold_fields),
         ]
 
         def rows(actor):
