@@ -306,6 +306,190 @@ class TestUaeDeadline(AccountTestInvoicingCommon):
         self.assertFalse(invoice.l10n_ae_transmission_ids)
         self.assertFalse(deadline.activity_ids)
 
+    def test_reviewed_summary_vat_deadline_precedes_residual_clock(
+        self,
+    ):
+        # Independent worked dates: docs/research/vat-summary-deadlines.md.
+        # These are reviewer-entered dates, not an automatic legal calculator.
+        manager = self.simple_accountman
+        self.assertFalse(manager.has_group("base.group_system"))
+        self.assertEqual(manager.company_ids, self.env.company)
+        moves = self.env["account.move"].with_user(manager)
+        payments = self.env["account.payment"].with_user(manager)
+        deadlines = self.env["l10n_ae.edi.deadline"].with_user(manager)
+        bank = self.company_data["default_journal_bank"]
+        payment_method = self.inbound_payment_method_line
+        for summary, issue_day, payment_day, anchor, due, reminder, amount in (
+            (
+                True,
+                "2026-10-01",
+                "2026-10-05",
+                "2026-09-30",
+                "2026-10-14",
+                "2026-10-12",
+                210,
+            ),
+            (
+                False,
+                "2026-09-03",
+                "2026-09-12",
+                "2026-09-02",
+                "2026-09-16",
+                "2026-09-14",
+                105,
+            ),
+        ):
+            with self.subTest(summary=summary):
+                supply_days = (
+                    ("2026-09-02", "2026-09-30") if summary else ("2026-09-02",)
+                )
+                invoice = moves.create(
+                    {
+                        "move_type": "out_invoice",
+                        "partner_id": self.partner_a.id,
+                        "invoice_date": issue_day,
+                        "taxable_supply_date": anchor,
+                        "l10n_ae_summary": summary,
+                        "l10n_ae_invoicing_period_start": "2026-09-01"
+                        if summary
+                        else False,
+                        "l10n_ae_invoicing_period_end": "2026-09-30"
+                        if summary
+                        else False,
+                        "invoice_line_ids": [
+                            Command.create(
+                                {
+                                    "name": f"Synthetic service completed {day}",
+                                    "quantity": 1,
+                                    "price_unit": 100,
+                                    "account_id": self.company_data[
+                                        "default_account_revenue"
+                                    ].id,
+                                    "tax_ids": [Command.set(self.tax_sale_a.ids)],
+                                }
+                            )
+                            for day in supply_days
+                        ],
+                    }
+                )
+                invoice.action_post()
+                # A real native payment records the distinct, later receipt date.
+                register = (
+                    self.env["account.payment.register"]
+                    .with_user(manager)
+                    .with_context(active_model="account.move", active_ids=invoice.ids)
+                    .create(
+                        {
+                            "payment_date": payment_day,
+                            "amount": amount,
+                            "journal_id": bank.id,
+                            "payment_method_line_id": payment_method.id,
+                        }
+                    )
+                )
+                payment_action = register.action_create_payments()
+                self.assertEqual(payment_action["res_model"], "account.payment")
+                payment = payments.browse(payment_action["res_id"])
+                self.assertEqual(payment.invoice_ids, invoice)
+                self.assertNotEqual(payment.state, "draft")
+                self.assertEqual(payment.date, fields.Date.to_date(payment_day))
+                self.assertGreater(
+                    payment.date, max(map(fields.Date.to_date, supply_days))
+                )
+                self.assertEqual(invoice.amount_total, amount)
+                self.assertEqual(
+                    invoice.taxable_supply_date, fields.Date.to_date(anchor)
+                )
+                self.assertEqual(invoice.l10n_ae_summary, summary)
+                invoice.env.flush_all()
+                ledger = invoice.line_ids.read(
+                    ["balance", "amount_currency", "account_id", "write_date"]
+                )
+                with Form(deadlines, view="l10n_ae_edi.edi_deadline_form") as form:
+                    form.name = (
+                        "Synthetic September summary"
+                        if summary
+                        else "Synthetic single supply"
+                    )
+                    form.move_id = invoice
+                    form.registration_status = "vat_registered"
+                    form.rule_basis = "residual"
+                    form.anchor_kind = "business_transaction"
+                    form.anchor_date = date(2026, 9, 2)
+                    form.due_date = date(2026, 9, 16)
+                    form.reminder_date = date(2026, 9, 14)
+                    form.calendar_basis = "Calendar days; no business-day adjustment"
+                    form.source_reference = (
+                        "MD243/2025 art6(4)-(5); VAT art25/67; ER art59(6)/(13)(b)/(16)"
+                        if summary
+                        else "MD243/2025 art6(4)-(5); VAT art25/67(1)"
+                    )
+                    form.policy_version = "reviewed-example-2026-10-19"
+                    form.review_note = (
+                        "Same recipient; services completed 2026-09-02 and 2026-09-30; "
+                        "payment 2026-10-05 after both services; no earlier invoice, "
+                        "advance, periodic contract or separate invoices. Month-end "
+                        "summary exception reviewed; not a production legal approval."
+                        if summary
+                        else "Service completed 2026-09-02; payment 2026-09-12; "
+                        "no advance or periodic contract; separate full tax invoice. "
+                        "Not eligible for the monthly summary deadline."
+                    )
+                    form.responsible_id = manager
+                    form.requested_fact = "confirmations"
+                deadline = form.record
+                # The residual clock is not an approvable basis for this registrant,
+                # even though its dates satisfy the generic chronological checks.
+                with (
+                    self.cr.savepoint(),
+                    self.assertRaisesRegex(
+                        ValidationError, "consistent with the declared VAT registration"
+                    ),
+                ):
+                    deadline.action_approve()
+                self.assertEqual(deadline.state, "draft")
+                self.assertFalse(deadline.approved_at)
+                self.assertFalse(deadline.activity_ids)
+                with Form(deadline, view="l10n_ae_edi.edi_deadline_form") as form:
+                    form.rule_basis = "vat"
+                    form.anchor_kind = "other" if summary else "supply"
+                    form.anchor_date = fields.Date.to_date(anchor)
+                    form.due_date = fields.Date.to_date(due)
+                    form.reminder_date = fields.Date.to_date(reminder)
+                deadline.action_approve()
+                self.assertEqual(deadline.approved_by_id, manager)
+                self.assertEqual(deadline.rule_basis, "vat")
+                self.assertEqual(deadline.anchor_date, fields.Date.to_date(anchor))
+                self.assertEqual(deadline.timezone, "Asia/Dubai")
+                self.assertNotEqual(deadline.due_date, invoice.invoice_date)
+                for day, expected in (
+                    (reminder, "due_soon"),
+                    (due, "due_today"),
+                    ("2026-10-15" if summary else "2026-09-17", "overdue"),
+                ):
+                    status = deadline.get_deadline_status(day)
+                    self.assertEqual(status["state"], expected)
+                    self.assertEqual(status["due_date"], due)
+                    self.assertFalse(status["observed"])
+                    self.assertEqual(status["timeliness"], "not_assessed")
+                with freeze_time(f"{reminder} 08:00:00"):
+                    deadline.action_schedule_reminder()
+                    deadline.action_schedule_reminder()
+                self.assertEqual(len(deadline.activity_ids), 1)
+                self.assertEqual(deadline.activity_ids.user_id, manager)
+                self.assertEqual(
+                    deadline.activity_ids.date_deadline, fields.Date.to_date(due)
+                )
+                self.assertEqual(invoice.state, "posted")
+                self.assertEqual(invoice.amount_total, amount)
+                self.assertEqual(
+                    invoice.line_ids.read(
+                        ["balance", "amount_currency", "account_id", "write_date"]
+                    ),
+                    ledger,
+                )
+                self.assertFalse(invoice.l10n_ae_transmission_ids)
+
     def test_transferred_draft_requires_review_before_deadline_assessment(self):
         company_a = self.env.company
         data_b = self.setup_other_company(name="Synthetic deadline second company")
