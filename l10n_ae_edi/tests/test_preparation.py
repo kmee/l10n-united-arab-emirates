@@ -561,21 +561,22 @@ class TestUaeInvoicePreparation(AccountTestInvoicingCommon):
         ]
         invoice.env.flush_all()
         invoice.line_ids.invalidate_recordset()
-        before = invoice.line_ids.sorted("id").read(fields)
+        # Compare stored relation IDs: account display names can differ by user.
+        before = invoice.line_ids.sorted("id").read(fields, load=None)
         reviewer = new_test_user(
             self.env,
             login="synthetic-other-note-reviewer",
             groups="account.group_account_manager",
             company_ids=self.env.company.ids,
         )
-        self.assertNotIn(reviewer.id, {row["write_uid"][0] for row in before})
+        self.assertNotIn(reviewer.id, {row["write_uid"] for row in before})
         actor = invoice.with_user(reviewer)
         self.assertFalse(actor.env.su)
         note = "Synthetic cadence: tenth business day."
         actor.write({"l10n_ae_billing_frequency_note": note})
         actor.env.flush_all()
         actor.line_ids.invalidate_recordset()
-        self.assertEqual(actor.line_ids.sorted("id").read(fields), before)
+        self.assertEqual(actor.line_ids.sorted("id").read(fields, load=None), before)
         self.assertEqual(actor.l10n_ae_billing_frequency_note, note)
         self.assertEqual(actor.write_uid, reviewer)
         # A mixed write must keep the native synchronization route. Its normal
@@ -592,11 +593,13 @@ class TestUaeInvoicePreparation(AccountTestInvoicingCommon):
         actor.action_l10n_ae_prepare()
         self.assertEqual(len(actor.l10n_ae_transmission_ids), 1)
         frozen_note = actor.l10n_ae_billing_frequency_note
-        frozen_ledger = actor.line_ids.sorted("id").read(fields)
+        frozen_ledger = actor.line_ids.sorted("id").read(fields, load=None)
         with self.assertRaisesRegex(UserError, "frozen UAE invoice"):
             actor.write({"l10n_ae_billing_frequency_note": "Changed after freezing"})
         self.assertEqual(actor.l10n_ae_billing_frequency_note, frozen_note)
-        self.assertEqual(actor.line_ids.sorted("id").read(fields), frozen_ledger)
+        self.assertEqual(
+            actor.line_ids.sorted("id").read(fields, load=None), frozen_ledger
+        )
 
     def test_posted_send_metadata_preserves_fiscal_uae_ledger_audits(self):
         ae = self.env.ref("base.ae")
