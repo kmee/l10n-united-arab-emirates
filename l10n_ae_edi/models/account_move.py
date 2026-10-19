@@ -675,6 +675,7 @@ class AccountMove(models.Model):
             )
         invoice_metadata_fields = {
             "l10n_ae_beneficiary_id",
+            "l10n_ae_billing_frequency_note",
             "l10n_ae_tax_exchange_rate",
             "l10n_ae_tax_exchange_date",
             "l10n_ae_tax_exchange_source",
@@ -692,9 +693,9 @@ class AccountMove(models.Model):
                 )
             )
             if posted_invoices:
-                # Beneficiary repair, quote review and native Send/portal metadata
-                # change no accounting input. The first email creates its portal
-                # token even when the invoice documents already exist.
+                # Beneficiary/cadence repair, quote review and native Send/portal
+                # metadata change no accounting input. The first email creates
+                # its portal token even when invoice documents already exist.
                 # Native sync otherwise rewrites stored debit/credit line audits.
                 result = super(
                     AccountMove,
