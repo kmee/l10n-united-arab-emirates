@@ -70,6 +70,35 @@
                         />
                         <field name="l10n_ae_transmission_id" readonly="True" />
                         <field name="l10n_ae_submission_state" readonly="True" />
+                        <div
+                            name="l10n_ae_submitted_action_guidance"
+                            class="alert alert-warning"
+                            role="alert"
+                            colspan="2"
+                            invisible="state != 'posted' or not l10n_ae_transmission_id or l10n_ae_submission_state not in ('accepted', 'unknown')"
+                        >
+                            <p invisible="l10n_ae_submission_state != 'accepted'">
+                                <strong
+                            >Accepted by API is not fiscal confirmation.</strong>
+                                Review delivery, validation and tax-report confirmations separately.
+                            </p>
+                            <p invisible="l10n_ae_submission_state != 'unknown'">
+                                <strong
+                            >Indeterminate means the submission result is unknown.</strong>
+                                Do not create a duplicate invoice.
+                            </p>
+                            <p>
+                                Keep this posted invoice and its frozen UAE original.
+                                Reset, cancel, and repost are refused.
+                            </p>
+                            <p invisible="l10n_ae_submission_state != 'accepted'">
+                                For an adjustment, ask your Accounting Manager to review a linked credit note.
+                            </p>
+                            <p invisible="l10n_ae_submission_state != 'unknown'">
+                                An authorized sender must reconcile the existing submission key before correction or retry.
+                                An unsuccessful lookup alone does not authorize a new invoice.
+                            </p>
+                        </div>
                         <button
                             name="action_l10n_ae_start_local_correction"
                             type="object"
