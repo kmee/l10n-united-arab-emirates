@@ -529,6 +529,75 @@ class TestUaeInvoicePreparation(AccountTestInvoicingCommon):
                 else:
                     self.assertFalse(actor.l10n_ae_fiscal_uuid)
 
+    def test_posted_other_note_preserves_ledger_audits_and_frozen_guard(self):
+        self.env.company.l10n_ae_edi_auto_prepare = False
+        invoice = self.init_invoice("out_invoice", amounts=[100], taxes=self.tax_sale_a)
+        invoice.write(
+            {
+                "l10n_ae_binding_id": self.binding.id,
+                "l10n_ae_billing_frequency_code": "OTH",
+            }
+        )
+        invoice = invoice.with_user(self.simple_accountman)
+        invoice.action_post()
+        self.assertEqual(invoice.state, "posted")
+        self.assertFalse(invoice.l10n_ae_transmission_ids)
+        fields = [
+            "account_id",
+            "debit",
+            "credit",
+            "balance",
+            "amount_currency",
+            "currency_id",
+            "quantity",
+            "price_unit",
+            "discount",
+            "tax_ids",
+            "name",
+            "create_uid",
+            "create_date",
+            "write_uid",
+            "write_date",
+        ]
+        invoice.env.flush_all()
+        invoice.line_ids.invalidate_recordset()
+        before = invoice.line_ids.sorted("id").read(fields)
+        reviewer = new_test_user(
+            self.env,
+            login="synthetic-other-note-reviewer",
+            groups="account.group_account_manager",
+            company_ids=self.env.company.ids,
+        )
+        self.assertNotIn(reviewer.id, {row["write_uid"][0] for row in before})
+        actor = invoice.with_user(reviewer)
+        self.assertFalse(actor.env.su)
+        note = "Synthetic cadence: tenth business day."
+        actor.write({"l10n_ae_billing_frequency_note": note})
+        actor.env.flush_all()
+        actor.line_ids.invalidate_recordset()
+        self.assertEqual(actor.line_ids.sorted("id").read(fields), before)
+        self.assertEqual(actor.l10n_ae_billing_frequency_note, note)
+        self.assertEqual(actor.write_uid, reviewer)
+        # A mixed write must keep the native synchronization route. Its normal
+        # audit author change provides a deterministic signal within one txn.
+        actor.write(
+            {
+                "l10n_ae_billing_frequency_note": note + " Reviewed.",
+                "narration": "Synthetic separate commercial terms.",
+            }
+        )
+        actor.env.flush_all()
+        actor.line_ids.invalidate_recordset()
+        self.assertEqual(actor.line_ids.mapped("write_uid"), reviewer)
+        actor.action_l10n_ae_prepare()
+        self.assertEqual(len(actor.l10n_ae_transmission_ids), 1)
+        frozen_note = actor.l10n_ae_billing_frequency_note
+        frozen_ledger = actor.line_ids.sorted("id").read(fields)
+        with self.assertRaisesRegex(UserError, "frozen UAE invoice"):
+            actor.write({"l10n_ae_billing_frequency_note": "Changed after freezing"})
+        self.assertEqual(actor.l10n_ae_billing_frequency_note, frozen_note)
+        self.assertEqual(actor.line_ids.sorted("id").read(fields), frozen_ledger)
+
     def test_posted_send_metadata_preserves_fiscal_uae_ledger_audits(self):
         ae = self.env.ref("base.ae")
         fr = self.env.ref("base.fr")
