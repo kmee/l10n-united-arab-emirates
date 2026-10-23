@@ -552,26 +552,36 @@ class TestUaeIncident(AccountTestInvoicingCommon):
             company_ids=self.env.company.ids,
             company_id=self.env.company.id,
         )
-        incident = (
+        model = (
             self.env["l10n_ae.edi.incident"]
             .with_user(manager)
-            .create(
-                {
-                    "name": "Synthetic new registration requiring original",
-                    "incident_kind": "registration_change",
-                    "fta_confirmation_received_at": "2026-11-30 21:30:00",
-                    "fta_confirmation_reference": "Synthetic FTA registration receipt",
-                    "reason": "Synthetic address amendment",
-                    "responsible_id": manager.id,
-                    "calendar_start": "2026-12-01",
-                    "calendar_end": "2026-12-10",
-                    "calendar_holidays": ["2026-12-02", "2026-12-03"],
-                    "calendar_source": "Reviewed synthetic federal calendar",
-                    "calendar_version": "synthetic-2026",
-                    "source_reference": "Reviewed MD243 Art5.3 and date exclusion",
-                    "review_note": "Dubai Dec1; Dec4,7,8,9,10 are days1 through5",
-                }
-            )
+            .with_context(default_confirmation_intake_mode="legacy_opened")
+        )
+        self.assertNotIn(
+            "confirmation_intake_mode", model.fields_get(attributes=["type", "string"])
+        )
+        form = model.get_view(
+            view_id=self.env.ref("l10n_ae_edi.edi_incident_form").id,
+            view_type="form",
+        )
+        self.assertNotIn("confirmation_intake_mode", form["arch"])
+        self.assertNotIn("legacy_opened", form["arch"])
+        incident = model.create(
+            {
+                "name": "Synthetic new registration requiring original",
+                "incident_kind": "registration_change",
+                "fta_confirmation_received_at": "2026-11-30 21:30:00",
+                "fta_confirmation_reference": "Synthetic FTA registration receipt",
+                "reason": "Synthetic address amendment",
+                "responsible_id": manager.id,
+                "calendar_start": "2026-12-01",
+                "calendar_end": "2026-12-10",
+                "calendar_holidays": ["2026-12-02", "2026-12-03"],
+                "calendar_source": "Reviewed synthetic federal calendar",
+                "calendar_version": "synthetic-2026",
+                "source_reference": "Reviewed MD243 Art5.3 and date exclusion",
+                "review_note": "Dubai Dec1; Dec4,7,8,9,10 are days1 through5",
+            }
         )
         select_reviewed_calendar_fixture(incident)
         before = incident.read(

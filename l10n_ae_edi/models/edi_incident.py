@@ -43,22 +43,6 @@ class UaeEdiIncident(models.Model):
         string="FTA Confirmation Received At"
     )
     fta_confirmation_reference = fields.Text(string="FTA Confirmation Reference")
-    confirmation_intake_mode = fields.Selection(
-        [
-            ("original_required", "Original Required Before Opening"),
-            ("legacy_opened", "Legacy Opened without Original"),
-        ],
-        string="Registration Intake Policy",
-        default="original_required",
-        required=True,
-        readonly=True,
-        copy=False,
-        help=(
-            "The upgrade identifies already-opened registration cases without "
-            "a retained original. This classification does not authenticate a "
-            "confirmation or approve a deadline. New openings require the original."
-        ),
-    )
     reason = fields.Text()
     responsible_id = fields.Many2one("res.users", ondelete="restrict")
     timezone = fields.Char(default="Asia/Dubai", required=True, readonly=True)
@@ -141,7 +125,6 @@ class UaeEdiIncident(models.Model):
         "timezone",
         "notice_ids",
         "fta_confirmation_ids",
-        "confirmation_intake_mode",
         "impact_ids",
         "restoration_ids",
         "affected_transmission_ids",
@@ -299,7 +282,6 @@ class UaeEdiIncident(models.Model):
                 opened_at=False,
                 notice_ids=[],
                 fta_confirmation_ids=[],
-                confirmation_intake_mode="original_required",
                 impact_ids=[],
                 restoration_ids=[],
             )
