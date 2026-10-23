@@ -1,6 +1,7 @@
 # Copyright 2026 KMEE
 # License AGPL-3.0 or later (https://www.gnu.org/licenses/agpl).
 
+import base64
 import hashlib
 import io
 import json
@@ -11,6 +12,7 @@ from contextlib import closing
 
 from lxml import etree
 
+from odoo import Command
 from odoo.exceptions import AccessError, UserError, ValidationError
 from odoo.tests import Form, tagged
 from odoo.tests.common import new_test_user
@@ -2723,3 +2725,404 @@ class TestUaeInvoiceXmlSource(UaePintTestCommon):
             "Synthetic buyer street", invoice.l10n_ae_transmission_id.xml_content
         )
         self.assertEqual(invoice.preview_l10n_ae_pint(), expected)
+
+    def test_existing_auditor_recovers_original_after_legal_company_archival(self):
+        """Archival preserves evidence access without reopening accounting scope."""
+        original_company = self.env.company
+        active_company = self.env["res.company"].create(
+            {
+                "name": "Synthetic active audit home after archival",
+                "country_id": self.env.ref("base.ae").id,
+                "currency_id": self.env.ref("base.AED").id,
+            }
+        )
+        invoice = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
+        )
+        binding = self._reviewed_binding(
+            {"name": "Synthetic original before company archival"},
+            capabilities=CONTROLLED_CAPABILITIES,
+            note="Synthetic local contract; no actual ASP approval.",
+        )
+        invoice.l10n_ae_binding_id = binding
+        invoice.action_l10n_ae_prepare()
+        issue = invoice.l10n_ae_transmission_id
+        auditor = new_test_user(
+            self.env,
+            login="synthetic-existing-archived-company-auditor",
+            groups=(
+                "base.group_user,base.group_allow_export,"
+                "l10n_ae_edi.group_fiscal_auditor"
+            ),
+            company_id=active_company.id,
+            company_ids=[original_company.id, active_company.id],
+        ).with_context(allowed_company_ids=active_company.ids)
+        memberships = sorted(auditor.with_context(active_test=False).company_ids.ids)
+        roles = sorted(auditor.group_ids.ids)
+        fields = ["xml_download", "evidence_archive"]
+        before = (
+            issue.with_user(auditor)
+            .with_context(allowed_company_ids=original_company.ids)
+            .read(fields)[0]
+        )
+        xml = base64.b64decode(before["xml_download"]["content"])
+        package = base64.b64decode(before["evidence_archive"]["content"])
+        self.assertEqual(xml, issue.xml_content.encode())
+        self.assertEqual(hashlib.sha256(xml).hexdigest(), issue.xml_hash)
+        identity = (issue.payload, issue.idempotency_key, invoice.l10n_ae_fiscal_uuid)
+        ledger = invoice.line_ids.read(
+            ["debit", "credit", "balance", "amount_currency", "write_date"]
+        )
+
+        # Native Odoo forbids archiving any active user's default company.
+        # Relocate those defaults legitimately before archival, without changing
+        # this auditor's pre-existing memberships, roles or active home company.
+        defaults = self.env["res.users"].search(
+            [("active", "=", True), ("company_id", "=", original_company.id)]
+        )
+        defaults.write(
+            {
+                "company_ids": [Command.link(active_company.id)],
+                "company_id": active_company.id,
+            }
+        )
+        original_company.with_context(
+            allowed_company_ids=active_company.ids
+        ).action_archive()
+        archived_company = original_company.with_context(
+            allowed_company_ids=active_company.ids
+        )
+        self.assertFalse(archived_company.active)
+        self.assertEqual(
+            sorted(auditor.with_context(active_test=False).company_ids.ids),
+            memberships,
+        )
+        self.assertEqual(sorted(auditor.group_ids.ids), roles)
+        self.assertEqual(auditor.company_id, active_company)
+        self.assertFalse(auditor.has_group("base.group_system"))
+        self.assertFalse(auditor.has_group("account.group_account_invoice"))
+        self.env.invalidate_all()
+        archived = issue.with_user(auditor).with_context(
+            allowed_company_ids=active_company.ids
+        )
+        try:
+            after = archived.read(fields)[0]
+        except AccessError as error:
+            self.fail(
+                "Previously authorized fiscal auditor cannot recover the "
+                f"archived company original: {error}"
+            )
+        self.assertEqual(base64.b64decode(after["xml_download"]["content"]), xml)
+        self.assertEqual(
+            base64.b64decode(after["evidence_archive"]["content"]), package
+        )
+        # The accounting preservation oracle is separate from the auditor's
+        # evidence-only reads; no new accounting permission is granted to them.
+        current = issue.sudo().with_context(allowed_company_ids=active_company.ids)
+        self.assertEqual(
+            (
+                current.payload,
+                current.idempotency_key,
+                current.move_id.l10n_ae_fiscal_uuid,
+            ),
+            identity,
+        )
+        self.assertEqual(
+            current.move_id.line_ids.read(
+                ["debit", "credit", "balance", "amount_currency", "write_date"]
+            ),
+            ledger,
+        )
+        _logger.info(
+            "UAE_ARCHIVED_COMPANY_AUDIT=%s",
+            json.dumps(
+                {
+                    "company_id": original_company.id,
+                    "active_home_company_id": active_company.id,
+                    "auditor_id": auditor.id,
+                    "issue_id": issue.id,
+                    "xml_sha256": hashlib.sha256(xml).hexdigest(),
+                    "package_sha256": hashlib.sha256(package).hexdigest(),
+                    "memberships_and_roles_preserved": True,
+                    "archived_company_stays_inactive": not archived_company.active,
+                    "accounting_and_original_preserved": True,
+                },
+                sort_keys=True,
+            ),
+        )
+
+    def _archived_audit_fixture(self, suffix):
+        company_a = self.env.company
+        company_b = self.env["res.company"].create(
+            {
+                "name": "Synthetic active audit home after archival " + suffix,
+                "country_id": self.env.ref("base.ae").id,
+                "currency_id": self.env.ref("base.AED").id,
+            }
+        )
+        invoice = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
+        )
+        binding = self._reviewed_binding(
+            {"name": "Synthetic original before company archival " + suffix},
+            capabilities=CONTROLLED_CAPABILITIES,
+            note="Synthetic local contract; no actual ASP approval.",
+        )
+        invoice.l10n_ae_binding_id = binding
+        invoice.action_l10n_ae_prepare()
+        issue = invoice.l10n_ae_transmission_id
+        auditor = new_test_user(
+            self.env,
+            login="synthetic-archive-negative-" + suffix,
+            groups="base.group_user,base.group_allow_export,l10n_ae_edi.group_fiscal_auditor",
+            company_id=company_b.id,
+            company_ids=[company_a.id, company_b.id],
+        )
+        source = issue.with_user(auditor).with_context(
+            allowed_company_ids=company_a.ids
+        )
+        expected = source.read(["xml_download", "evidence_archive"])[0]
+        xml = base64.b64decode(expected["xml_download"]["content"])
+        package = base64.b64decode(expected["evidence_archive"]["content"])
+        self.assertEqual(xml, issue.xml_content.encode())
+        self.assertEqual(hashlib.sha256(xml).hexdigest(), issue.xml_hash)
+        original = issue.read(
+            [
+                "payload",
+                "payload_hash",
+                "xml_content",
+                "xml_hash",
+                "idempotency_key",
+                "revision",
+            ]
+        )[0]
+        ledger = invoice.line_ids.read(
+            ["debit", "credit", "balance", "amount_currency", "write_date"]
+        )
+        defaults = self.env["res.users"].search(
+            [("active", "=", True), ("company_id", "=", company_a.id)]
+        )
+        defaults.write(
+            {"company_ids": [Command.link(company_b.id)], "company_id": company_b.id}
+        )
+        # Admin configuration mutations below use the legitimate active home B.
+        admin = self.env(
+            context={**self.env.context, "allowed_company_ids": company_b.ids}
+        )
+        company_a.with_env(admin).action_archive()
+        self.assertFalse(company_a.with_env(admin).active)
+        return {
+            "company_a": company_a,
+            "company_b": company_b,
+            "invoice": invoice,
+            "issue": issue,
+            "binding": binding,
+            "auditor": auditor,
+            "admin": admin,
+            "xml": xml,
+            "package": package,
+            "original": original,
+            "ledger": ledger,
+            "ledger_ids": [row["id"] for row in ledger],
+        }
+
+    def _archived_audit_as_actor(self, fixture, user=None):
+        actor = user or fixture["auditor"]
+        return (
+            fixture["issue"]
+            .with_user(actor)
+            .sudo(False)
+            .with_context(allowed_company_ids=fixture["company_b"].ids)
+        )
+
+    def _assert_archived_audit_downloads(self, fixture, user=None):
+        issue = self._archived_audit_as_actor(fixture, user)
+        self.assertFalse(issue.env.su)
+        issue.check_access("read")
+        result = issue.read(["xml_download", "evidence_archive"])[0]
+        self.assertEqual(
+            base64.b64decode(result["xml_download"]["content"]), fixture["xml"]
+        )
+        self.assertEqual(
+            base64.b64decode(result["evidence_archive"]["content"]), fixture["package"]
+        )
+        self.assertEqual(
+            hashlib.sha256(fixture["xml"]).hexdigest(), fixture["original"]["xml_hash"]
+        )
+
+    def _assert_archived_audit_denied(self, fixture, user=None):
+        issue = self._archived_audit_as_actor(fixture, user)
+        self.assertFalse(issue.env.su)
+        with self.assertRaises(AccessError):
+            issue.check_access("read")
+        with self.assertRaises(AccessError):
+            issue.read(["xml_download"])
+        with self.assertRaises(AccessError):
+            issue.read(["evidence_archive"])
+
+    def _assert_archived_audit_preserved(self, fixture):
+        # Separate privileged fixture oracle, never the public auditor read seam.
+        # Matches the original positive test's independent accounting oracle.
+        issue = fixture["issue"].with_env(fixture["admin"]).sudo()
+        self.assertEqual(issue.read(list(fixture["original"]))[0], fixture["original"])
+        self.assertEqual(
+            issue.move_id.line_ids.read(
+                ["debit", "credit", "balance", "amount_currency", "write_date"]
+            ),
+            fixture["ledger"],
+        )
+        self.assertFalse(fixture["company_a"].with_env(fixture["admin"]).active)
+
+    def test_archived_auditor_warm_reads_recheck_role_membership_active_and_export(
+        self,
+    ):
+        """Each revocation is a separate denial after an actually warmed success."""
+        fixture = self._archived_audit_fixture("warm-revocations")
+        auditor = fixture["auditor"].with_env(fixture["admin"])
+        role = self.env.ref("l10n_ae_edi.group_fiscal_auditor")
+        export = self.env.ref("base.group_allow_export")
+        self._assert_archived_audit_downloads(fixture)
+        auditor.write({"group_ids": [Command.unlink(role.id)]})
+        self._assert_archived_audit_denied(fixture)
+        auditor.write({"group_ids": [Command.link(role.id)]})
+        self._assert_archived_audit_downloads(fixture)
+
+        # Native Many2many writes preserve inactive relations unless the
+        # administrator explicitly includes them in the write's scope.
+        auditor.with_context(active_test=False).write(
+            {"company_ids": [Command.unlink(fixture["company_a"].id)]}
+        )
+        self.assertNotIn(
+            fixture["company_a"].id,
+            auditor.with_context(active_test=False).company_ids.ids,
+        )
+        self._assert_archived_audit_denied(fixture)
+        auditor.with_context(active_test=False).write(
+            {"company_ids": [Command.link(fixture["company_a"].id)]}
+        )
+        self.assertIn(
+            fixture["company_a"].id,
+            auditor.with_context(active_test=False).company_ids.ids,
+        )
+        self._assert_archived_audit_downloads(fixture)
+
+        auditor.write({"active": False})
+        self._assert_archived_audit_denied(fixture)
+        auditor.write({"active": True})
+        self._assert_archived_audit_downloads(fixture)
+
+        auditor.write({"group_ids": [Command.unlink(export.id)]})
+        actual = self._archived_audit_as_actor(fixture)
+        actual.check_access("read")
+        self.assertEqual(
+            base64.b64decode(
+                actual.read(["xml_download"])[0]["xml_download"]["content"]
+            ),
+            fixture["xml"],
+        )
+        with self.assertRaises(AccessError):
+            actual.read(["evidence_archive"])
+        auditor.write({"group_ids": [Command.link(export.id)]})
+        self._assert_archived_audit_downloads(fixture)
+        # No explicit invalidate/flush/cache clear or new login between changes.
+        self._assert_archived_audit_preserved(fixture)
+        _logger.info(
+            "UAE_ARCHIVED_AUDIT_SECURITY=%s",
+            json.dumps(
+                {
+                    "case": "warm_revocations",
+                    "actual_uid_reads": True,
+                    "denied": ["role", "membership", "inactive_actor", "no_export"],
+                    "xml_without_export_preserved": True,
+                    "original_and_ledger_preserved": True,
+                }
+            ),
+        )
+
+    def test_archived_audit_exception_does_not_extend_to_active_companies_or_accounting(
+        self,
+    ):
+        fixture = self._archived_audit_fixture("scope-boundaries")
+        self._assert_archived_audit_downloads(fixture)
+        target = fixture["company_a"].with_env(fixture["admin"])
+        target.action_unarchive()
+        # A is allowed by membership but active and deselected: archive-only
+        # access must disappear even after a warmed successful package read.
+        self._assert_archived_audit_denied(fixture)
+        target.action_archive()
+        self._assert_archived_audit_downloads(fixture)
+        home = fixture["company_b"]
+        groups = {
+            "manager-only": (
+                "base.group_user,account.group_account_manager,base.group_allow_export"
+            ),
+            "system-only": "base.group_user,base.group_system,base.group_allow_export",
+            "foreign-auditor": (
+                "base.group_user,l10n_ae_edi.group_fiscal_auditor,"
+                "base.group_allow_export"
+            ),
+            "manager-auditor": (
+                "base.group_user,account.group_account_manager,"
+                "l10n_ae_edi.group_fiscal_auditor,base.group_allow_export"
+            ),
+        }
+        users = {}
+        for name, roles in groups.items():
+            memberships = (
+                home.ids if name == "foreign-auditor" else [target.id, home.id]
+            )
+            users[name] = new_test_user(
+                fixture["admin"],
+                login="synthetic-archive-boundary-" + name,
+                groups=roles,
+                company_id=home.id,
+                company_ids=memberships,
+            )
+        for name in ("manager-only", "system-only", "foreign-auditor"):
+            self._assert_archived_audit_denied(fixture, users[name])
+        manager_auditor = users["manager-auditor"]
+        self._assert_archived_audit_downloads(fixture, manager_auditor)
+        issue = self._archived_audit_as_actor(fixture, manager_auditor)
+        for operation in ("create", "write", "unlink"):
+            with self.assertRaises(AccessError):
+                issue.check_access(operation)
+        line_records = fixture["admin"]["account.move.line"].browse(
+            fixture["ledger_ids"]
+        )
+        for record in (fixture["invoice"], fixture["binding"], *line_records):
+            scoped = (
+                record.with_user(manager_auditor)
+                .sudo(False)
+                .with_context(allowed_company_ids=home.ids)
+            )
+            self.assertFalse(scoped.env.su)
+            with self.assertRaises(AccessError):
+                scoped.check_access("read")
+        # Native environments still reject selecting an inactive company,
+        # even for an assigned auditor eligible for historical evidence reads.
+        forged = self._archived_audit_as_actor(fixture).with_context(
+            allowed_company_ids=target.ids, active_test=False
+        )
+        with self.assertRaises(AccessError):
+            forged.read(["xml_download", "evidence_archive"])
+        self._assert_archived_audit_preserved(fixture)
+        _logger.info(
+            "UAE_ARCHIVED_AUDIT_SECURITY=%s",
+            json.dumps(
+                {
+                    "case": "scope_boundaries",
+                    "actual_uid_reads": True,
+                    "denied": [
+                        "active_deselected",
+                        "manager_only",
+                        "system_without_auditor",
+                        "nonmember",
+                        "cud",
+                        "accounting",
+                        "binding",
+                        "inactive_company_context",
+                    ],
+                    "original_and_ledger_preserved": True,
+                }
+            ),
+        )
