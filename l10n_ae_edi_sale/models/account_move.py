@@ -284,11 +284,15 @@ class AccountMove(models.Model):
 
     def _l10n_ae_prior_advance_consumption(self, source):
         self.ensure_one()
+        current_move = self._origin
+        current_move_exclusion = (
+            [("move_id", "!=", current_move.id)] if current_move else []
+        )
         prior = self.env["l10n_ae.edi.transmission"].search(
             [
                 ("company_id", "=", self.company_id.id),
                 ("l10n_ae_advance_source_ids", "in", source.ids),
-                ("move_id", "!=", self.id),
+                *current_move_exclusion,
                 "|",
                 ("local_correction_id", "=", False),
                 "&",
@@ -310,7 +314,7 @@ class AccountMove(models.Model):
                 ("quantity", "<", 0),
                 ("move_id.state", "=", "posted"),
                 ("move_id.move_type", "=", "out_invoice"),
-                ("move_id", "!=", self.id),
+                *current_move_exclusion,
                 ("move_id.l10n_ae_transmission_id", "=", False),
             ]
         )
