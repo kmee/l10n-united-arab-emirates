@@ -60,6 +60,7 @@ class UaeEdiEvidence(models.Model):
         "dispatch_error_kind",
         "dispatch_review_at",
         "dispatch_validation_receipt",
+        "dispatch_policy_receipt",
         "retention_ids",
         "retention_ids.write_date",
         "retention_ids.hold_ids",
@@ -117,6 +118,11 @@ class UaeEdiEvidence(models.Model):
             preserve_json(
                 "local-validation-rejection.json",
                 json.loads(issue.dispatch_validation_receipt),
+            )
+        if issue.dispatch_policy_receipt:
+            preserve_json(
+                "local-conformance-policy.json",
+                json.loads(issue.dispatch_policy_receipt),
             )
         attempts = issue.attempt_ids
         preserve_json(
