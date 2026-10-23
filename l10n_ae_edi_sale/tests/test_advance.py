@@ -92,6 +92,25 @@ class TestUaeSalesAdvance(AccountTestInvoicingCommon):
         invoice.l10n_ae_binding_id = self.binding
         return invoice
 
+    def _confirmed_order(self, price):
+        order = self.env["sale.order"].create(
+            {
+                "partner_id": self.partner_a.id,
+                "order_line": [
+                    Command.create(
+                        {
+                            "product_id": self.product_a.id,
+                            "product_uom_qty": 1,
+                            "price_unit": price,
+                            "tax_ids": [Command.set(self.tax_sale_a.ids)],
+                        }
+                    )
+                ],
+            }
+        )
+        order.action_confirm()
+        return order
+
     def _create_fiscal_country_sales_orders(self):
         # Set both countries before creating business documents. US accepts the
         # synthetic 15-digit UAE registration without bypassing native VAT checks.
@@ -470,22 +489,7 @@ class TestUaeSalesAdvance(AccountTestInvoicingCommon):
 
     def test_taxed_advance_receipt_and_final_balance_keep_original_reference(self):
         # Independently worked MoF balance example: 10000/500 less 1000/50.
-        order = self.env["sale.order"].create(
-            {
-                "partner_id": self.partner_a.id,
-                "order_line": [
-                    Command.create(
-                        {
-                            "product_id": self.product_a.id,
-                            "product_uom_qty": 1,
-                            "price_unit": 10000,
-                            "tax_ids": [Command.set(self.tax_sale_a.ids)],
-                        }
-                    )
-                ],
-            }
-        )
-        order.action_confirm()
+        order = self._confirmed_order(10000)
         advance = self._create_invoice(order, "percentage", 10)
         advance.action_post()
         advance.action_l10n_ae_prepare()
@@ -763,22 +767,7 @@ class TestUaeSalesAdvance(AccountTestInvoicingCommon):
         self.assertEqual(advance.amount_total + final.amount_total, 105)
 
     def test_frozen_advance_and_final_preserve_their_sales_links(self):
-        order = self.env["sale.order"].create(
-            {
-                "partner_id": self.partner_a.id,
-                "order_line": [
-                    Command.create(
-                        {
-                            "product_id": self.product_a.id,
-                            "product_uom_qty": 1,
-                            "price_unit": 10000,
-                            "tax_ids": [Command.set(self.tax_sale_a.ids)],
-                        }
-                    )
-                ],
-            }
-        )
-        order.action_confirm()
+        order = self._confirmed_order(10000)
         advance = self._create_invoice(order, "percentage", 10)
         advance.action_post()
         advance.action_l10n_ae_prepare()
@@ -807,22 +796,7 @@ class TestUaeSalesAdvance(AccountTestInvoicingCommon):
         self.assertEqual((advance.amount_total, final.amount_total), (1050, 9450))
 
     def test_final_balance_rejects_unposted_advance_before_accounting_post(self):
-        order = self.env["sale.order"].create(
-            {
-                "partner_id": self.partner_a.id,
-                "order_line": [
-                    Command.create(
-                        {
-                            "product_id": self.product_a.id,
-                            "product_uom_qty": 1,
-                            "price_unit": 10000,
-                            "tax_ids": [Command.set(self.tax_sale_a.ids)],
-                        }
-                    )
-                ],
-            }
-        )
-        order.action_confirm()
+        order = self._confirmed_order(10000)
         advance = self._create_invoice(order, "percentage", 10)
         final = self._create_invoice(order, "delivered")
         self.assertEqual(advance.state, "draft")
@@ -842,22 +816,7 @@ class TestUaeSalesAdvance(AccountTestInvoicingCommon):
     def test_final_balance_rejects_unposted_advance_with_auto_prepare_disabled(self):
         # Independent balance: 10000 + VAT 500 less advance 1000 + VAT 50.
         self.env.company.l10n_ae_edi_auto_prepare = False
-        order = self.env["sale.order"].create(
-            {
-                "partner_id": self.partner_a.id,
-                "order_line": [
-                    Command.create(
-                        {
-                            "product_id": self.product_a.id,
-                            "product_uom_qty": 1,
-                            "price_unit": 10000,
-                            "tax_ids": [Command.set(self.tax_sale_a.ids)],
-                        }
-                    )
-                ],
-            }
-        )
-        order.action_confirm()
+        order = self._confirmed_order(10000)
         advance = self._create_invoice(order, "percentage", 10)
         final = self._create_invoice(order, "delivered")
         self.assertEqual(advance.state, "draft")
@@ -896,22 +855,7 @@ class TestUaeSalesAdvance(AccountTestInvoicingCommon):
         self.assertFalse(final.l10n_ae_transmission_id)
 
     def test_final_balance_rejects_an_advance_for_another_commercial_customer(self):
-        order = self.env["sale.order"].create(
-            {
-                "partner_id": self.partner_a.id,
-                "order_line": [
-                    Command.create(
-                        {
-                            "product_id": self.product_a.id,
-                            "product_uom_qty": 1,
-                            "price_unit": 10000,
-                            "tax_ids": [Command.set(self.tax_sale_a.ids)],
-                        }
-                    )
-                ],
-            }
-        )
-        order.action_confirm()
+        order = self._confirmed_order(10000)
         advance = self._create_invoice(order, "percentage", 10)
         advance.action_post()
         advance.action_l10n_ae_prepare()
@@ -923,22 +867,7 @@ class TestUaeSalesAdvance(AccountTestInvoicingCommon):
         self.assertFalse(final.l10n_ae_transmission_id)
 
     def test_final_balance_rejects_deduction_above_the_original_taxed_advance(self):
-        order = self.env["sale.order"].create(
-            {
-                "partner_id": self.partner_a.id,
-                "order_line": [
-                    Command.create(
-                        {
-                            "product_id": self.product_a.id,
-                            "product_uom_qty": 1,
-                            "price_unit": 10000,
-                            "tax_ids": [Command.set(self.tax_sale_a.ids)],
-                        }
-                    )
-                ],
-            }
-        )
-        order.action_confirm()
+        order = self._confirmed_order(10000)
         advance = self._create_invoice(order, "percentage", 10)
         advance.action_post()
         advance.action_l10n_ae_prepare()
@@ -951,22 +880,7 @@ class TestUaeSalesAdvance(AccountTestInvoicingCommon):
         self.assertFalse(final.l10n_ae_transmission_id)
 
     def test_final_balance_rejects_an_advance_in_another_document_currency(self):
-        order = self.env["sale.order"].create(
-            {
-                "partner_id": self.partner_a.id,
-                "order_line": [
-                    Command.create(
-                        {
-                            "product_id": self.product_a.id,
-                            "product_uom_qty": 1,
-                            "price_unit": 10000,
-                            "tax_ids": [Command.set(self.tax_sale_a.ids)],
-                        }
-                    )
-                ],
-            }
-        )
-        order.action_confirm()
+        order = self._confirmed_order(10000)
         advance = self._create_invoice(order, "percentage", 10)
         advance.action_post()
         advance.action_l10n_ae_prepare()
@@ -991,22 +905,7 @@ class TestUaeSalesAdvance(AccountTestInvoicingCommon):
         )
 
     def test_final_balance_rejects_a_different_advance_document_category(self):
-        order = self.env["sale.order"].create(
-            {
-                "partner_id": self.partner_a.id,
-                "order_line": [
-                    Command.create(
-                        {
-                            "product_id": self.product_a.id,
-                            "product_uom_qty": 1,
-                            "price_unit": 10000,
-                            "tax_ids": [Command.set(self.tax_sale_a.ids)],
-                        }
-                    )
-                ],
-            }
-        )
-        order.action_confirm()
+        order = self._confirmed_order(10000)
         advance = self._create_invoice(order, "percentage", 10)
         advance.action_post()
         advance.action_l10n_ae_prepare()
@@ -1033,22 +932,7 @@ class TestUaeSalesAdvance(AccountTestInvoicingCommon):
         )
 
     def test_final_balance_rejects_an_advance_from_another_legal_company(self):
-        order = self.env["sale.order"].create(
-            {
-                "partner_id": self.partner_a.id,
-                "order_line": [
-                    Command.create(
-                        {
-                            "product_id": self.product_a.id,
-                            "product_uom_qty": 1,
-                            "price_unit": 10000,
-                            "tax_ids": [Command.set(self.tax_sale_a.ids)],
-                        }
-                    )
-                ],
-            }
-        )
-        order.action_confirm()
+        order = self._confirmed_order(10000)
         advance = self._create_invoice(order, "percentage", 10)
         advance.action_post()
         advance.action_l10n_ae_prepare()
@@ -1107,22 +991,7 @@ class TestUaeSalesAdvance(AccountTestInvoicingCommon):
         )
 
     def test_second_final_cannot_reuse_an_already_frozen_advance_deduction(self):
-        order = self.env["sale.order"].create(
-            {
-                "partner_id": self.partner_a.id,
-                "order_line": [
-                    Command.create(
-                        {
-                            "product_id": self.product_a.id,
-                            "product_uom_qty": 1,
-                            "price_unit": 10000,
-                            "tax_ids": [Command.set(self.tax_sale_a.ids)],
-                        }
-                    )
-                ],
-            }
-        )
-        order.action_confirm()
+        order = self._confirmed_order(10000)
         advance = self._create_invoice(order, "percentage", 10)
         advance.action_post()
         advance.action_l10n_ae_prepare()
@@ -1152,22 +1021,7 @@ class TestUaeSalesAdvance(AccountTestInvoicingCommon):
         self.assertEqual((advance.amount_total, final.amount_total), (1050, 9450))
 
     def test_two_partial_finals_can_consume_exactly_one_advance(self):
-        order = self.env["sale.order"].create(
-            {
-                "partner_id": self.partner_a.id,
-                "order_line": [
-                    Command.create(
-                        {
-                            "product_id": self.product_a.id,
-                            "product_uom_qty": 1,
-                            "price_unit": 10000,
-                            "tax_ids": [Command.set(self.tax_sale_a.ids)],
-                        }
-                    )
-                ],
-            }
-        )
-        order.action_confirm()
+        order = self._confirmed_order(10000)
         advance = self._create_invoice(order, "percentage", 10)
         advance.action_post()
         advance.action_l10n_ae_prepare()
@@ -1216,22 +1070,7 @@ class TestUaeSalesAdvance(AccountTestInvoicingCommon):
         )
 
     def test_posted_final_consumes_advance_before_fiscal_preparation(self):
-        order = self.env["sale.order"].create(
-            {
-                "partner_id": self.partner_a.id,
-                "order_line": [
-                    Command.create(
-                        {
-                            "product_id": self.product_a.id,
-                            "product_uom_qty": 1,
-                            "price_unit": 10000,
-                            "tax_ids": [Command.set(self.tax_sale_a.ids)],
-                        }
-                    )
-                ],
-            }
-        )
-        order.action_confirm()
+        order = self._confirmed_order(10000)
         advance = self._create_invoice(order, "percentage", 10)
         advance.action_post()
         advance.action_l10n_ae_prepare()
@@ -1254,22 +1093,7 @@ class TestUaeSalesAdvance(AccountTestInvoicingCommon):
     def test_local_correction_advance_summary_excludes_its_frozen_issue_during_onchange(
         self,
     ):
-        order = self.env["sale.order"].create(
-            {
-                "partner_id": self.partner_a.id,
-                "order_line": [
-                    Command.create(
-                        {
-                            "product_id": self.product_a.id,
-                            "product_uom_qty": 1,
-                            "price_unit": 10000,
-                            "tax_ids": [Command.set(self.tax_sale_a.ids)],
-                        }
-                    )
-                ],
-            }
-        )
-        order.action_confirm()
+        order = self._confirmed_order(10000)
         advance = self._create_invoice(order, "percentage", 10).with_user(
             self.simple_accountman
         )
@@ -1333,22 +1157,7 @@ class TestUaeSalesAdvance(AccountTestInvoicingCommon):
         # Independent amounts: 10000 + VAT 500, advance 1000 + VAT 50,
         # deducted final 9000 + VAT 450. Removing the deduction restores 10500.
         self.env.company.l10n_ae_edi_auto_prepare = False
-        order = self.env["sale.order"].create(
-            {
-                "partner_id": self.partner_a.id,
-                "order_line": [
-                    Command.create(
-                        {
-                            "product_id": self.product_a.id,
-                            "product_uom_qty": 1,
-                            "price_unit": 10000,
-                            "tax_ids": [Command.set(self.tax_sale_a.ids)],
-                        }
-                    )
-                ],
-            }
-        )
-        order.action_confirm()
+        order = self._confirmed_order(10000)
         advance = self._create_invoice(order, "percentage", 10).with_user(
             self.simple_accountman
         )
