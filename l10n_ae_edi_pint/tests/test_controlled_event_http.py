@@ -9,14 +9,19 @@ import os
 import threading
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from unittest.mock import patch
+
+from psycopg2.errors import UniqueViolation
 
 from odoo.tests import HttpCase, tagged
+from odoo.tools import mute_logger
 
 from odoo.addons.account.tests.common import AccountTestInvoicingCommon
 from odoo.addons.l10n_ae_edi.tests.common import (
     CONTROLLED_CAPABILITIES,
     review_controlled_binding,
 )
+from odoo.addons.l10n_ae_edi.tools.controlled_events import ControlledEventReceiver
 from odoo.addons.l10n_ae_edi.tools.controlled_executor import ControlledExecutor
 
 from .common import requires_normative_resources
@@ -302,7 +307,7 @@ class TestUaeNativeControlledEventHttp(AccountTestInvoicingCommon, HttpCase):
             sort_keys=True,
         ).encode("utf-8")
 
-    def _post_event(self, raw, expected_outcome):
+    def _post_event(self, raw, expected_outcome, *, expected_status=200):
         self.authenticate(None, None)
         prefix = f"KMEE_UAE_CONTROLLED_EVENTS_{self.binding.id}"
         env_keys = tuple(
@@ -329,9 +334,11 @@ class TestUaeNativeControlledEventHttp(AccountTestInvoicingCommon, HttpCase):
                 },
                 timeout=15,
             )
-            self.assertEqual(response.status_code, 200)
-            self.assertEqual(response.json(), {"outcome": expected_outcome})
+            self.assertEqual(response.status_code, expected_status)
+            if expected_outcome is not None:
+                self.assertEqual(response.json(), {"outcome": expected_outcome})
             self.assertEqual(response.headers.get("Cache-Control"), "no-store")
+            return response
         finally:
             for key, value in old_env.items():
                 if value is None:
@@ -404,3 +411,75 @@ class TestUaeNativeControlledEventHttp(AccountTestInvoicingCommon, HttpCase):
             ],
         )
         self.assertEqual(len(transmission.attempt_ids), 1)
+
+    @requires_normative_resources("1.0.4")
+    def test_public_http_recognized_unique_failures_retry_then_recover(self):
+        """Controlled _persist fault injection, not real index contention."""
+        fixture = self._accepted_invoice()
+        transmission = fixture[1]
+        raw = self._event_bytes(
+            transmission,
+            event_id="native-http-unique-retry-event-1",
+            dimension="delivery_c3_state",
+            state="delivered",
+        )
+        status_fields = [
+            "validation_c2_state",
+            "delivery_c3_state",
+            "reporting_c2_state",
+            "reporting_c3_state",
+            "write_date",
+            "attempt_ids",
+            "event_ids",
+        ]
+        status_before = transmission.read(status_fields, load=None)
+
+        # Get PostgreSQL's real constraint diagnostic in a rolled-back temp table;
+        # this does not create or mutate any event, transmission, or invoice rows.
+        constraint = "l10n_ae_edi_event_event_identity_unique"
+        with (
+            self.assertRaises(UniqueViolation) as raised,
+            self.env.cr.savepoint(),
+            mute_logger("odoo.sql_db"),
+        ):
+            self.env.cr.execute(
+                "CREATE TEMP TABLE uae_event_unique_probe "
+                "(value integer, CONSTRAINT "
+                "l10n_ae_edi_event_event_identity_unique UNIQUE (value))"
+            )
+            self.env.cr.execute("INSERT INTO uae_event_unique_probe VALUES (1)")
+            self.env.cr.execute("INSERT INTO uae_event_unique_probe VALUES (1)")
+        collision = raised.exception
+        self.assertEqual(collision.diag.constraint_name, constraint)
+
+        calls = []
+
+        def collide(*_args, **_kwargs):
+            calls.append(True)
+            raise collision
+
+        # The real public HTTP controller and receiver retry loop execute; only
+        # the persistence seam injects the database error deterministically.
+        with patch.object(ControlledEventReceiver, "_persist", side_effect=collide):
+            response = self._post_event(raw, None, expected_status=503)
+        self.assertEqual(len(calls), 3)
+        self.assertEqual(response.json(), {"error": "receiving_unavailable"})
+        self.assertEqual(response.headers.get("Retry-After"), "1")
+        self._assert_original_unchanged(fixture)
+        self.assertEqual(transmission.read(status_fields, load=None), status_before)
+        self.assertFalse(transmission.event_ids)
+
+        # The exact same signed bytes apply after removing the fault, then replay
+        # as a duplicate without another event or change to the original invoice.
+        self._post_event(raw, "applied")
+        transmission.invalidate_recordset()
+        applied_event = transmission.event_ids
+        self.assertEqual(len(applied_event), 1)
+        self.assertEqual(applied_event.event_id, "native-http-unique-retry-event-1")
+        self.assertEqual(applied_event.original_body, raw.decode("utf-8"))
+        self.assertEqual(applied_event.body_hash, hashlib.sha256(raw).hexdigest())
+        self._post_event(raw, "duplicate")
+        transmission.invalidate_recordset()
+        self._assert_original_unchanged(fixture)
+        self.assertEqual(transmission.delivery_c3_state, "delivered")
+        self.assertEqual(len(transmission.event_ids), 1)
