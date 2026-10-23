@@ -88,10 +88,14 @@ class UaeEdiRetention(models.Model):
     @api.model
     def _check_current_document(self, document):
         document.ensure_one()
-        principal = self.env["res.users"].browse(self.env.uid)
+        # Native relation access hides archived companies from an ordinary
+        # res.users browse. env.user reads only this actor's own assignment
+        # metadata; the original itself is still checked under the actual UID.
+        principal = self.env.user
         if (
             not principal.active
-            or document.company_id.id not in principal.company_ids.ids
+            or document.company_id.id
+            not in principal.with_context(active_test=False).company_ids.ids
         ):
             raise AccessError(
                 self.env._(
