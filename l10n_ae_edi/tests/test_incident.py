@@ -777,8 +777,36 @@ class TestUaeIncident(AccountTestInvoicingCommon):
         finally:
             parameters.set_bool("database.is_neutralized", False)
         self.assertFalse(case.fta_confirmation_ids)
-        wizard.action_confirm()
+        wizard.with_context(
+            allowed_company_ids=(company_b | company_a).ids
+        ).action_confirm()
         original = case.fta_confirmation_ids
+        attachment = (
+            self.env["ir.attachment"]
+            .sudo()
+            .search(
+                [
+                    ("res_model", "=", original._name),
+                    ("res_id", "=", original.id),
+                    ("res_field", "=", "document_content"),
+                ]
+            )
+        )
+        self.assertEqual(
+            len(attachment),
+            1,
+            "Capture must preserve one private confirmation attachment",
+        )
+        self.assertEqual(attachment.company_id, company_a)
+        self.assertFalse(attachment.public)
+        self.assertFalse(attachment.access_token)
+        for actor in (manager, reader):
+            with (
+                self.subTest(raw_attachment_actor=actor.login),
+                self.cr.savepoint(),
+                self.assertRaises(AccessError),
+            ):
+                attachment.with_user(actor).read(["raw"])
         foreign.record_fta_confirmation(evidence)
         foreign_original = foreign.fta_confirmation_ids
         for elevated in (False, True):
@@ -816,11 +844,7 @@ class TestUaeIncident(AccountTestInvoicingCommon):
             original.with_user(reader).read(["document_content"])
         # Corrupt storage only as a fixture fault, then exercise the public binary read.
         with self.cr.savepoint(), self._assert_user_error("failed integrity review"):
-            self.cr.execute(
-                "UPDATE l10n_ae_edi_incident_confirmation "
-                "SET document_content = %s WHERE id = %s",
-                (b"Corrupt fixture original", original.id),
-            )
+            attachment.write({"raw": BinaryBytes(b"Corrupt fixture original")})
             original.invalidate_recordset(["document_content", "document"])
             _ = original.with_user(reader).document
         self.assertEqual(

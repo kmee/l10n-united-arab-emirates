@@ -26,6 +26,7 @@ from . import edi_retention
 from . import edi_deadline
 from . import edi_incident
 from . import edi_calendar
+from . import edi_incident_evidence
 from . import edi_incident_notice
 from . import edi_incident_confirmation
 from . import edi_incident_impact
