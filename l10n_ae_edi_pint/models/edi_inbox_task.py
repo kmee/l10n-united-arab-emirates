@@ -205,6 +205,14 @@ class UaeEdiInboxTask(models.Model):
                 self.env._("Use the native incoming review scheduled action.")
             )
         actor = self.env.user.sudo(False)
+        if actor.has_group("base.group_system") or actor.has_group(
+            "base.group_erp_manager"
+        ):
+            raise AccessError(
+                self.env._(
+                    "Select a non-administrator Accounting Manager scheduler account."
+                )
+            )
         if (
             not actor.active
             or actor.share
