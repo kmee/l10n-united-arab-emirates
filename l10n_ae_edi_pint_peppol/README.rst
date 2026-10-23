@@ -54,6 +54,32 @@ in the disposable upgrade rehearsal.
 A Community installation without native Peppol does not need it. No new
 credentials, permissions or configuration are introduced.
 
+The bridge checks the accounting fiscal country; native Peppol
+applicability follows Odoo's physical company country and registration
+state. In qualified public Odoo 20
+(``65fca92369e515db7e340abef7dad47686c3da46``), AE is absent from
+``PEPPOL_LIST`` in ``account/models/company.py``. A UAE fiscal company
+with an eligible foreign physical country can still enter the native
+delegation branch. This distinction does not establish UAE transport or
+network acceptance. Configuring an external ASP does not enable Odoo's
+native verifier.
+
+Usage
+=====
+
+1. Open the contact in the selected company and its **Invoicing** or
+   **Accounting** tab.
+2. Under **Customer Invoices**, review the routing identifier and click
+   **Verify**.
+3. When native Peppol is unavailable for the UAE company, read the
+   information message and verify the participant through the appointed
+   service provider.
+
+The message does not mark the contact verified or submit an invoice.
+Internal native Send and onchange callers keep their existing return
+behavior. This feedback applies to the contact-form button; the native
+bulk verification action is unchanged.
+
 Bug Tracker
 ===========
 
