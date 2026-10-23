@@ -13,7 +13,7 @@ from contextlib import closing
 
 from lxml import etree
 
-from odoo import Command
+from odoo import Command, fields
 from odoo.exceptions import AccessError, UserError, ValidationError
 from odoo.tests import Form, tagged
 from odoo.tests.common import new_test_user
@@ -2852,7 +2852,14 @@ class TestUaeInvoiceXmlSource(UaePintTestCommon):
             ),
         )
 
-    def _archived_audit_fixture(self, suffix, *, reviewed_retention=False):
+    def _archived_audit_fixture(
+        self,
+        suffix,
+        *,
+        reviewed_retention=False,
+        transport_evidence=False,
+        archive=True,
+    ):
         company_a = self.env.company
         company_b = self.env["res.company"].create(
             {
@@ -2872,6 +2879,104 @@ class TestUaeInvoiceXmlSource(UaePintTestCommon):
         invoice.l10n_ae_binding_id = binding
         invoice.action_l10n_ae_prepare()
         issue = invoice.l10n_ae_transmission_id
+        correction = self.env["l10n_ae.edi.correction"]
+        billing_request = self.env["l10n_ae.edi.billing.request"]
+        transport_attempt = self.env["l10n_ae.edi.attempt"]
+        transport_event = self.env["l10n_ae.edi.event"]
+        transport_event_body = False
+        if transport_evidence:
+            # The valid correction relationship is between revision 1 and the
+            # native replacement. Reuse that lifecycle before adding the local
+            # transport evidence to revision 2.
+            invoice = invoice.with_user(self.simple_accountman)
+            self.assertTrue(invoice.button_draft())
+            correction = invoice.l10n_ae_correction_id
+            invoice.invoice_line_ids.filtered(
+                lambda line: line.display_type == "product"
+            ).write({"price_unit": 125})
+            invoice.action_post()
+            invoice.action_l10n_ae_prepare()
+            issue = invoice.l10n_ae_transmission_id
+            self.assertEqual(correction.replacement_transmission_id, issue)
+            identity = {
+                "company_id": issue.company_id.id,
+                "environment": issue.environment,
+                "process": issue.process,
+                "origin_system": issue.origin_system,
+                "origin_document_id": issue.origin_document_id,
+            }
+            request_hash = hashlib.sha256(
+                json.dumps(
+                    {"fixture": "synthetic-local-billing-request", **identity},
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode()
+            ).hexdigest()
+            billing_request = self.env[
+                "l10n_ae.edi.billing.request"
+            ]._record_prepared_request(identity, request_hash, invoice)
+            # Deliberately synthetic native rows: this fixture does not call an
+            # HTTP route, executor, ASP, or external provider.
+            now = fields.Datetime.now()
+            attempt_receipt = json.dumps(
+                {"fixture": "synthetic-local-only", "provider_contacted": False},
+                sort_keys=True,
+            )
+            transport_attempt = (
+                self.env["l10n_ae.edi.attempt"]
+                .sudo()
+                .create(
+                    {
+                        "transmission_id": issue.id,
+                        "company_id": company_a.id,
+                        "operation": "submit",
+                        "claim_token": "synthetic-local-attempt-" + suffix,
+                        "started_at": now,
+                    }
+                )
+            )
+            transport_attempt._complete_controlled(
+                {
+                    "state": "unknown",
+                    "completed_at": now,
+                    "error_kind": "synthetic_local_fixture",
+                    "receipt": attempt_receipt,
+                }
+            )
+            transport_event_body = json.dumps(
+                {
+                    "fixture": "synthetic-native-local-only",
+                    "provider_contacted": False,
+                    "event_id": "synthetic-local-event-" + suffix,
+                    "dimension": "validation_c2_state",
+                    "state": "passed",
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            transport_event = (
+                self.env["l10n_ae.edi.event"]
+                .sudo()
+                .create(
+                    {
+                        "transmission_id": issue.id,
+                        "binding_id": binding.id,
+                        "company_id": company_a.id,
+                        "event_id": "synthetic-local-event-" + suffix,
+                        "dimension": "validation_c2_state",
+                        "fact_state": "passed",
+                        "sequence": 1,
+                        "occurred_at": now,
+                        "received_at": now,
+                        "original_body": transport_event_body,
+                        "body_hash": hashlib.sha256(
+                            transport_event_body.encode()
+                        ).hexdigest(),
+                        "outcome": "applied",
+                    }
+                )
+            )
+            issue.sudo()._apply_controlled_event(transport_event)
         policies = self.env["l10n_ae.edi.retention"]
         holds = self.env["l10n_ae.edi.retention.hold"]
         if reviewed_retention:
@@ -2934,19 +3039,11 @@ class TestUaeInvoiceXmlSource(UaePintTestCommon):
         ledger = invoice.line_ids.read(
             ["debit", "credit", "balance", "amount_currency", "write_date"]
         )
-        defaults = self.env["res.users"].search(
-            [("active", "=", True), ("company_id", "=", company_a.id)]
-        )
-        defaults.write(
-            {"company_ids": [Command.link(company_b.id)], "company_id": company_b.id}
-        )
         # Admin configuration mutations below use the legitimate active home B.
         admin = self.env(
             context={**self.env.context, "allowed_company_ids": company_b.ids}
         )
-        company_a.with_env(admin).action_archive()
-        self.assertFalse(company_a.with_env(admin).active)
-        return {
+        fixture = {
             "company_a": company_a,
             "company_b": company_b,
             "invoice": invoice,
@@ -2961,7 +3058,33 @@ class TestUaeInvoiceXmlSource(UaePintTestCommon):
             "ledger_ids": [row["id"] for row in ledger],
             "policies": policies,
             "holds": holds,
+            "correction": correction,
+            "billing_request": billing_request,
+            "billing_request_hash": billing_request.request_hash
+            if transport_evidence
+            else False,
+            "correction_source_id": correction.source_transmission_id.id
+            if transport_evidence
+            else False,
+            "transport_attempt": transport_attempt,
+            "transport_event": transport_event,
+            "transport_event_body": transport_event_body,
         }
+        if archive:
+            self._archive_audit_fixture_company(fixture)
+        return fixture
+
+    def _archive_audit_fixture_company(self, fixture):
+        company_a = fixture["company_a"]
+        company_b = fixture["company_b"]
+        defaults = self.env["res.users"].search(
+            [("active", "=", True), ("company_id", "=", company_a.id)]
+        )
+        defaults.write(
+            {"company_ids": [Command.link(company_b.id)], "company_id": company_b.id}
+        )
+        company_a.with_env(fixture["admin"]).action_archive()
+        self.assertFalse(company_a.with_env(fixture["admin"]).active)
 
     def _archived_audit_as_actor(self, fixture, user=None):
         actor = user or fixture["auditor"]
@@ -3009,6 +3132,50 @@ class TestUaeInvoiceXmlSource(UaePintTestCommon):
             fixture["ledger"],
         )
         self.assertFalse(fixture["company_a"].with_env(fixture["admin"]).active)
+
+    def _archived_audit_child_records(self, fixture):
+        return (
+            (fixture["transport_attempt"], ["state", "error_kind", "receipt"]),
+            (
+                fixture["transport_event"],
+                ["event_id", "fact_state", "outcome", "body_hash", "original_body"],
+            ),
+            (fixture["billing_request"], ["request_hash", "origin_document_id"]),
+            (
+                fixture["correction"],
+                ["source_transmission_id", "replacement_transmission_id", "state"],
+            ),
+        )
+
+    def _assert_archived_audit_children_readable(
+        self, fixture, *, user=None, allowed_company_ids=None
+    ):
+        actor = user or fixture["auditor"]
+        company_ids = allowed_company_ids or fixture["company_b"].ids
+        for records, fields_to_read in self._archived_audit_child_records(fixture):
+            actual = (
+                records.with_user(actor)
+                .sudo(False)
+                .with_context(allowed_company_ids=company_ids)
+            )
+            actual.check_access("read")
+            self.assertEqual(len(actual.read(fields_to_read)), len(actual))
+
+    def _assert_archived_audit_children_denied(
+        self, fixture, *, user=None, allowed_company_ids=None
+    ):
+        actor = user or fixture["auditor"]
+        company_ids = allowed_company_ids or fixture["company_b"].ids
+        for records, fields_to_read in self._archived_audit_child_records(fixture):
+            actual = (
+                records.with_user(actor)
+                .sudo(False)
+                .with_context(allowed_company_ids=company_ids)
+            )
+            with self.assertRaises(AccessError):
+                actual.check_access("read")
+            with self.assertRaises(AccessError):
+                actual.read(fields_to_read)
 
     def test_archived_auditor_warm_reads_recheck_role_membership_active_and_export(
         self,
@@ -3232,6 +3399,276 @@ class TestUaeInvoiceXmlSource(UaePintTestCommon):
                     "package_sha256": hashlib.sha256(package).hexdigest(),
                     "complete_children_preserved": True,
                     "archive_stays_inactive": True,
+                },
+                sort_keys=True,
+            ),
+        )
+
+    def test_archived_auditor_retains_nonempty_complete_native_child_evidence(self):
+        """A local native fixture retains all four child families byte-for-byte."""
+        fixture = self._archived_audit_fixture(
+            "nonempty-native-children", transport_evidence=True
+        )
+        archived = self._archived_audit_as_actor(fixture)
+        self.assertFalse(archived.env.su)
+        archived.check_access("read")
+        self.assertEqual(
+            base64.b64decode(
+                archived.read(["xml_download"])[0]["xml_download"]["content"]
+            ),
+            fixture["xml"],
+        )
+        for records, _fields_to_read in self._archived_audit_child_records(fixture):
+            self.assertEqual(len(records), 1)
+        try:
+            result = archived.read(["evidence_archive"])[0]
+        except AccessError as error:
+            self.fail(
+                "Expected assigned archived auditor to export all four native "
+                "child families; evidence export raised AccessError: "
+                f"{error}"
+            )
+        package = base64.b64decode(result["evidence_archive"]["content"])
+        self.assertEqual(
+            package,
+            fixture["package"],
+            "Archived auditor package must retain every native child proof.",
+        )
+        self._assert_archived_audit_children_readable(fixture)
+        with zipfile.ZipFile(io.BytesIO(package)) as archive:
+            self.assertIsNone(archive.testzip())
+            attempt_rows = json.loads(archive.read("attempts.json"))
+            event_rows = json.loads(archive.read("events.json"))
+            billing_rows = json.loads(archive.read("billing-receipts.json"))
+            correction_rows = json.loads(archive.read("corrections.json"))
+            self.assertEqual(
+                [row["id"] for row in attempt_rows],
+                [fixture["transport_attempt"].id],
+            )
+            self.assertEqual(
+                (attempt_rows[0]["state"], attempt_rows[0]["error_kind"]),
+                ("unknown", "synthetic_local_fixture"),
+            )
+            self.assertEqual(
+                json.loads(attempt_rows[0]["receipt"]),
+                {"fixture": "synthetic-local-only", "provider_contacted": False},
+            )
+            self.assertEqual(
+                [row["id"] for row in event_rows], [fixture["transport_event"].id]
+            )
+            self.assertEqual(
+                (event_rows[0]["fact_state"], event_rows[0]["outcome"]),
+                ("passed", "applied"),
+            )
+            self.assertEqual(
+                event_rows[0]["body_hash"],
+                hashlib.sha256(fixture["transport_event_body"].encode()).hexdigest(),
+            )
+            self.assertEqual(
+                archive.read(f"events/{fixture['transport_event'].id}.json").decode(),
+                fixture["transport_event_body"],
+            )
+            self.assertEqual(
+                [row["id"] for row in billing_rows], [fixture["billing_request"].id]
+            )
+            self.assertEqual(
+                billing_rows[0]["request_hash"], fixture["billing_request_hash"]
+            )
+            self.assertEqual(
+                [row["id"] for row in correction_rows], [fixture["correction"].id]
+            )
+            self.assertEqual(
+                (
+                    correction_rows[0]["source_transmission_id"],
+                    correction_rows[0]["replacement_transmission_id"],
+                    correction_rows[0]["state"],
+                ),
+                (
+                    fixture["correction_source_id"],
+                    fixture["issue"].id,
+                    "completed",
+                ),
+            )
+        self._assert_archived_audit_preserved(fixture)
+        _logger.info(
+            "UAE_ARCHIVED_CHILD_PACKAGE=%s",
+            json.dumps(
+                {
+                    "fixture_scope": "synthetic-native-local-only",
+                    "provider_contacted": False,
+                    "attempt_ids": fixture["transport_attempt"].ids,
+                    "attempt_state": fixture["transport_attempt"].state,
+                    "event_ids": fixture["transport_event"].ids,
+                    "event_body_sha256": fixture["transport_event"].body_hash,
+                    "billing_request_ids": fixture["billing_request"].ids,
+                    "correction_ids": fixture["correction"].ids,
+                    "package_sha256": hashlib.sha256(package).hexdigest(),
+                    "complete_children_preserved": True,
+                    "archive_stays_inactive": True,
+                },
+                sort_keys=True,
+            ),
+        )
+
+    def test_archived_audit_package_refuses_hidden_required_native_child(self):
+        """Every discovered child is required even under active and archived scope."""
+        fixture = self._archived_audit_fixture(
+            "hidden-native-child", transport_evidence=True, archive=False
+        )
+        company_a = fixture["company_a"]
+        company_b = fixture["company_b"]
+        auditor = fixture["auditor"]
+
+        def assert_hidden_children_refuse(allowed_company_ids):
+            issue = (
+                fixture["issue"]
+                .with_user(auditor)
+                .sudo(False)
+                .with_context(allowed_company_ids=allowed_company_ids)
+            )
+            for child, fields_to_read in self._archived_audit_child_records(fixture):
+                restriction = fixture["admin"]["ir.access"].create(
+                    {
+                        "name": "Synthetic required native archive child",
+                        "model_id": self.env["ir.model"]._get(child._name).id,
+                        "operation": "r",
+                        "domain": f"[('id', '!=', {child.id})]",
+                    }
+                )
+                try:
+                    self.env.invalidate_all()
+                    for source in (issue, issue.sudo()):
+                        with self.assertRaises(AccessError):
+                            source.read(["evidence_archive"])
+                    exact = (
+                        child.with_user(auditor)
+                        .sudo(False)
+                        .with_context(allowed_company_ids=allowed_company_ids)
+                    )
+                    with self.assertRaises(AccessError):
+                        exact.check_access("read")
+                    with self.assertRaises(AccessError):
+                        exact.read(fields_to_read)
+                finally:
+                    restriction.unlink()
+                    self.env.invalidate_all()
+                exact.check_access("read")
+                self.assertEqual(len(exact.read(fields_to_read)), 1)
+
+        self._assert_archived_audit_children_readable(
+            fixture, allowed_company_ids=company_a.ids
+        )
+        assert_hidden_children_refuse(company_a.ids)
+        self._archive_audit_fixture_company(fixture)
+        assert_hidden_children_refuse(company_b.ids)
+        self._assert_archived_audit_preserved(fixture)
+        _logger.info(
+            "UAE_ARCHIVED_CHILD_GLOBAL_HIDDEN=%s",
+            json.dumps(
+                {
+                    "children": [
+                        records._name
+                        for records, _ in self._archived_audit_child_records(fixture)
+                    ],
+                    "contexts": ["active_selected", "archived_assigned"],
+                    "package_refused_for_actual_uid_and_sudo": True,
+                    "exact_known_child_denied": True,
+                    "original_and_ledger_preserved": True,
+                },
+                sort_keys=True,
+            ),
+        )
+
+    def test_archived_child_records_recheck_actor_company_and_mutation_scope(self):
+        """All four child models recheck authority; archive never adds write scope."""
+        fixture = self._archived_audit_fixture(
+            "native-child-security", transport_evidence=True
+        )
+        auditor = fixture["auditor"].with_env(fixture["admin"])
+        self._assert_archived_audit_children_readable(fixture, user=auditor)
+
+        role = self.env.ref("l10n_ae_edi.group_fiscal_auditor")
+        auditor.write({"group_ids": [Command.unlink(role.id)]})
+        self._assert_archived_audit_children_denied(fixture, user=auditor)
+        auditor.write({"group_ids": [Command.link(role.id)]})
+        self._assert_archived_audit_children_readable(fixture, user=auditor)
+
+        auditor.with_context(active_test=False).write(
+            {"company_ids": [Command.unlink(fixture["company_a"].id)]}
+        )
+        self._assert_archived_audit_children_denied(fixture, user=auditor)
+        auditor.with_context(active_test=False).write(
+            {"company_ids": [Command.link(fixture["company_a"].id)]}
+        )
+        self._assert_archived_audit_children_readable(fixture, user=auditor)
+
+        auditor.write({"active": False})
+        self._assert_archived_audit_children_denied(fixture, user=auditor)
+        auditor.write({"active": True})
+        self._assert_archived_audit_children_readable(fixture, user=auditor)
+
+        company_a = fixture["company_a"].with_env(fixture["admin"])
+        company_a.action_unarchive()
+        self._assert_archived_audit_children_denied(
+            fixture,
+            user=auditor,
+            allowed_company_ids=fixture["company_b"].ids,
+        )
+        company_a.action_archive()
+        self._assert_archived_audit_children_readable(fixture, user=auditor)
+
+        manager_auditor = new_test_user(
+            fixture["admin"],
+            login="synthetic-archive-child-manager-auditor",
+            groups=(
+                "base.group_user,account.group_account_manager,"
+                "l10n_ae_edi.group_fiscal_auditor,base.group_allow_export"
+            ),
+            company_id=fixture["company_b"].id,
+            company_ids=[fixture["company_a"].id, fixture["company_b"].id],
+        )
+        self._assert_archived_audit_children_readable(fixture, user=manager_auditor)
+        for records, _fields_to_read in self._archived_audit_child_records(fixture):
+            actual = (
+                records.with_user(manager_auditor)
+                .sudo(False)
+                .with_context(allowed_company_ids=fixture["company_b"].ids)
+            )
+            with self.assertRaises(AccessError):
+                actual.check_access("create")
+            for operation in ("write", "unlink"):
+                with self.assertRaises(AccessError):
+                    actual.check_access(operation)
+            with self.assertRaises((AccessError, UserError)):
+                actual.write({"company_id": fixture["company_b"].id})
+            with self.assertRaises((AccessError, UserError)):
+                actual.unlink()
+        for record in (
+            fixture["invoice"],
+            fixture["binding"],
+            *fixture["admin"]["account.move.line"].browse(fixture["ledger_ids"]),
+        ):
+            scoped = (
+                record.with_user(manager_auditor)
+                .sudo(False)
+                .with_context(allowed_company_ids=fixture["company_b"].ids)
+            )
+            with self.assertRaises(AccessError):
+                scoped.check_access("read")
+        self._assert_archived_audit_preserved(fixture)
+        _logger.info(
+            "UAE_ARCHIVED_CHILD_AUTHORITY=%s",
+            json.dumps(
+                {
+                    "children": [
+                        records._name
+                        for records, _ in self._archived_audit_child_records(fixture)
+                    ],
+                    "actual_uid_role_membership_activity_and_company_rechecks": True,
+                    "manager_auditor_child_reads_only": True,
+                    "child_cud_denied": True,
+                    "accounting_and_binding_reads_denied": True,
+                    "original_and_ledger_preserved": True,
                 },
                 sort_keys=True,
             ),
