@@ -111,14 +111,40 @@
     <record id="edi_billing_request_company_rule" model="ir.access">
         <field name="name">UAE original billing request company isolation</field>
         <field name="model_id" ref="model_l10n_ae_edi_billing_request" />
-        <field name="operation">crud</field>
+        <field name="operation">cud</field>
         <field name="domain">[('company_id', 'in', company_ids)]</field>
+    </record>
+    <record id="edi_billing_request_evidence_read_rule" model="ir.access">
+        <field
+            name="name"
+        >UAE selected or assigned archived original billing request evidence</field>
+        <field name="model_id" ref="model_l10n_ae_edi_billing_request" />
+        <field name="operation">r</field>
+        <field name="domain">
+            ['|', ('company_id', 'in', company_ids), '&amp;',
+            ('company_id.active', '=', False),
+            ('company_id', 'in', user.with_context(active_test=False).company_ids.ids
+            if user.active and user.has_group('l10n_ae_edi.group_fiscal_auditor') else [])]
+        </field>
     </record>
     <record id="edi_correction_company_rule" model="ir.access">
         <field name="name">UAE local correction company isolation</field>
         <field name="model_id" ref="model_l10n_ae_edi_correction" />
-        <field name="operation">crud</field>
+        <field name="operation">cud</field>
         <field name="domain">[('company_id', 'in', company_ids)]</field>
+    </record>
+    <record id="edi_correction_evidence_read_rule" model="ir.access">
+        <field
+            name="name"
+        >UAE selected or assigned archived local correction evidence</field>
+        <field name="model_id" ref="model_l10n_ae_edi_correction" />
+        <field name="operation">r</field>
+        <field name="domain">
+            ['|', ('company_id', 'in', company_ids), '&amp;',
+            ('company_id.active', '=', False),
+            ('company_id', 'in', user.with_context(active_test=False).company_ids.ids
+            if user.active and user.has_group('l10n_ae_edi.group_fiscal_auditor') else [])]
+        </field>
     </record>
     <record id="credit_reference_company_rule" model="ir.access">
         <field name="name">UAE credit reference company isolation</field>
@@ -158,13 +184,39 @@
     <record id="edi_attempt_company_rule" model="ir.access">
         <field name="name">UAE transport attempt company isolation</field>
         <field name="model_id" ref="model_l10n_ae_edi_attempt" />
-        <field name="operation">crud</field>
+        <field name="operation">cud</field>
         <field name="domain">[('company_id', 'in', company_ids)]</field>
+    </record>
+    <record id="edi_attempt_evidence_read_rule" model="ir.access">
+        <field
+            name="name"
+        >UAE selected or assigned archived transport attempt evidence</field>
+        <field name="model_id" ref="model_l10n_ae_edi_attempt" />
+        <field name="operation">r</field>
+        <field name="domain">
+            ['|', ('company_id', 'in', company_ids), '&amp;',
+            ('company_id.active', '=', False),
+            ('company_id', 'in', user.with_context(active_test=False).company_ids.ids
+            if user.active and user.has_group('l10n_ae_edi.group_fiscal_auditor') else [])]
+        </field>
     </record>
     <record id="edi_event_company_rule" model="ir.access">
         <field name="name">UAE authenticated event company isolation</field>
         <field name="model_id" ref="model_l10n_ae_edi_event" />
-        <field name="operation">crud</field>
+        <field name="operation">cud</field>
         <field name="domain">[('company_id', 'in', company_ids)]</field>
+    </record>
+    <record id="edi_event_evidence_read_rule" model="ir.access">
+        <field
+            name="name"
+        >UAE selected or assigned archived authenticated event evidence</field>
+        <field name="model_id" ref="model_l10n_ae_edi_event" />
+        <field name="operation">r</field>
+        <field name="domain">
+            ['|', ('company_id', 'in', company_ids), '&amp;',
+            ('company_id.active', '=', False),
+            ('company_id', 'in', user.with_context(active_test=False).company_ids.ids
+            if user.active and user.has_group('l10n_ae_edi.group_fiscal_auditor') else [])]
+        </field>
     </record>
 </odoo>
