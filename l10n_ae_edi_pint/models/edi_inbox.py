@@ -730,6 +730,12 @@ class UaeEdiInbox(models.Model):
         else:
             move = self.env["account.move"].create(values)
         move._l10n_ae_mark_received()
+        # Enforce the received UUID index inside our import savepoint before
+        # native import hooks can catch a lazy-flush error and leave the
+        # transaction aborted instead of retaining the original for review.
+        move.flush_recordset(
+            ["company_id", "l10n_ae_received_document", "l10n_ae_fiscal_uuid"]
+        )
         if not existing:
             self.env["account.edi.ubl.kmee_ae.inbound"]._import_invoice_ubl_cii(
                 move, {"xml_tree": tree, "attachment": False}, new=True

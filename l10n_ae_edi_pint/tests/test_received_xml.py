@@ -3,6 +3,7 @@
 import hashlib
 import io
 import json
+import logging
 import os
 import tempfile
 import zipfile
@@ -23,9 +24,211 @@ from odoo.addons.l10n_ae_edi.tests.common import (
 from ..tools.validation import OfflinePintValidator
 from .common import NS, UaePintTestCommon, requires_normative_resources
 
+_logger = logging.getLogger(__name__)
+
 
 @tagged("post_install", "-at_install")
 class TestUaeReceivedXml(UaePintTestCommon):
+    def test_nested_internal_entities_are_retained_for_review_without_import(self):
+        tree = self._received_test_xml()
+        item_name = tree.find("cac:InvoiceLine/cac:Item/cbc:Name", NS)
+        self.assertIsNotNone(item_name)
+        item_name.text = "SYNTHETIC_ENTITY_REFERENCE"
+        # The nested-expansion attack pattern is bounded: even an unsafe parser
+        # would expand this synthetic four-level fixture to only 405 characters.
+        declarations = ['<!ENTITY uae_level0 "SYNTH">']
+        for level in range(1, 5):
+            declarations.append(
+                f'<!ENTITY uae_level{level} "' + f"&uae_level{level - 1};" * 3 + '">'
+            )
+        content = (
+            "<!DOCTYPE Invoice [" + "".join(declarations) + "]>"
+        ).encode() + etree.tostring(tree).replace(
+            b"SYNTHETIC_ENTITY_REFERENCE", b"&uae_level4;"
+        )
+        self.assertIn(b"&uae_level4;", content)
+        binding = self._reviewed_binding(
+            {"name": "Nested internal XML entities"},
+            capabilities=("receive",),
+            note="Synthetic reviewed receiving contract for early DTD refusal.",
+        )
+        receiver = (
+            self.env["l10n_ae.edi.inbox"]
+            .with_user(self.simple_accountman)
+            .with_context(allowed_company_ids=self.env.company.ids)
+        )
+        self.assertFalse(receiver.env.su)
+        self.assertFalse(receiver.env.user.has_group("base.group_erp_manager"))
+        # Native fixture ingestion is RPC-private; Process remains the user action.
+        original = receiver.receive_controlled_document(
+            binding.id, "synthetic-nested-internal-entities", content
+        )
+        moves = receiver.env["account.move"].search(
+            [("company_id", "=", self.env.company.id)], order="id"
+        )
+        fields = ["state", "amount_total", "write_uid", "write_date"]
+        ledger_fields = ["account_id", "balance", "write_uid", "write_date"]
+        self.env.flush_all()
+        moves.invalidate_recordset(fields)
+        moves.line_ids.invalidate_recordset(ledger_fields)
+        before_moves = moves.read(fields)
+        before_ledger = moves.line_ids.sorted("id").read(ledger_fields)
+
+        self.assertFalse(original.action_process())
+        self.assertEqual(original.state, "review")
+        self.assertEqual(original.diagnostic, "DTD is forbidden in invoice XML.")
+        self.assertFalse(original.move_id)
+        self.assertEqual(original.original_xml.content, content)
+        self.assertEqual(original.xml_hash, hashlib.sha256(content).hexdigest())
+        history = original.processing_history_ids
+        self.assertEqual(len(history), 1)
+        self.assertEqual(history.outcome, "review")
+        self.assertEqual(history.operator_id, receiver.env.user)
+        self.assertFalse(history.validation_report or history.validation_report_hash)
+        self.assertFalse(history.move_id)
+        self.env.flush_all()
+        self.assertEqual(
+            receiver.env["account.move"].search(
+                [("company_id", "=", self.env.company.id)], order="id"
+            ),
+            moves,
+        )
+        self.assertEqual(moves.read(fields), before_moves)
+        self.assertEqual(moves.line_ids.sorted("id").read(ledger_fields), before_ledger)
+        self.assertEqual(
+            receiver.receive_controlled_document(
+                binding.id, "synthetic-nested-internal-entities", content
+            ),
+            original,
+        )
+        self.assertEqual(original.processing_history_ids, history)
+        _logger.info(
+            "UAE_NATIVE_INBOUND_GUARD=%s",
+            json.dumps(
+                {
+                    "case": "internal_entities",
+                    "forbidden_dtd": True,
+                    "formal_report_created": False,
+                    "company_moves_and_ledger_preserved": True,
+                    "retained_xml_hash": original.xml_hash,
+                    "fixture_reference_depth": 4,
+                },
+                sort_keys=True,
+            ),
+        )
+
+    @requires_normative_resources("1.0.4")
+    def test_missing_received_uuid_never_links_an_existing_uuidless_bill(self):
+        binding = self._reviewed_binding(
+            {"name": "Received UUID required before matching"},
+            capabilities=("receive",),
+            note="Synthetic reviewed receive-only contract for UUID refusal.",
+        )
+        receiver = (
+            self.env["l10n_ae.edi.inbox"]
+            .with_user(self.simple_accountman)
+            .with_context(allowed_company_ids=self.env.company.ids)
+        )
+        self.assertFalse(receiver.env.su)
+        self.assertFalse(receiver.env.user.has_group("base.group_erp_manager"))
+        tree = self._received_test_xml()
+        valid_original = receiver.receive_controlled_document(
+            binding.id, "synthetic-valid-uuid-control", etree.tostring(tree)
+        )
+        self.assertTrue(valid_original.action_process(), valid_original.diagnostic)
+        self.assertEqual(valid_original.move_id.state, "draft")
+        self.assertEqual(
+            (
+                valid_original.move_id.amount_untaxed,
+                valid_original.move_id.amount_tax,
+                valid_original.move_id.amount_total,
+            ),
+            (100, 5, 105),
+        )
+        local_bill = self.init_invoice(
+            "in_invoice", amounts=[100], taxes=self.tax_purchase_a
+        ).with_user(self.simple_accountman)
+        self.assertFalse(local_bill.l10n_ae_fiscal_uuid)
+        self.assertFalse(local_bill.l10n_ae_received_document)
+        tree.remove(tree.find("cbc:UUID", NS))
+        content = etree.tostring(tree)
+        original = receiver.receive_controlled_document(
+            binding.id, "synthetic-missing-uuid", content
+        )
+        moves = receiver.env["account.move"].search(
+            [("company_id", "=", self.env.company.id)], order="id"
+        )
+        fields = [
+            "state",
+            "move_type",
+            "amount_untaxed",
+            "amount_tax",
+            "amount_total",
+            "l10n_ae_fiscal_uuid",
+            "l10n_ae_received_document",
+            "write_uid",
+            "write_date",
+        ]
+        ledger_fields = ["account_id", "balance", "write_uid", "write_date"]
+        self.env.flush_all()
+        # Observe stored fixture facts after native computations, not older
+        # writer values retained in the setup environments' field caches.
+        moves.invalidate_recordset(fields)
+        moves.line_ids.invalidate_recordset(ledger_fields)
+        before_moves = moves.read(fields)
+        before_ledger = moves.line_ids.sorted("id").read(ledger_fields)
+
+        self.assertFalse(original.action_process())
+        self.assertEqual(original.state, "review")
+        self.assertIn("ibr-193-ae", original.diagnostic.lower())
+        self.assertFalse(original.move_id)
+        self.assertEqual(original.original_xml.content, content)
+        self.assertEqual(original.xml_hash, hashlib.sha256(content).hexdigest())
+        history = original.processing_history_ids
+        self.assertEqual(len(history), 1)
+        self.assertEqual(history.outcome, "review")
+        self.assertFalse(history.move_id)
+        report = json.loads(history.validation_report)
+        self.assertTrue(report["xsd_valid"], report)
+        self.assertFalse(report["valid"], report)
+        self.assertEqual(
+            history.validation_report_hash,
+            hashlib.sha256(history.validation_report.encode()).hexdigest(),
+        )
+        self.env.flush_all()
+        self.assertEqual(
+            receiver.env["account.move"].search(
+                [("company_id", "=", self.env.company.id)], order="id"
+            ),
+            moves,
+        )
+        self.assertEqual(moves.read(fields), before_moves)
+        self.assertEqual(moves.line_ids.sorted("id").read(ledger_fields), before_ledger)
+        self.assertFalse(local_bill.l10n_ae_fiscal_uuid)
+        self.assertEqual(
+            receiver.receive_controlled_document(
+                binding.id, "synthetic-missing-uuid", content
+            ),
+            original,
+        )
+        self.assertEqual(original.processing_history_ids, history)
+        _logger.info(
+            "UAE_NATIVE_INBOUND_GUARD=%s",
+            json.dumps(
+                {
+                    "case": "missing_uuid",
+                    "review_without_accounting_link": True,
+                    "valid_control_total": 105,
+                    "uuidless_local_bill_preserved": True,
+                    "company_moves_and_ledger_preserved": True,
+                    "diagnostic_code": "ibr-193-ae",
+                    "report_hash": history.validation_report_hash,
+                    "retained_xml_hash": original.xml_hash,
+                },
+                sort_keys=True,
+            ),
+        )
+
     @requires_normative_resources("1.0.3")
     def test_received_commercial_credit_pins_package_while_original_bill_is_missing(
         self,
