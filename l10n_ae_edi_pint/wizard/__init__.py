@@ -3,3 +3,4 @@
 from . import edi_inbox_selection
 from . import edi_inbox_event_review
 from . import account_move_send_wizard
+from . import base_document_layout

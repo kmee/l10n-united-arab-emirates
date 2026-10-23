@@ -556,13 +556,67 @@ class AccountEdiUblUae(models.AbstractModel):
                 abs(value), max_dp=max(2, -value.as_tuple().exponent)
             )
         # Core has already computed the line extension from its rounded amounts.
-        # Preserve that accounting total, then replace only its percentage discount.
+        # Replace its percentage discount before the optional global line rebuild.
         original = vals["l10n_ae_discount_node"]
         if original is not None:
             original.clear()
             original.update(node)
         else:
             vals["line_node"]["cac:AllowanceCharge"].append(node)
+
+    def _l10n_ae_preserve_global_line_extension(self, vals):
+        if vals["company"].tax_calculation_rounding_method != "round_globally":
+            return
+        # UAE IBR-147-AE allows raw line extensions; IBR-CO-10 rounds their
+        # sum at the document boundary. Core's cent-rounding before summation
+        # otherwise loses source money on fractional multi-line invoices.
+        # Use the same export-only native net basis as the price/discount,
+        # before PINT's intermediate six-place rounding. Consume the final
+        # serialized allowance/charge nodes, including the exact AE discount.
+        raw_base = self._l10n_ae_raw_fiscal_base_line(vals, undiscounted=True)
+        amount = self._l10n_ae_computed_decimal(
+            self.env["account.tax"]._get_gross_total_without_tax(
+                raw_base, vals["company"]
+            )
+        )
+        line = vals["line_node"]
+        for adjustment in line["cac:AllowanceCharge"]:
+            sign = 1 if adjustment["cbc:ChargeIndicator"]["_text"] == "true" else -1
+            amount += sign * Decimal(str(adjustment["cbc:Amount"]["_text"]))
+        line["cbc:LineExtensionAmount"]["_text"] = FloatFmt(
+            amount, max_dp=max(2, -amount.as_tuple().exponent)
+        )
+
+    def _ubl_add_legal_monetary_total_line_extension_amount_node(
+        self, vals, in_foreign_currency=True
+    ):
+        result = super()._ubl_add_legal_monetary_total_line_extension_amount_node(
+            vals, in_foreign_currency
+        )
+        if (
+            in_foreign_currency
+            and vals["company"].tax_calculation_rounding_method == "round_globally"
+        ):
+            currency = vals["currency_id"]
+            node = vals["legal_monetary_total_node"]["cbc:LineExtensionAmount"]
+            # Sum the actual emitted values as decimals before the sole source
+            # header rounding; retain the native accounting-currency path.
+            amount = sum(
+                (
+                    Decimal(str(line["cbc:LineExtensionAmount"]["_text"]))
+                    for key in (
+                        "cac:InvoiceLine",
+                        "cac:CreditNoteLine",
+                        "cac:DebitNoteLine",
+                    )
+                    for line in vals["document_node"].get(key, [])
+                ),
+                Decimal(0),
+            )
+            node["_text"] = FloatFmt(
+                currency.round(float(amount)), min_dp=currency.decimal_places
+            )
+        return result
 
     def _l10n_ae_raw_fiscal_base_line(self, vals, undiscounted=False):
         # Recompute on an export-only copy with native unrounded tax arithmetic.
@@ -630,12 +684,14 @@ class AccountEdiUblUae(models.AbstractModel):
     def _ubl_add_invoice_line_node(self, vals):
         result = super()._ubl_add_invoice_line_node(vals)
         self._l10n_ae_preserve_line_discount(vals)
+        self._l10n_ae_preserve_global_line_extension(vals)
         self._l10n_ae_add_line_aed_amounts(vals)
         return result
 
     def _ubl_add_credit_note_line_node(self, vals):
         result = super()._ubl_add_credit_note_line_node(vals)
         self._l10n_ae_preserve_line_discount(vals)
+        self._l10n_ae_preserve_global_line_extension(vals)
         self._l10n_ae_add_line_aed_amounts(vals)
         return result
 
