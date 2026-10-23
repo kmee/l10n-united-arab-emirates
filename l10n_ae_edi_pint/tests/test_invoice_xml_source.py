@@ -2,16 +2,20 @@
 # License AGPL-3.0 or later (https://www.gnu.org/licenses/agpl).
 
 import hashlib
+import io
 import json
 import logging
 import sys
 import uuid
+from contextlib import closing
 
 from lxml import etree
 
 from odoo.exceptions import AccessError, UserError, ValidationError
 from odoo.tests import Form, tagged
 from odoo.tests.common import new_test_user
+from odoo.tools.binary import BinaryBytes
+from odoo.tools.pdf import PdfReader
 
 from odoo.addons.l10n_ae_edi.tests.common import (
     CONTROLLED_CAPABILITIES,
@@ -2332,6 +2336,197 @@ class TestUaeInvoiceXmlSource(UaePintTestCommon):
         self.assertEqual(transmission.read(observed_fields)[0], original)
         self.assertEqual((invoice.amount_tax, invoice.amount_total), (5, 105))
 
+    def test_buyer98_pdf_preserves_private_original_in_invoice_company(self):
+        company = self.env.company
+        other_company = self.env["res.company"].create(
+            {"name": "Synthetic current PDF company B"}
+        )
+        manager = self.simple_accountman
+        manager.company_ids |= other_company
+        reader = new_test_user(
+            self.env,
+            login="synthetic-pdf-original-reader",
+            groups="account.group_account_readonly",
+            company_ids=company.ids,
+            company_id=company.id,
+        )
+        self.partner_a.write(
+            {"name": "Synthetic Buyer98 Attachment Original", "routing_endpoint": False}
+        )
+        invoice = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
+        ).with_user(manager)
+        invoice.write(
+            {
+                "l10n_ae_buyer_not_implemented": True,
+                "l10n_ae_buyer_onboarding_review_date": "2019-01-01",
+                "l10n_ae_buyer_onboarding_review_reference": "SYNTH-PDF-ORIGINAL",
+                "l10n_ae_fiscal_uuid": "aaaaaaaf-7777-4777-8777-777777777777",
+                "l10n_ae_binding_id": self._reviewed_binding(
+                    {"name": "Synthetic private PDF original"},
+                    capabilities=CONTROLLED_CAPABILITIES,
+                    note="Synthetic review of the buyer98 preserved PDF contract.",
+                ).id,
+            }
+        )
+        self.assertFalse(invoice.env.su)
+        self.assertFalse(manager.has_group("base.group_system"))
+        invoice.action_l10n_ae_prepare()
+        issue = invoice.l10n_ae_transmission_id
+        before = invoice.read(["state", "amount_untaxed", "amount_tax", "amount_total"])
+        ledger_fields = ["debit", "credit", "balance", "amount_currency", "write_date"]
+        ledger = invoice.line_ids.sorted("id").read(ledger_fields)
+        current = invoice.with_context(
+            allowed_company_ids=(other_company | company).ids
+        )
+        self.assertEqual(current.env.company, other_company)
+        self.assertEqual(issue.company_id, company)
+        # Let the real renderer request its assets through the native test server.
+        with self.allow_pdf_render():
+            action = current.action_l10n_ae_generate_conventional_pdf()
+        expected_url = (
+            f"/web/content/l10n_ae.edi.transmission/{issue.id}/"
+            "conventional_pdf_content?download=true&filename_field=conventional_filename"
+        )
+        self.assertEqual(action["url"], expected_url)
+        content = issue.conventional_pdf_content.content
+        self.assertTrue(content.startswith(b"%PDF-"))
+        text = " ".join(
+            " ".join(
+                page.extract_text() for page in PdfReader(io.BytesIO(content)).pages
+            ).split()
+        )
+        self.assertIn("Buyer98", text)
+        self.assertIn(invoice.name, text)
+        self.assertIn("105.00", text)
+        attachment = (
+            self.env["ir.attachment"]
+            .sudo()
+            .search(
+                [
+                    ("res_model", "=", issue._name),
+                    ("res_id", "=", issue.id),
+                    ("res_field", "=", "conventional_pdf_original_content"),
+                ]
+            )
+        )
+        self.assertEqual(
+            len(attachment),
+            1,
+            "Generate must preserve one private PDF original attachment",
+        )
+        self.assertEqual(attachment.company_id, company)
+        self.assertFalse(attachment.public)
+        self.assertFalse(attachment.access_token)
+        digest, generated_at = (
+            issue.conventional_pdf_hash,
+            issue.conventional_pdf_generated_at,
+        )
+        self.assertEqual(hashlib.sha256(content).hexdigest(), digest)
+        self.assertEqual(invoice.action_l10n_ae_generate_conventional_pdf(), action)
+        self.assertEqual(invoice.with_user(reader).action_print_pdf(), action)
+        self.assertEqual(
+            issue.with_user(reader).conventional_pdf_content.content, content
+        )
+        self.assertEqual(
+            (issue.conventional_pdf_hash, issue.conventional_pdf_generated_at),
+            (digest, generated_at),
+        )
+        self.assertEqual(
+            invoice.read(["state", "amount_untaxed", "amount_tax", "amount_total"]),
+            before,
+        )
+        self.assertEqual(invoice.line_ids.sorted("id").read(ledger_fields), ledger)
+        self.assertEqual(
+            (invoice.amount_untaxed, invoice.amount_tax, invoice.amount_total),
+            (100, 5, 105),
+        )
+        for actor in (manager, reader):
+            for record, field in (
+                (issue.with_user(actor), "conventional_pdf_original_content"),
+                (attachment.with_user(actor), "raw"),
+            ):
+                with (
+                    self.subTest(actor=actor.login, field=field),
+                    self.assertRaises(AccessError),
+                ):
+                    record.read([field])
+        # Storage faults are fixture injections; the public field observes refusal.
+        for fault in ("hash", "bytes"):
+            with closing(self.cr.savepoint()):
+                if fault == "hash":
+                    self.cr.execute(
+                        "UPDATE l10n_ae_edi_transmission "
+                        "SET conventional_pdf_hash = %s WHERE id = %s",
+                        ["0" * 64, issue.id],
+                    )
+                else:
+                    attachment.write({"raw": BinaryBytes(b"Corrupt PDF original\n")})
+                issue.invalidate_recordset(
+                    [
+                        "conventional_pdf_content",
+                        "conventional_pdf_original_content",
+                        "conventional_pdf_hash",
+                    ]
+                )
+                with self.assertRaisesRegex(
+                    UserError, "preserved invoice PDF is corrupt"
+                ) as error:
+                    _ = issue.with_user(reader).conventional_pdf_content
+                self.assertIs(type(error.exception), UserError)
+            issue.invalidate_recordset(
+                [
+                    "conventional_pdf_content",
+                    "conventional_pdf_original_content",
+                    "conventional_pdf_hash",
+                ]
+            )
+            self.assertEqual(
+                issue.with_user(reader).conventional_pdf_content.content, content
+            )
+        for role in (
+            "group_controlled_sender",
+            "group_billing_reader",
+            "group_fiscal_auditor",
+            "group_event_receiver",
+        ):
+            actor = new_test_user(
+                self.env,
+                login="synthetic-pdf-" + role,
+                groups="l10n_ae_edi." + role,
+                company_ids=company.ids,
+                company_id=company.id,
+            )
+            actual = issue.with_user(actor)
+            self.assertFalse(actual.env["account.move"].has_access("read"))
+            self.assertEqual(actual.conventional_pdf_content.content, content)
+            with self.assertRaises(AccessError):
+                actual.read(["conventional_pdf_original_content"])
+        outsider = new_test_user(
+            self.env,
+            login="synthetic-pdf-no-transmission-rights",
+            groups="base.group_user",
+            company_ids=company.ids,
+            company_id=company.id,
+        )
+        foreign_reader = new_test_user(
+            self.env,
+            login="synthetic-pdf-foreign-company",
+            groups="account.group_account_readonly",
+            company_ids=other_company.ids,
+            company_id=other_company.id,
+        )
+        # Warmed content must not cross actual UID/company boundaries under sudo.
+        for candidate in (
+            issue.with_user(outsider),
+            issue.with_user(foreign_reader).with_context(
+                allowed_company_ids=other_company.ids
+            ),
+            issue.with_context(allowed_company_ids=other_company.ids),
+        ):
+            with self.assertRaises(AccessError):
+                _ = candidate.sudo().conventional_pdf_content
+
     def test_pdf_issue_cannot_be_attached_to_another_invoice(self):
         original = self.init_invoice(
             "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
@@ -2442,6 +2637,7 @@ class TestUaeInvoiceXmlSource(UaePintTestCommon):
                 self.assertEqual(invoice.l10n_ae_transmission_id.payload, payload)
                 self.assertEqual(invoice.preview_l10n_ae_pint(), xml)
         for field in presentation_fields + [
+            "conventional_pdf_original_content",
             "conventional_pdf_content",
             "conventional_pdf_hash",
             "conventional_pdf_generated_at",
