@@ -47,6 +47,45 @@ class TestUaeInvoicePreparation(AccountTestInvoicingCommon):
             note="Synthetic controlled contract for invoice preparation tests.",
         )
 
+    def test_controlled_event_apply_rejects_unsupported_dimension_and_state(self):
+        invoice = self.init_invoice(
+            "out_invoice", amounts=[100], taxes=self.tax_sale_a, post=True
+        )
+        invoice.l10n_ae_binding_id = self.binding
+        invoice.action_l10n_ae_prepare()
+        # Match the authenticated receiver's privileged internal application.
+        transmission = invoice.l10n_ae_transmission_id.sudo()
+        frozen_fields = [
+            "remote_id",
+            "payload",
+            "payload_hash",
+            "xml_hash",
+            "validation_c2_state",
+            "delivery_c3_state",
+            "reporting_c2_state",
+            "reporting_c3_state",
+            "write_date",
+        ]
+        frozen = transmission.read(frozen_fields, load=None)
+        event_ids = transmission.event_ids.ids
+        for dimension, fact_state in (
+            ("remote_id", "SYNTHETIC-FORGED-REMOTE-ID"),
+            ("validation_c2_state", "not-a-controlled-state"),
+        ):
+            event = self.env["l10n_ae.edi.event"].new(
+                {"dimension": dimension, "fact_state": fact_state}
+            )
+            with (
+                self.cr.savepoint(),
+                self.assertRaisesRegex(
+                    ValidationError, "controlled event fact is not supported"
+                ),
+            ):
+                transmission._apply_controlled_event(event)
+            transmission.invalidate_recordset()
+            self.assertEqual(transmission.read(frozen_fields, load=None), frozen)
+            self.assertEqual(transmission.event_ids.ids, event_ids)
+
     def test_unsupported_contract_document_keeps_native_post_until_reviewed(self):
         binding = (
             self.env["l10n_ae.edi.binding"]

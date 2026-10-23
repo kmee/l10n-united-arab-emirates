@@ -1,6 +1,7 @@
 # Copyright 2026 KMEE
 # License AGPL-3.0 or later (https://www.gnu.org/licenses/agpl).
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from requests import ConnectionError as RequestConnectionError
@@ -888,7 +889,10 @@ class TestCbuaePublication(AccountTestInvoicingCommon):
         publication = model.create({"requested_date": "2026-08-26"})
         with (
             patch("requests.get", return_value=slow),
-            patch("time.monotonic", side_effect=lambda: clock[0]),
+            patch(
+                "odoo.addons.l10n_ae_edi.models.cbuae_publication.time",
+                SimpleNamespace(monotonic=lambda: clock[0]),
+            ),
         ):
             publication.action_capture()
         self.assertEqual(publication.state, "error")

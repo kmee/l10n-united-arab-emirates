@@ -681,6 +681,7 @@ class AccountMove(models.Model):
             "sending_data",
             "is_move_sent",
             "message_main_attachment_id",
+            "access_token",
         }
         if vals and set(vals).issubset(invoice_metadata_fields):
             posted_invoices = self.filtered(
@@ -691,8 +692,9 @@ class AccountMove(models.Model):
                 )
             )
             if posted_invoices:
-                # Beneficiary repair, quote review and native Send metadata change
-                # no accounting input.
+                # Beneficiary repair, quote review and native Send/portal metadata
+                # change no accounting input. The first email creates its portal
+                # token even when the invoice documents already exist.
                 # Native sync otherwise rewrites stored debit/credit line audits.
                 result = super(
                     AccountMove,
