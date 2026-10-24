@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<odoo>
+    <record id="account_tax_form_additional_vat" model="ir.ui.view">
+        <field name="name">account.tax.form.uae.additional.vat</field>
+        <field name="model">account.tax</field>
+        <field
+            name="inherit_id"
+            ref="account_edi_ubl_cii.view_account_invoice_form_inherit"
+        />
+        <field name="arch" type="xml">
+            <field name="ubl_cii_tax_category_code" position="after">
+                <field
+                    name="l10n_ae_edi_additional_vat_rate"
+                    invisible="ubl_cii_tax_category_code != 'N'"
+                />
+            </field>
+        </field>
+    </record>
+</odoo>

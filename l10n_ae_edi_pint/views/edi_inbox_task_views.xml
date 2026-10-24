@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<odoo>
+    <record id="edi_inbox_task_form" model="ir.ui.view">
+        <field name="name">l10n_ae.edi.inbox.task.form</field>
+        <field name="model">l10n_ae.edi.inbox.task</field>
+        <field name="arch" type="xml">
+            <form
+                string="Received Document Internal Review"
+                create="false"
+                edit="false"
+                delete="false"
+                duplicate="false"
+            >
+                <header>
+                    <button
+                        name="action_resolve_review"
+                        type="object"
+                        string="Resolve Internal Review"
+                        groups="account.group_account_manager"
+                        invisible="state == 'resolved' or source_state != 'processed' or source_identity_conflict"
+                    />
+                    <field
+                        name="state"
+                        widget="statusbar"
+                        statusbar_visible="open,resolved"
+                    />
+                </header>
+                <sheet>
+                    <div class="alert alert-info" role="alert">
+                        This internal attention request does not post, transmit or acknowledge a fiscal document.
+                        Completing its To-Do does not process the received original.
+                    </div>
+                    <group>
+                        <group string="Received Original">
+                            <field name="name" />
+                            <field name="inbox_id" />
+                            <field
+                                name="company_id"
+                                groups="base.group_multi_company"
+                            />
+                            <field name="xml_hash" />
+                            <field name="source_state" />
+                            <field name="source_identity_conflict" />
+                        </group>
+                        <group string="Request and Assignment History">
+                            <field name="requested_by_id" options="{'no_open': True}" />
+                            <field name="requested_at" />
+                            <field name="assigned_to_id" options="{'no_open': True}" />
+                            <field name="assigned_by_id" options="{'no_open': True}" />
+                            <field name="assigned_at" />
+                            <field name="resolved_by_id" options="{'no_open': True}" />
+                            <field name="resolved_at" />
+                        </group>
+                    </group>
+                    <group string="Latest Scheduled Check">
+                        <field name="last_checked_at" />
+                        <field name="last_check_state" />
+                        <field name="check_review_note" />
+                        <field name="next_check_at" />
+                    </group>
+                </sheet>
+                <chatter />
+            </form>
+        </field>
+    </record>
+    <record id="edi_inbox_task_list" model="ir.ui.view">
+        <field name="name">l10n_ae.edi.inbox.task.list</field>
+        <field name="model">l10n_ae.edi.inbox.task</field>
+        <field name="arch" type="xml">
+            <list
+                create="false"
+                edit="false"
+                delete="false"
+                decoration-warning="last_check_state == 'review_required'"
+            >
+                <field name="name" />
+                <field name="company_id" groups="base.group_multi_company" />
+                <field name="state" />
+                <field name="assigned_to_id" />
+                <field name="requested_at" />
+                <field name="last_check_state" />
+                <field name="next_check_at" />
+            </list>
+        </field>
+    </record>
+    <record id="edi_inbox_task_action" model="ir.actions.act_window">
+        <field name="name">UAE Incoming Reviews</field>
+        <field name="res_model">l10n_ae.edi.inbox.task</field>
+        <field name="view_mode">list,form</field>
+    </record>
+    <menuitem
+        id="edi_inbox_task_menu"
+        name="UAE Incoming Reviews"
+        parent="account.menu_finance_payables"
+        action="edi_inbox_task_action"
+        sequence="31"
+        groups="account.group_account_manager,account.group_account_readonly"
+    />
+</odoo>

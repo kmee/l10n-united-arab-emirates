@@ -1,0 +1,416 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<odoo>
+    <record id="edi_inbox_rejection_list" model="ir.ui.view">
+        <field name="name">l10n_ae.edi.inbox.rejection.list</field>
+        <field name="model">l10n_ae.edi.inbox.rejection</field>
+        <field name="arch" type="xml">
+            <list create="false" edit="false" delete="false">
+                <field name="remote_id" />
+                <field name="event_id" />
+                <field name="binding_id" />
+                <field name="company_id" groups="base.group_multi_company" />
+                <field name="reason" />
+                <field name="received_at" />
+            </list>
+        </field>
+    </record>
+    <record id="edi_inbox_rejection_form" model="ir.ui.view">
+        <field name="name">l10n_ae.edi.inbox.rejection.form</field>
+        <field name="model">l10n_ae.edi.inbox.rejection</field>
+        <field name="arch" type="xml">
+            <form create="false" edit="false" delete="false">
+                <sheet>
+                    <div
+                        class="alert alert-warning"
+                        role="alert"
+                        invisible="reason != 'empty_xml'"
+                    >
+                        This retrieved artifact contains no XML. It is retained as
+                        local retrieval evidence, not an invoice or an ASP rejection.
+                        Contact integration support; do not create a replacement bill
+                        from this artifact.
+                    </div>
+                    <div
+                        class="alert alert-warning"
+                        role="alert"
+                        invisible="reason != 'response_limit'"
+                    >
+                        Retrieval stopped at the HTTP response limit. No complete XML
+                        or verified XML hash was retained. The listing hash is an
+                        unverified claim. This local refusal is not an ASP rejection.
+                        Contact integration support; do not create a replacement bill
+                        from this observation. Other received documents can continue.
+                    </div>
+                    <group>
+                        <field name="remote_id" />
+                        <field name="event_id" />
+                        <field name="binding_id" />
+                        <field name="company_id" groups="base.group_multi_company" />
+                        <field name="reason" />
+                        <field name="xml_retrieved" invisible="1" />
+                        <field name="xml_size" invisible="not xml_retrieved" />
+                        <field
+                            name="xml_hash"
+                            class="text-wrap text-break"
+                            invisible="not xml_retrieved"
+                        />
+                        <field name="artifact" invisible="not xml_retrieved" />
+                        <field
+                            name="response_limit_bytes"
+                            invisible="reason != 'response_limit'"
+                        />
+                        <field
+                            name="observed_response_bytes"
+                            invisible="reason != 'response_limit'"
+                        />
+                        <field
+                            name="declared_xml_hash"
+                            class="text-wrap text-break"
+                            invisible="reason != 'response_limit'"
+                        />
+                        <field name="operator_id" />
+                        <field name="received_at" />
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+    <record id="edi_inbox_rejection_action" model="ir.actions.act_window">
+        <field name="name">Rejected Retrieved UAE Artifacts</field>
+        <field name="res_model">l10n_ae.edi.inbox.rejection</field>
+        <field name="view_mode">list,form</field>
+    </record>
+    <menuitem
+        id="edi_inbox_rejection_menu"
+        name="Rejected Retrieved UAE Artifacts"
+        parent="account.menu_finance_payables"
+        action="edi_inbox_rejection_action"
+        sequence="31"
+        groups="account.group_account_invoice,account.group_account_readonly"
+    />
+    <record id="edi_inbox_form" model="ir.ui.view">
+        <field name="name">l10n_ae.edi.inbox.form</field>
+        <field name="model">l10n_ae.edi.inbox</field>
+        <field name="arch" type="xml">
+            <form
+                string="Received UAE Document"
+                create="false"
+                edit="false"
+                delete="false"
+            >
+                <header>
+                    <button
+                        name="action_download_evidence"
+                        type="object"
+                        string="Download Evidence Package"
+                        groups="base.group_allow_export"
+                    />
+                    <button
+                        name="action_review_identity_variant"
+                        type="object"
+                        string="Review Identity Variant"
+                        groups="account.group_account_manager"
+                        invisible="not identity_conflict"
+                    />
+                    <button
+                        name="action_review_event_conflict"
+                        type="object"
+                        string="Review Delivery Event Conflict"
+                        groups="account.group_account_manager"
+                        invisible="not ingestion_conflict"
+                    />
+                    <button
+                        name="action_request_review"
+                        type="object"
+                        string="Request Internal Review"
+                        groups="account.group_account_manager"
+                        invisible="state == 'processed'"
+                    />
+                    <button
+                        name="action_process"
+                        type="object"
+                        string="Process Received Document"
+                        groups="account.group_account_manager"
+                        invisible="state == 'processed' or identity_review_pending or event_review_pending"
+                    />
+                    <button
+                        name="action_open_move"
+                        type="object"
+                        string="Open Accounting Document"
+                        invisible="not move_id"
+                    />
+                    <field
+                        name="state"
+                        widget="statusbar"
+                        statusbar_visible="received,review,processed"
+                    />
+                </header>
+                <sheet>
+                    <group>
+                        <field name="remote_id" />
+                        <field name="company_id" groups="base.group_multi_company" />
+                        <field name="binding_id" />
+                        <field name="received_at" />
+                        <field name="original_xml" />
+                        <field name="xml_hash" class="text-wrap text-break" />
+                        <field name="move_id" />
+                        <field name="identity_conflict" />
+                        <field name="ingestion_conflict" />
+                        <field name="identity_review_pending" />
+                        <field name="event_review_pending" />
+                    </group>
+                    <group string="Received Delivery" invisible="not delivery_summary">
+                        <field name="delivery_summary" readonly="1" nolabel="1" />
+                    </group>
+                    <group string="Review Diagnostic" invisible="not diagnostic">
+                        <field name="diagnostic" nolabel="1" />
+                    </group>
+                    <group
+                        string="Received Invoice References"
+                        col="1"
+                        invisible="not credit_reference_summary"
+                    >
+                        <field
+                            name="credit_reference_summary"
+                            readonly="1"
+                            nolabel="1"
+                        />
+                    </group>
+                    <group string="Internal Review Request" col="1">
+                        <field name="internal_review_task_ids" readonly="1" nolabel="1">
+                            <list create="false" edit="false" delete="false">
+                                <field name="state" />
+                                <field name="requested_at" />
+                                <field name="assigned_to_id" />
+                                <field name="assigned_at" />
+                                <field name="last_check_state" />
+                            </list>
+                        </field>
+                    </group>
+                    <group
+                        string="Internal Identity Selections"
+                        col="1"
+                        invisible="not identity_conflict"
+                    >
+                        <field name="identity_decision_ids" readonly="1" nolabel="1">
+                            <list create="false" edit="false" delete="false">
+                                <field name="occurred_at" />
+                                <field name="operator_id" options="{'no_open': True}" />
+                                <field name="selected_inbox_id" />
+                                <field name="review_reference" />
+                            </list>
+                            <form
+                                create="false"
+                                edit="false"
+                                delete="false"
+                                duplicate="false"
+                            >
+                                <group>
+                                    <field name="occurred_at" />
+                                    <field
+                                        name="operator_id"
+                                        options="{'no_open': True}"
+                                    />
+                                    <field name="selected_inbox_id" />
+                                    <field name="selected_xml_hash" />
+                                    <field name="justification" />
+                                    <field name="review_reference" />
+                                </group>
+                                <field name="member_ids" readonly="1">
+                                    <list create="false" edit="false" delete="false">
+                                        <field name="id" string="Original ID" />
+                                        <field
+                                            name="xml_hash"
+                                            class="text-wrap text-break"
+                                        />
+                                    </list>
+                                </field>
+                            </form>
+                        </field>
+                    </group>
+                    <group
+                        string="Internal Delivery Event Reviews"
+                        col="1"
+                        invisible="not ingestion_conflict"
+                    >
+                        <field name="event_decision_ids" readonly="1" nolabel="1">
+                            <list create="false" edit="false" delete="false">
+                                <field name="occurred_at" />
+                                <field name="operator_id" options="{'no_open': True}" />
+                                <field
+                                    name="approved_inbox_ids"
+                                    widget="many2many_tags"
+                                />
+                                <field name="review_reference" />
+                            </list>
+                            <form
+                                create="false"
+                                edit="false"
+                                delete="false"
+                                duplicate="false"
+                            >
+                                <group>
+                                    <field name="occurred_at" />
+                                    <field
+                                        name="operator_id"
+                                        options="{'no_open': True}"
+                                    />
+                                    <field name="member_ids" widget="many2many_tags" />
+                                    <field
+                                        name="approved_inbox_ids"
+                                        widget="many2many_tags"
+                                    />
+                                    <field name="justification" />
+                                    <field name="review_reference" />
+                                </group>
+                            </form>
+                        </field>
+                    </group>
+                    <group string="Delivery Event History" col="1">
+                        <field name="ingestion_event_ids" readonly="1" nolabel="1">
+                            <list create="false" edit="false" delete="false">
+                                <field name="event_id" />
+                                <field name="remote_id" />
+                                <field name="occurred_at" />
+                                <field name="operator_id" options="{'no_open': True}" />
+                                <field name="disposition" />
+                            </list>
+                            <form
+                                create="false"
+                                edit="false"
+                                delete="false"
+                                duplicate="false"
+                            >
+                                <group>
+                                    <field name="event_id" />
+                                    <field name="remote_id" />
+                                    <field name="xml_hash" />
+                                    <field name="occurred_at" />
+                                    <field
+                                        name="operator_id"
+                                        options="{'no_open': True}"
+                                    />
+                                    <field name="disposition" />
+                                    <field name="provider" />
+                                    <field name="environment" />
+                                    <field name="recipient_tin" />
+                                </group>
+                            </form>
+                        </field>
+                    </group>
+                    <group string="Processing History" col="1">
+                        <field name="processing_history_ids" readonly="1" nolabel="1">
+                            <list create="false" edit="false" delete="false">
+                                <field name="occurred_at" />
+                                <field name="operator_id" options="{'no_open': True}" />
+                                <field name="outcome" />
+                                <field name="normative_ruleset" optional="hide" />
+                                <field name="diagnostic" />
+                                <field name="xml_hash" optional="hide" />
+                            </list>
+                            <form
+                                create="false"
+                                edit="false"
+                                delete="false"
+                                duplicate="false"
+                            >
+                                <group>
+                                    <field name="occurred_at" />
+                                    <field
+                                        name="operator_id"
+                                        options="{'no_open': True}"
+                                    />
+                                    <field name="outcome" />
+                                    <field name="normative_ruleset" />
+                                    <field name="normative_manifest_hash" />
+                                    <field
+                                        name="xml_hash"
+                                        class="text-wrap text-break"
+                                    />
+                                    <field name="diagnostic" />
+                                    <field name="validation_report_hash" />
+                                    <field name="validation_report" />
+                                </group>
+                            </form>
+                        </field>
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+    <record id="edi_inbox_list" model="ir.ui.view">
+        <field name="name">l10n_ae.edi.inbox.list</field>
+        <field name="model">l10n_ae.edi.inbox</field>
+        <field name="arch" type="xml">
+            <list
+                create="false"
+                edit="false"
+                delete="false"
+                decoration-warning="state == 'review'"
+            >
+                <field name="remote_id" />
+                <field name="company_id" groups="base.group_multi_company" />
+                <field name="binding_id" />
+                <field name="received_at" />
+                <field name="state" />
+                <field name="move_id" />
+            </list>
+        </field>
+    </record>
+    <record id="edi_inbox_search" model="ir.ui.view">
+        <field name="name">l10n_ae.edi.inbox.search</field>
+        <field name="model">l10n_ae.edi.inbox</field>
+        <field name="arch" type="xml">
+            <search string="Received UAE Documents">
+                <field name="remote_id" />
+                <field name="binding_id" />
+                <field name="company_id" groups="base.group_multi_company" />
+                <field name="received_at" />
+                <filter
+                    name="review"
+                    string="Requires Review"
+                    domain="[('state', '=', 'review')]"
+                />
+                <separator />
+                <filter
+                    name="identity_conflict"
+                    string="Remote ID Conflict"
+                    domain="[('identity_conflict', '=', True)]"
+                />
+                <separator />
+                <filter
+                    name="ingestion_conflict"
+                    string="Delivery Event Conflict"
+                    domain="[('ingestion_conflict', '=', True)]"
+                />
+                <group>
+                    <filter
+                        name="group_binding"
+                        string="ASP Binding"
+                        context="{'group_by': 'binding_id'}"
+                    />
+                    <filter
+                        name="group_company"
+                        string="Company"
+                        context="{'group_by': 'company_id'}"
+                        groups="base.group_multi_company"
+                    />
+                </group>
+            </search>
+        </field>
+    </record>
+    <record id="edi_inbox_action" model="ir.actions.act_window">
+        <field name="name">Received UAE Documents</field>
+        <field name="res_model">l10n_ae.edi.inbox</field>
+        <field name="view_mode">list,form</field>
+        <field name="search_view_id" ref="edi_inbox_search" />
+    </record>
+    <menuitem
+        id="edi_inbox_menu"
+        name="Received UAE Documents"
+        parent="account.menu_finance_payables"
+        action="edi_inbox_action"
+        sequence="30"
+        groups="account.group_account_invoice,account.group_account_readonly"
+    />
+</odoo>
