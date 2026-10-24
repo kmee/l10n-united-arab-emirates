@@ -1,0 +1,311 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<odoo>
+    <record id="edi_incident_form" model="ir.ui.view">
+        <field name="name">l10n_ae.edi.incident.form</field>
+        <field name="model">l10n_ae.edi.incident</field>
+        <field name="arch" type="xml">
+            <form string="UAE Compliance Incident" duplicate="false">
+                <header>
+                    <button
+                        name="action_record_fta_confirmation"
+                        type="object"
+                        string="Record Original FTA Confirmation"
+                        groups="account.group_account_manager"
+                        invisible="state != 'draft' or incident_kind != 'registration_change' or fta_confirmation_ids"
+                    />
+                    <button
+                        name="action_review_impact"
+                        type="object"
+                        string="Review Affected Documents"
+                        groups="account.group_account_manager"
+                        invisible="state != 'open' or incident_kind != 'system_failure'"
+                    />
+                    <button
+                        name="action_review_restoration"
+                        type="object"
+                        string="Review Service Restoration"
+                        groups="account.group_account_manager"
+                        invisible="state != 'open' or incident_kind != 'system_failure'"
+                    />
+                    <button
+                        name="action_open"
+                        type="object"
+                        string="Open Reviewed Incident"
+                        class="btn-primary"
+                        groups="account.group_account_manager"
+                        invisible="state != 'draft'"
+                    />
+                    <field name="state" widget="statusbar" readonly="1" />
+                    <button
+                        name="action_record_notice"
+                        type="object"
+                        string="Record Supplied Notice"
+                        groups="account.group_account_manager"
+                        invisible="state != 'open'"
+                    />
+                </header>
+                <sheet>
+                    <group>
+                        <field name="name" readonly="state == 'open'" />
+                        <field
+                            name="incident_kind"
+                            readonly="state == 'open' or fta_confirmation_ids"
+                        />
+                        <field
+                            name="company_id"
+                            readonly="1"
+                            options="{'no_create': True, 'no_open': True}"
+                        />
+                        <field
+                            name="affected_roles"
+                            readonly="state == 'open'"
+                            invisible="incident_kind != 'system_failure'"
+                        />
+                        <field
+                            name="occurrence_at"
+                            readonly="state == 'open'"
+                            invisible="incident_kind != 'system_failure'"
+                        />
+                        <field
+                            name="detected_at"
+                            readonly="state == 'open'"
+                            invisible="incident_kind != 'system_failure'"
+                        />
+                        <field
+                            name="fta_confirmation_received_at"
+                            readonly="state == 'open' or fta_confirmation_ids"
+                            invisible="incident_kind != 'registration_change'"
+                        />
+                        <field
+                            name="fta_confirmation_reference"
+                            readonly="state == 'open' or fta_confirmation_ids"
+                            invisible="incident_kind != 'registration_change'"
+                        />
+                        <field name="reason" readonly="state == 'open'" />
+                        <field
+                            name="responsible_id"
+                            readonly="state == 'open'"
+                            options="{'no_create': True, 'no_open': True}"
+                            domain="[('active', '=', True), ('share', '=', False), ('company_ids', 'in', [company_id])]"
+                        />
+                    </group>
+                    <p class="text-muted">
+                        Times are shown in your Odoo time zone. Deadlines use the legal event date in Asia/Dubai: failure occurrence or receipt of the FTA registration confirmation.
+                    </p>
+                    <p class="text-muted" invisible="state != 'draft'">
+                        Select a reviewed calendar version before opening. Typed calendar details alone do not approve a version.
+                    </p>
+                    <p
+                        class="text-muted"
+                        invisible="state != 'open' or calendar_version_id"
+                    >
+                        This historical incident retains its reviewed inline calendar. Its deadline and opening history are preserved; no calendar version was assigned retroactively.
+                    </p>
+                    <group string="Reviewed UAE Calendar">
+                        <field
+                            name="calendar_version_id"
+                            readonly="state == 'open'"
+                            domain="[('company_id', '=', company_id), ('state', '=', 'approved')]"
+                            options="{'no_create': True}"
+                        />
+                        <field
+                            name="calendar_source_sha256"
+                            readonly="1"
+                            invisible="not calendar_version_id"
+                        />
+                        <field
+                            name="calendar_start"
+                            readonly="state == 'open' or calendar_version_id"
+                        />
+                        <field
+                            name="calendar_end"
+                            readonly="state == 'open' or calendar_version_id"
+                        />
+                        <field
+                            name="calendar_holiday_dates"
+                            string="Federal Holiday Dates"
+                            placeholder="One ISO date (YYYY-MM-DD) per line"
+                            readonly="state == 'open' or calendar_version_id"
+                        />
+                        <field
+                            name="calendar_source"
+                            readonly="state == 'open' or calendar_version_id"
+                        />
+                        <field
+                            name="calendar_version"
+                            readonly="state == 'open' or calendar_version_id"
+                        />
+                        <field name="source_reference" readonly="state == 'open'" />
+                        <field name="review_note" readonly="state == 'open'" />
+                        <field
+                            name="timezone"
+                            string="Deadline Time Zone"
+                            readonly="1"
+                        />
+                        <field name="notification_due_date" readonly="1" />
+                    </group>
+                    <group string="Incident History">
+                        <field
+                            name="opened_by_id"
+                            readonly="1"
+                            options="{'no_create': True, 'no_open': True}"
+                        />
+                        <field name="opened_at" readonly="1" />
+                    </group>
+                    <p class="text-muted">
+                        Opening a reviewed incident schedules one internal reminder for its responsible user. The reminder records an internal action; it does not confirm that a notification was delivered or acknowledged.
+                    </p>
+                    <group string="Supplied Notice Evidence">
+                        <field name="notice_ids" nolabel="1" readonly="1">
+                            <list create="false" edit="false" delete="false">
+                                <field name="notice_purpose" />
+                                <field name="evidence_origin" />
+                                <field name="sender_role" />
+                                <field name="taxpayer_roles" />
+                                <field name="recipient_role" />
+                                <field name="sent_at" />
+                                <field name="external_reference" />
+                                <field name="recorded_by_id" />
+                                <field name="recorded_at" />
+                            </list>
+                        </field>
+                    </group>
+                    <group
+                        string="Original FTA Confirmation"
+                        invisible="incident_kind != 'registration_change'"
+                    >
+                        <field name="fta_confirmation_ids" nolabel="1" readonly="1">
+                            <list create="false" edit="false" delete="false">
+                                <field name="evidence_origin" />
+                                <field name="received_at" />
+                                <field name="external_reference" />
+                                <field name="document_filename" />
+                                <field name="document_sha256" />
+                                <field name="recorded_by_id" />
+                                <field name="recorded_at" />
+                            </list>
+                            <form
+                                string="Original FTA Confirmation"
+                                create="false"
+                                edit="false"
+                                delete="false"
+                            >
+                                <group>
+                                    <field name="evidence_origin" />
+                                    <field name="received_at" />
+                                    <field name="external_reference" />
+                                    <field name="source_reference" />
+                                    <field name="review_note" />
+                                    <field name="document_filename" />
+                                    <field
+                                        name="document"
+                                        filename="document_filename"
+                                    />
+                                    <field name="document_sha256" />
+                                    <field name="recorded_by_id" />
+                                    <field name="recorded_at" />
+                                </group>
+                            </form>
+                        </field>
+                    </group>
+                    <group
+                        string="Recovery Review"
+                        invisible="state != 'open' or incident_kind != 'system_failure'"
+                    >
+                        <field name="restoration_reviewed" readonly="1" />
+                        <field name="affected_document_count" readonly="1" />
+                        <field name="pending_submission_count" readonly="1" />
+                        <field name="pending_confirmation_count" readonly="1" />
+                    </group>
+                    <p
+                        class="text-muted"
+                        invisible="state != 'open' or incident_kind != 'system_failure'"
+                    >
+                        This overview covers reviewed affected documents. Restored service does not confirm delivery or tax reporting. Refresh the form after queue reconciliation to review the current results.
+                    </p>
+                    <field
+                        name="affected_transmission_ids"
+                        readonly="1"
+                        invisible="state != 'open' or incident_kind != 'system_failure'"
+                    >
+                        <list create="false" edit="false" delete="false">
+                            <field name="move_id" />
+                            <field name="submission_state" />
+                            <field name="confirmation_state" />
+                            <field name="validation_c2_state" optional="show" />
+                            <field name="delivery_c3_state" optional="show" />
+                            <field name="reporting_c2_state" optional="show" />
+                            <field name="reporting_c3_state" optional="show" />
+                            <field name="next_attempt_at" optional="show" />
+                            <field name="dispatch_review_required" optional="show" />
+                            <field name="event_review_required" optional="hide" />
+                            <field name="binding_id" optional="hide" />
+                            <field name="idempotency_key" optional="hide" />
+                        </list>
+                    </field>
+                    <group
+                        string="Reviewed Impact Batches"
+                        invisible="state != 'open' or incident_kind != 'system_failure'"
+                    >
+                        <field name="impact_ids" readonly="1" nolabel="1">
+                            <list create="false" edit="false" delete="false">
+                                <field name="source_reference" />
+                                <field name="review_note" />
+                                <field name="recorded_by_id" />
+                                <field name="recorded_at" />
+                            </list>
+                        </field>
+                    </group>
+                    <group
+                        string="Service Restoration Reviews"
+                        invisible="state != 'open' or incident_kind != 'system_failure'"
+                    >
+                        <field name="restoration_ids" readonly="1" nolabel="1">
+                            <list create="false" edit="false" delete="false">
+                                <field name="evidence_origin" />
+                                <field name="restored_at" />
+                                <field name="source_reference" />
+                                <field name="recorded_by_id" />
+                                <field name="recorded_at" />
+                            </list>
+                        </field>
+                    </group>
+                </sheet>
+                <chatter />
+            </form>
+        </field>
+    </record>
+    <record id="edi_incident_list" model="ir.ui.view">
+        <field name="name">l10n_ae.edi.incident.list</field>
+        <field name="model">l10n_ae.edi.incident</field>
+        <field name="arch" type="xml">
+            <list>
+                <field name="name" />
+                <field name="incident_kind" />
+                <field
+                    name="company_id"
+                    options="{'no_create': True, 'no_open': True}"
+                />
+                <field name="state" />
+                <field name="notification_due_date" />
+                <field
+                    name="responsible_id"
+                    options="{'no_create': True, 'no_open': True}"
+                />
+                <field name="affected_roles" />
+            </list>
+        </field>
+    </record>
+    <record id="edi_incident_action" model="ir.actions.act_window">
+        <field name="name">UAE Compliance Incidents</field>
+        <field name="res_model">l10n_ae.edi.incident</field>
+        <field name="view_mode">list,form</field>
+    </record>
+    <menuitem
+        id="edi_incident_menu"
+        name="UAE Compliance Incidents"
+        parent="account.menu_finance_configuration"
+        action="edi_incident_action"
+        groups="account.group_account_manager"
+    />
+</odoo>

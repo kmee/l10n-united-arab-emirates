@@ -1,0 +1,212 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<odoo>
+    <record id="edi_retention_form" model="ir.ui.view">
+        <field name="name">l10n_ae.edi.retention.form</field>
+        <field name="model">l10n_ae.edi.retention</field>
+        <field name="arch" type="xml">
+            <form string="UAE Retention Obligation" duplicate="false">
+                <header>
+                    <button
+                        name="action_approve"
+                        type="object"
+                        string="Approve Reviewed Basis"
+                        class="btn-primary"
+                        groups="account.group_account_manager"
+                        invisible="state != 'draft'"
+                    />
+                    <button
+                        name="action_open_hold"
+                        type="object"
+                        string="Place Hold"
+                        groups="account.group_account_manager"
+                        invisible="state != 'approved'"
+                    />
+                    <button
+                        name="action_assess_original"
+                        type="object"
+                        string="Assess Original"
+                    />
+                    <field name="state" widget="statusbar" />
+                </header>
+                <sheet>
+                    <group>
+                        <field name="name" readonly="state == 'approved'" />
+                        <field name="company_id" options="{'no_open': True}" />
+                        <field
+                            name="transmission_id"
+                            domain="[('company_id', '=', company_id)]"
+                            required="1"
+                            readonly="state == 'approved'"
+                            options="{'no_create': True, 'no_open': True}"
+                        />
+                        <field name="record_class" readonly="state == 'approved'" />
+                        <field name="tax_purpose" readonly="state == 'approved'" />
+                        <field name="anchor_kind" readonly="state == 'approved'" />
+                        <field name="period_start" readonly="state == 'approved'" />
+                        <field name="anchor_date" readonly="state == 'approved'" />
+                        <field name="retention_years" readonly="state == 'approved'" />
+                        <field name="extended_until" readonly="state == 'approved'" />
+                    </group>
+                    <group string="Reviewed Basis">
+                        <field name="source_reference" readonly="state == 'approved'" />
+                        <field name="policy_version" readonly="state == 'approved'" />
+                        <field name="review_note" readonly="state == 'approved'" />
+                    </group>
+                    <group string="Approval History">
+                        <field name="approved_by_id" options="{'no_open': True}" />
+                        <field name="approved_at" />
+                        <field name="retain_until" />
+                    </group>
+                    <group string="Hold History">
+                        <field name="hold_ids" nolabel="1">
+                            <list create="false" edit="false" delete="false">
+                                <field name="reason" />
+                                <field name="source_reference" />
+                                <field name="state" />
+                                <field
+                                    name="placed_by_id"
+                                    options="{'no_open': True}"
+                                />
+                                <field name="placed_at" />
+                                <field
+                                    name="released_by_id"
+                                    options="{'no_open': True}"
+                                />
+                                <field name="released_at" />
+                                <field name="release_reason" />
+                                <button
+                                    name="action_open_release"
+                                    type="object"
+                                    string="Release Hold"
+                                    groups="account.group_account_manager"
+                                    invisible="state != 'active'"
+                                />
+                            </list>
+                        </field>
+                    </group>
+                    <p
+                        class="text-muted"
+                    >Classification does not approve invoice content. An expired interval permits disposition review only; it does not authorize deletion.</p>
+                </sheet>
+            </form>
+        </field>
+    </record>
+    <record id="edi_retention_list" model="ir.ui.view">
+        <field name="name">l10n_ae.edi.retention.list</field>
+        <field name="model">l10n_ae.edi.retention</field>
+        <field name="arch" type="xml">
+            <list>
+                <field name="name" />
+                <field name="company_id" />
+                <field name="tax_purpose" />
+                <field name="state" />
+                <field name="retain_until" />
+            </list>
+        </field>
+    </record>
+    <record id="edi_retention_action" model="ir.actions.act_window">
+        <field name="name">UAE Retention Obligations</field>
+        <field name="res_model">l10n_ae.edi.retention</field>
+        <field name="view_mode">list,form</field>
+    </record>
+    <menuitem
+        id="edi_retention_menu"
+        name="UAE Retention Obligations"
+        parent="account.menu_finance_configuration"
+        action="edi_retention_action"
+        groups="account.group_account_manager"
+        sequence="92"
+    />
+    <record id="edi_audit_retention_list" model="ir.ui.view">
+        <field name="name">l10n_ae.edi.retention.audit.list</field>
+        <field name="model">l10n_ae.edi.retention</field>
+        <field name="inherit_id" ref="edi_retention_list" />
+        <field name="mode">primary</field>
+        <field name="priority" eval="30" />
+        <field name="arch" type="xml">
+            <list position="attributes">
+                <attribute name="create">false</attribute>
+                <attribute name="edit">false</attribute>
+                <attribute name="delete">false</attribute>
+            </list>
+        </field>
+    </record>
+    <record id="edi_audit_retention_form" model="ir.ui.view">
+        <field name="name">l10n_ae.edi.retention.audit.form</field>
+        <field name="model">l10n_ae.edi.retention</field>
+        <field name="inherit_id" ref="edi_retention_form" />
+        <field name="mode">primary</field>
+        <field name="priority" eval="30" />
+        <field name="arch" type="xml">
+            <form position="attributes">
+                <attribute name="create">false</attribute>
+                <attribute name="edit">false</attribute>
+                <attribute name="delete">false</attribute>
+            </form>
+            <field name="name" position="attributes">
+                <attribute name="readonly">1</attribute>
+            </field>
+        </field>
+    </record>
+    <record id="edi_audit_retention_action" model="ir.actions.act_window">
+        <field name="name">Retention Obligations</field>
+        <field name="res_model">l10n_ae.edi.retention</field>
+        <field name="view_mode">list,form</field>
+    </record>
+    <record id="edi_audit_retention_action_list" model="ir.actions.act_window.view">
+        <field name="sequence" eval="1" />
+        <field name="view_mode">list</field>
+        <field name="view_id" ref="edi_audit_retention_list" />
+        <field name="act_window_id" ref="edi_audit_retention_action" />
+    </record>
+    <record id="edi_audit_retention_action_form" model="ir.actions.act_window.view">
+        <field name="sequence" eval="2" />
+        <field name="view_mode">form</field>
+        <field name="view_id" ref="edi_audit_retention_form" />
+        <field name="act_window_id" ref="edi_audit_retention_action" />
+    </record>
+    <menuitem
+        id="edi_audit_retention_menu"
+        name="Retention Obligations"
+        parent="edi_audit_root"
+        action="edi_audit_retention_action"
+        sequence="7"
+    />
+    <record id="edi_retention_hold_form" model="ir.ui.view">
+        <field name="name">l10n_ae.edi.retention.hold.form</field>
+        <field name="model">l10n_ae.edi.retention.hold</field>
+        <field name="arch" type="xml">
+            <form
+                string="UAE Retention Hold History"
+                create="false"
+                edit="false"
+                delete="false"
+                duplicate="false"
+            >
+                <header>
+                    <button
+                        name="action_open_release"
+                        type="object"
+                        string="Release Hold"
+                        groups="account.group_account_manager"
+                        invisible="state != 'active'"
+                    />
+                </header>
+                <sheet>
+                    <group>
+                        <field name="retention_id" options="{'no_open': True}" />
+                        <field name="company_id" options="{'no_open': True}" />
+                        <field name="reason" />
+                        <field name="source_reference" />
+                        <field name="state" />
+                        <field name="placed_by_id" options="{'no_open': True}" />
+                        <field name="placed_at" />
+                        <field name="released_by_id" options="{'no_open': True}" />
+                        <field name="released_at" />
+                        <field name="release_reason" />
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+</odoo>

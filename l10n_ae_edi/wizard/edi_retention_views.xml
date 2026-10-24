@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<odoo>
+    <record id="edi_retention_hold_wizard_form" model="ir.ui.view">
+        <field name="name">l10n_ae.edi.retention.hold.wizard.form</field>
+        <field name="model">l10n_ae.edi.retention.hold.wizard</field>
+        <field name="arch" type="xml">
+            <form string="Place Retention Hold">
+                <group>
+                    <field name="retention_id" options="{'no_open': True}" />
+                    <field name="reason" />
+                    <field name="source_reference" />
+                </group>
+                <footer>
+                    <button
+                        name="action_confirm"
+                        type="object"
+                        string="Place Hold"
+                        class="btn-primary"
+                    />
+                    <button string="Cancel" special="cancel" class="btn-secondary" />
+                </footer>
+            </form>
+        </field>
+    </record>
+    <record id="edi_retention_release_wizard_form" model="ir.ui.view">
+        <field name="name">l10n_ae.edi.retention.release.wizard.form</field>
+        <field name="model">l10n_ae.edi.retention.release.wizard</field>
+        <field name="arch" type="xml">
+            <form string="Release Retention Hold">
+                <group>
+                    <field name="hold_id" options="{'no_open': True}" />
+                    <field name="reason" />
+                </group>
+                <p
+                >The placement record remains unchanged. Release records your account, time and reviewed reason.</p>
+                <footer>
+                    <button
+                        name="action_confirm"
+                        type="object"
+                        string="Release Hold"
+                        class="btn-primary"
+                    />
+                    <button string="Cancel" special="cancel" class="btn-secondary" />
+                </footer>
+            </form>
+        </field>
+    </record>
+</odoo>

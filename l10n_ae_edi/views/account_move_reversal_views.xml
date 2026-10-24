@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<odoo>
+    <record id="account_move_reversal_uae_edi" model="ir.ui.view">
+        <field name="name">account.move.reversal.uae.edi</field>
+        <field name="model">account.move.reversal</field>
+        <field name="inherit_id" ref="account.view_account_move_reversal" />
+        <field name="arch" type="xml">
+            <xpath expr="//field[@name='reason']" position="after">
+                <field name="l10n_ae_credit_reason_applicable" invisible="True" />
+                <field
+                    name="l10n_ae_credit_reason"
+                    invisible="not l10n_ae_credit_reason_applicable"
+                />
+            </xpath>
+        </field>
+    </record>
+</odoo>

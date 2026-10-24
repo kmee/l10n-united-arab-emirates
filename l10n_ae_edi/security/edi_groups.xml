@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<odoo>
+    <record id="privilege_uae_integration" model="res.groups.privilege">
+        <field name="name">UAE Fiscal Evidence</field>
+        <field name="description">Read billing status or audit fiscal evidence.</field>
+        <field name="category_id" ref="base.module_category_accounting" />
+    </record>
+    <record id="privilege_uae_event_receiving" model="res.groups.privilege">
+        <field name="name">UAE Event Receiving</field>
+        <field name="category_id" ref="base.module_category_accounting" />
+    </record>
+    <record id="privilege_uae_controlled_sending" model="res.groups.privilege">
+        <field name="name">UAE Controlled Sending</field>
+        <field name="category_id" ref="base.module_category_accounting" />
+    </record>
+    <record id="group_event_receiver" model="res.groups">
+        <field name="name">Controlled Event Receiver</field>
+        <field name="privilege_id" ref="privilege_uae_event_receiving" />
+        <field name="implied_ids" eval="[(4, ref('base.group_user'))]" />
+        <field
+            name="comment"
+        >Receive authenticated controlled UAE events for authorized companies without accounting or configuration write access.</field>
+    </record>
+    <record id="group_controlled_sender" model="res.groups">
+        <field name="name">Controlled Sender</field>
+        <field name="privilege_id" ref="privilege_uae_controlled_sending" />
+        <field name="implied_ids" eval="[(4, ref('base.group_user'))]" />
+        <field
+            name="comment"
+        >Send committed controlled UAE issues and reconcile their original attempts for authorized companies without accounting or configuration write access.</field>
+    </record>
+    <record id="group_billing_reader" model="res.groups">
+        <field name="name">Billing Status Reader</field>
+        <field name="privilege_id" ref="privilege_uae_integration" />
+        <field name="implied_ids" eval="[(4, ref('base.group_user'))]" />
+        <field
+            name="comment"
+        >Query frozen UAE document status and evidence for authorized companies without accounting, sending or configuration access.</field>
+    </record>
+    <record id="group_fiscal_auditor" model="res.groups">
+        <field name="name">Fiscal Evidence Auditor</field>
+        <field name="privilege_id" ref="privilege_uae_integration" />
+        <field name="implied_ids" eval="[(4, ref('group_billing_reader'))]" />
+        <field
+            name="comment"
+        >Read frozen UAE fiscal evidence for authorized companies without accounting, configuration, sending or processing permissions. Data export requires a separate native permission.</field>
+    </record>
+</odoo>

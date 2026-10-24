@@ -1,0 +1,189 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<odoo>
+    <record id="cbuae_publication_form" model="ir.ui.view">
+        <field name="name">l10n_ae.cbuae.publication.form</field>
+        <field name="model">l10n_ae.cbuae.publication</field>
+        <field name="arch" type="xml">
+            <form string="CBUAE Publication" duplicate="false">
+                <header>
+                    <button
+                        name="action_capture"
+                        type="object"
+                        string="Capture Dated Publication"
+                        class="btn-primary"
+                        groups="account.group_account_manager"
+                        invisible="state != 'draft'"
+                    />
+                    <field name="state" widget="statusbar" readonly="1" />
+                </header>
+                <sheet>
+                    <group>
+                        <field name="company_id" readonly="1" />
+                        <field name="requested_date" readonly="state != 'draft'" />
+                        <field name="publication_date" readonly="1" />
+                        <field name="publication_stamp" readonly="1" />
+                        <field
+                            name="diagnostic"
+                            readonly="1"
+                            invisible="not diagnostic"
+                        />
+                    </group>
+                    <p class="text-muted">
+                        Capture preserves the source for review. Select an exact label and currency
+                        in CBUAE Rate Reviews before importing a native rate.
+                        Completed acquisitions are preserved; create another publication to retry.
+                    </p>
+                    <notebook>
+                        <page string="Source Original">
+                            <group>
+                                <field name="source_url" widget="url" readonly="1" />
+                                <field name="retrieved_at" readonly="1" />
+                                <field name="http_status" readonly="1" />
+                                <field name="content_type" readonly="1" />
+                                <field name="source_complete" readonly="1" />
+                                <field name="source_sha256" readonly="1" />
+                                <field
+                                    name="source_body"
+                                    string="Original Source"
+                                    widget="binary"
+                                    readonly="1"
+                                />
+                            </group>
+                        </page>
+                        <page string="Source Quotes">
+                            <field name="quotes" readonly="1" />
+                        </page>
+                    </notebook>
+                </sheet>
+            </form>
+        </field>
+    </record>
+    <record id="cbuae_publication_list" model="ir.ui.view">
+        <field name="name">l10n_ae.cbuae.publication.list</field>
+        <field name="model">l10n_ae.cbuae.publication</field>
+        <field name="arch" type="xml">
+            <list default_order="requested_date,id">
+                <field name="requested_date" />
+                <field name="company_id" />
+                <field name="publication_date" />
+                <field name="state" />
+                <field name="source_complete" />
+                <field name="retrieved_at" />
+            </list>
+        </field>
+    </record>
+    <record id="cbuae_publication_action" model="ir.actions.act_window">
+        <field name="name">CBUAE Publications</field>
+        <field name="res_model">l10n_ae.cbuae.publication</field>
+        <field name="view_mode">list,form</field>
+    </record>
+    <menuitem
+        id="cbuae_publication_menu"
+        name="CBUAE Publications"
+        parent="account.menu_finance_configuration"
+        action="cbuae_publication_action"
+        groups="account.group_account_manager"
+    />
+
+    <record id="cbuae_rate_review_form" model="ir.ui.view">
+        <field name="name">l10n_ae.cbuae.rate.review.form</field>
+        <field name="model">l10n_ae.cbuae.rate.review</field>
+        <field name="arch" type="xml">
+            <form string="CBUAE Rate Review" duplicate="false">
+                <header>
+                    <button
+                        name="action_import"
+                        type="object"
+                        string="Import Reviewed Native Rate"
+                        class="btn-primary"
+                        groups="account.group_account_manager"
+                        invisible="native_rate_id"
+                    />
+                </header>
+                <sheet>
+                    <group>
+                        <group string="Review Source and Mapping">
+                            <field name="company_id" readonly="1" />
+                            <field
+                                name="publication_id"
+                                readonly="native_rate_id"
+                                options="{'no_create': True}"
+                                domain="[('state', '=', 'captured'), ('source_complete', '=', True)]"
+                            />
+                            <field name="publication_date" readonly="1" />
+                            <field
+                                name="source_label"
+                                string="Exact CBUAE Label"
+                                readonly="native_rate_id"
+                            />
+                            <field name="selected_quote_literal" readonly="1" />
+                            <field
+                                name="currency_id"
+                                readonly="native_rate_id"
+                                domain="[('active', '=', True)]"
+                                options="{'no_create': True}"
+                            />
+                            <field name="review_note" readonly="native_rate_id" />
+                        </group>
+                        <group string="Preserved Import">
+                            <field
+                                name="native_rate_id"
+                                readonly="1"
+                                options="{'no_create': True}"
+                            />
+                            <field
+                                name="quote_literal"
+                                string="Imported Source Quote"
+                                readonly="1"
+                            />
+                            <field name="reviewed_by" readonly="1" />
+                            <field name="reviewed_at" readonly="1" />
+                            <field name="anchor_rate_id" readonly="1" />
+                            <field name="anchor_rate_literal" readonly="1" />
+                        </group>
+                    </group>
+                    <p
+                        class="text-muted"
+                    >Fiscal applicability still requires review.</p>
+                    <p class="text-muted">
+                        Import creates an immutable native rate dated with the publication.
+                        Existing rates are never overwritten. Review the accounting selection,
+                        supply date and applicable fiscal policy separately.
+                    </p>
+                    <notebook>
+                        <page string="Preserved Import Facts">
+                            <field name="import_facts" readonly="1" />
+                        </page>
+                    </notebook>
+                </sheet>
+            </form>
+        </field>
+    </record>
+    <record id="cbuae_rate_review_list" model="ir.ui.view">
+        <field name="name">l10n_ae.cbuae.rate.review.list</field>
+        <field name="model">l10n_ae.cbuae.rate.review</field>
+        <field name="arch" type="xml">
+            <list>
+                <field name="publication_id" />
+                <field name="company_id" />
+                <field name="source_label" />
+                <field name="currency_id" />
+                <field name="native_rate_id" />
+                <field name="reviewed_by" />
+                <field name="reviewed_at" />
+            </list>
+        </field>
+    </record>
+    <record id="cbuae_rate_review_action" model="ir.actions.act_window">
+        <field name="name">CBUAE Rate Reviews</field>
+        <field name="res_model">l10n_ae.cbuae.rate.review</field>
+        <field name="view_mode">list,form</field>
+    </record>
+    <menuitem
+        id="cbuae_rate_review_menu"
+        name="CBUAE Rate Reviews"
+        parent="account.menu_finance_configuration"
+        action="cbuae_rate_review_action"
+        groups="account.group_account_manager"
+    />
+</odoo>

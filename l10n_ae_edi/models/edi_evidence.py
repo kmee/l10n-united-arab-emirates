@@ -1,0 +1,338 @@
+# Copyright 2026 KMEE
+# License AGPL-3.0 or later (https://www.gnu.org/licenses/agpl).
+import hashlib
+import io
+import json
+import zipfile
+
+from odoo import api, fields, models
+from odoo.exceptions import AccessError, UserError
+from odoo.tools.binary import BinaryBytes
+
+
+def _read_evidence_records(issue, model_name, domain):
+    # Discover complete membership before applying actual-user access. Native
+    # relational reads and ordinary searches can silently omit restricted rows.
+    model = issue.env[model_name]
+    ids = model.sudo().search(domain, order="id").ids
+    records = model.with_user(issue.env.uid).sudo(False).browse(ids)
+    records.check_access("read")
+    if any(record.company_id != issue.company_id for record in records):
+        raise UserError(issue.env._("Fiscal evidence has an inconsistent company."))
+    return records
+
+
+def _evidence_metadata(records, names):
+    records.check_access("read")
+    # No display names or live accounting/configuration are traversed.
+    result = []
+    for record in records.sorted("id"):
+        values = {"id": record.id}
+        for name in names:
+            value = record[name]
+            if record._fields[name].type == "many2one":
+                value = value.id or False
+            elif record._fields[name].type == "datetime":
+                value = fields.Datetime.to_string(value) if value else False
+            values[name] = value
+        result.append(values)
+    return result
+
+
+class UaeEdiEvidence(models.Model):
+    _inherit = "l10n_ae.edi.transmission"
+
+    retention_ids = fields.One2many(
+        "l10n_ae.edi.retention", "transmission_id", readonly=True
+    )
+    evidence_archive = fields.Binary(
+        string="Fiscal Evidence Package",
+        compute="_compute_evidence_archive",
+        compute_sudo=False,
+        attachment=False,
+        groups="base.group_allow_export",
+    )
+    evidence_archive_filename = fields.Char(
+        compute="_compute_evidence_archive_filename", compute_sudo=False
+    )
+
+    def get_retention_status(self, as_of=None):
+        self.ensure_one()
+        return self.env["l10n_ae.edi.retention"]._assess(self, as_of, "transmission_id")
+
+    @api.depends("revision")
+    def _compute_evidence_archive_filename(self):
+        for issue in self:
+            issue.evidence_archive_filename = (
+                f"uae-evidence-{issue.id}-r{issue.revision}.zip"
+            )
+
+    @api.depends(
+        "dispatch_review_required",
+        "dispatch_error_kind",
+        "dispatch_review_at",
+        "dispatch_validation_receipt",
+        "dispatch_policy_receipt",
+        "retention_ids",
+        "retention_ids.write_date",
+        "retention_ids.hold_ids",
+        "retention_ids.hold_ids.write_date",
+    )
+    @api.depends_context("uid", "allowed_company_ids")
+    def _compute_evidence_archive(self):
+        for issue in self:
+            content = issue._build_evidence_archive()
+            issue.evidence_archive = BinaryBytes(content) if content else False
+
+    def write(self, vals):
+        if {"evidence_archive", "evidence_archive_filename"}.intersection(vals):
+            raise UserError(
+                self.env._("Fiscal evidence export projections are readonly.")
+            )
+        return super().write(vals)
+
+    def _build_evidence_archive(self):
+        self.ensure_one()
+        # Apply the actual actor's native rights even to an elevated projection.
+        principal = self.env.user.with_user(self.env.uid).sudo(False)
+        if not principal.active or not principal.has_group("base.group_allow_export"):
+            raise AccessError(self.env._("Native Data Export permission is required."))
+        issue = self.sudo(False)
+        issue.check_access("read")
+        if not issue.xml_content and not issue.xml_hash:
+            # A core-only preparation remains inspectable without inventing XML.
+            return None
+        artifacts = {}
+
+        def preserve(name, content, expected_hash=None):
+            digest = hashlib.sha256(content).hexdigest()
+            if expected_hash is not None and digest != expected_hash:
+                raise UserError(
+                    self.env._("UAE fiscal evidence integrity check failed: %s", name)
+                )
+            artifacts[name] = content
+
+        def preserve_json(name, value):
+            preserve(
+                name,
+                json.dumps(
+                    value, sort_keys=True, ensure_ascii=False, separators=(",", ":")
+                ).encode(),
+            )
+
+        if not issue.xml_content or not issue.xml_hash or not issue.payload_hash:
+            raise UserError(
+                self.env._("Original UAE snapshot and XML are required for export.")
+            )
+        preserve("snapshot.json", issue.payload.encode(), issue.payload_hash)
+        preserve("document.xml", issue.xml_content.encode(), issue.xml_hash)
+        if issue.dispatch_validation_receipt:
+            preserve_json(
+                "local-validation-rejection.json",
+                json.loads(issue.dispatch_validation_receipt),
+            )
+        if issue.dispatch_policy_receipt:
+            preserve_json(
+                "local-conformance-policy.json",
+                json.loads(issue.dispatch_policy_receipt),
+            )
+        attempts = _read_evidence_records(
+            issue,
+            "l10n_ae.edi.attempt",
+            [("transmission_id", "=", issue.id)],
+        )
+        preserve_json(
+            "attempts.json",
+            _evidence_metadata(
+                attempts,
+                [
+                    "company_id",
+                    "transmission_id",
+                    "operation",
+                    "started_at",
+                    "completed_at",
+                    "state",
+                    "error_kind",
+                    "receipt",
+                    "validation_receipt",
+                    "create_uid",
+                ],
+            ),
+        )
+        events = _read_evidence_records(
+            issue,
+            "l10n_ae.edi.event",
+            [("transmission_id", "=", issue.id)],
+        )
+        event_metadata = _evidence_metadata(
+            events,
+            [
+                "company_id",
+                "transmission_id",
+                "binding_id",
+                "event_id",
+                "dimension",
+                "fact_state",
+                "sequence",
+                "occurred_at",
+                "received_at",
+                "outcome",
+                "body_hash",
+            ],
+        )
+        preserve_json("events.json", event_metadata)
+        for event in events.sorted("id"):
+            preserve(
+                f"events/{event.id}.json", event.original_body.encode(), event.body_hash
+            )
+        receipts = _read_evidence_records(
+            issue,
+            "l10n_ae.edi.billing.request",
+            [
+                ("move_id", "=", issue.move_id.id),
+                ("company_id", "=", issue.company_id.id),
+                ("environment", "=", issue.environment),
+                ("process", "=", issue.process),
+                ("origin_system", "=", issue.origin_system),
+                ("origin_document_id", "=", issue.origin_document_id),
+            ],
+        )
+        preserve_json(
+            "billing-receipts.json",
+            _evidence_metadata(
+                receipts,
+                [
+                    "company_id",
+                    "move_id",
+                    "environment",
+                    "process",
+                    "origin_system",
+                    "origin_document_id",
+                    "request_hash",
+                    "create_date",
+                    "create_uid",
+                ],
+            ),
+        )
+        corrections = _read_evidence_records(
+            issue,
+            "l10n_ae.edi.correction",
+            [
+                ("company_id", "=", issue.company_id.id),
+                "|",
+                ("source_transmission_id", "=", issue.id),
+                ("replacement_transmission_id", "=", issue.id),
+            ],
+        )
+        preserve_json(
+            "corrections.json",
+            _evidence_metadata(
+                corrections,
+                [
+                    "company_id",
+                    "move_id",
+                    "source_transmission_id",
+                    "replacement_transmission_id",
+                    "reason",
+                    "started_by",
+                    "started_at",
+                    "completed_at",
+                    "state",
+                ],
+            ),
+        )
+        optional = {"conventional_html": False, "conventional_pdf": False}
+        if issue.conventional_html_content:
+            if not issue.conventional_html_hash:
+                raise UserError(
+                    self.env._("The preserved invoice presentation has no hash.")
+                )
+            preserve(
+                "conventional.html",
+                issue.conventional_html_content.encode(),
+                issue.conventional_html_hash,
+            )
+            optional["conventional_html"] = True
+        if issue.conventional_pdf_content:
+            if not issue.conventional_pdf_hash:
+                raise UserError(self.env._("The preserved invoice PDF has no hash."))
+            preserve(
+                "conventional.pdf",
+                issue.conventional_pdf_content.content,
+                issue.conventional_pdf_hash,
+            )
+            optional["conventional_pdf"] = True
+        retention = issue.env["l10n_ae.edi.retention"]._evidence_appendix(
+            issue, "transmission_id"
+        )
+        preserve_json("retention.json", retention)
+        identity = {
+            name: issue[name]
+            for name in [
+                "provider",
+                "environment",
+                "process",
+                "origin_system",
+                "origin_document_id",
+                "revision",
+            ]
+        }
+        identity.update(
+            transmission_id=issue.id,
+            company_id=issue.company_id.id,
+            move_id=issue.move_id.id,
+            binding_id=issue.binding_id.id,
+        )
+        manifest = {
+            "format": "kmee-uae-evidence-1",
+            "scope": "issued_revision",
+            "identity": identity,
+            "facts": {
+                name: issue[name]
+                for name in [
+                    "exchange_mode",
+                    "submission_state",
+                    "remote_id",
+                    "validation_c2_state",
+                    "delivery_c3_state",
+                    "reporting_c2_state",
+                    "reporting_c3_state",
+                    "confirmation_state",
+                    "event_review_required",
+                    "dispatch_review_required",
+                    "dispatch_error_kind",
+                ]
+            },
+            "relationships": {
+                "attempts": attempts.sorted("id").ids,
+                "events": events.sorted("id").ids,
+                "billing_receipts": receipts.sorted("id").ids,
+                "local_corrections": corrections.sorted("id").ids,
+                "retention_obligations": [
+                    row["id"] for row in retention["obligations"]
+                ],
+                "retention_holds": [row["id"] for row in retention["holds"]],
+            },
+            "optional_artifacts": optional,
+            "artifacts": {
+                name: {
+                    "sha256": hashlib.sha256(content).hexdigest(),
+                    "size": len(content),
+                }
+                for name, content in sorted(artifacts.items())
+            },
+        }
+        manifest["facts"]["dispatch_review_at"] = (
+            fields.Datetime.to_string(issue.dispatch_review_at)
+            if issue.dispatch_review_at
+            else False
+        )
+        preserve_json("manifest.json", manifest)
+        output = io.BytesIO()
+        with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_STORED) as archive:
+            for name, content in sorted(artifacts.items()):
+                info = zipfile.ZipInfo(name, date_time=(1980, 1, 1, 0, 0, 0))
+                info.create_system = 3
+                info.external_attr = 0o100600 << 16
+                archive.writestr(info, content)
+        return output.getvalue()
