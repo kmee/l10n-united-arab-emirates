@@ -6,10 +6,12 @@ import hashlib
 import io
 import json
 import logging
+import shutil
 import sys
 import uuid
 import zipfile
 from contextlib import closing
+from unittest import skipIf
 
 from lxml import etree
 
@@ -2339,6 +2341,7 @@ class TestUaeInvoiceXmlSource(UaePintTestCommon):
         self.assertEqual(transmission.read(observed_fields)[0], original)
         self.assertEqual((invoice.amount_tax, invoice.amount_total), (5, 105))
 
+    @skipIf(not shutil.which("wkhtmltopdf"), "wkhtmltopdf is not installed")
     def test_buyer98_pdf_preserves_private_original_in_invoice_company(self):
         company = self.env.company
         other_company = self.env["res.company"].create(
