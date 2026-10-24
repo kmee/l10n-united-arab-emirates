@@ -8,7 +8,7 @@
     "category": "Accounting/Localizations",
     "author": "KMEE, Odoo Community Association (OCA)",
     "maintainers": ["mileo"],
-    "website": "https://github.com/kmee/l10n-uae",
+    "website": "https://github.com/kmee/kmee-l10n-uae",
     "license": "AGPL-3",
     "depends": ["l10n_ae", "mail"],
     "data": [

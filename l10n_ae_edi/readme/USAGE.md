@@ -1,12 +1,10 @@
-Install only in an isolated Odoo 20.0 development database. Read the architecture and QA instructions before preparing synthetic documents. In the company's UAE E-Invoicing tab, confirm identity, select a sandbox ASP binding and optionally enable queuing on posting. An explicit invoice binding overrides the company default. The controlled external process sends committed intents; API acceptance does not confirm delivery or FTA reporting. These Alpha modules are not approved for production fiscal transmission.
+Install only in an isolated Odoo 20.0 development database. In the company's UAE E-Invoicing tab, confirm identity, select a sandbox ASP binding and optionally enable queuing on posting. An explicit invoice binding overrides the company default. The controlled external process sends committed intents; API acceptance does not confirm delivery or FTA reporting. These Alpha modules are not approved for production fiscal transmission.
 
 For a separate billing query account, assign **UAE Integration → Billing Status Reader**
 to a plain active internal user with only its permitted companies. The native Odoo20
 JSON2 API provides scoped status, preserved PINT XML and paginated event facts without
 accounting or sending privileges. Preparing an existing posted sandbox invoice is a
-separate operation requiring native Invoice/write permissions. See
-[the billing API contract](https://github.com/kmee/l10n-uae/blob/20.0/docs/controlled-executor.md#billing-api)
-and the PT/EN scenario manuals. Native API keys belong to Odoo; the addon adds no key
+separate operation requiring native Invoice/write permissions. Native API keys belong to Odoo; the addon adds no key
 store or credential fields. Full client creation/callback integration remains pending.
 
 **Fiscal Evidence Auditor** adds read access to transport attempts, original billing
@@ -18,9 +16,7 @@ billing receipts and corrections in read-only views. **Original PINT XML** downl
 the preserved issue bytes after checking their hash; it creates no attachment or send.
 For a permitted export, select the issue and use native **Actions → Export**.
 Company and role revocation apply to subsequent reads, exports and downloads. Full
-archive/retention and customer security acceptance remain required. See scenario21
-in the PT/EN manuals and
-[the audit UI evidence](https://github.com/kmee/l10n-uae/blob/20.0/docs/evidence/fiscal-audit-ui-2026-10-05.md).
+archive/retention and customer security acceptance remain required.
 
 For an outbound self-billed purchase, use a native self-billing purchase journal and
 select a UAE Self-Billing Agreement in the invoice's UAE tab. Accounting managers open **Invoicing → Configuration → UAE Self-Billing Agreements**
@@ -77,11 +73,6 @@ to inspect the preserved document. The document is excluded from subsequent auto
 batch selections while other eligible invoices continue. This records no remote
 attempt or ASP rejection and does not modify the posted invoice or frozen evidence.
 Automatic correction/unblocking and complete operational recovery remain required work.
-
-For prerequisites, UI steps, expected results and error handling, read the repository
-scenario based user manual in
-[English](https://github.com/kmee/l10n-uae/blob/20.0/docs/user/scenarios-en.md)
-or [Português](https://github.com/kmee/l10n-uae/blob/20.0/docs/user/scenarios-pt_BR.md).
 
 For scheduled controlled sending, accounting managers open **UAE Provider Bindings**,
 select the reviewed **Sandbox** binding and enable **Automatic Controlled Dispatch**.

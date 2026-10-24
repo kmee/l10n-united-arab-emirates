@@ -1,1 +1,3 @@
 test-requirements.txt merge=union
+# Primary HTTP response originals must survive checkout without newline conversion.
+l10n_ae_edi/tests/cassettes/cbuae/*.html -text
