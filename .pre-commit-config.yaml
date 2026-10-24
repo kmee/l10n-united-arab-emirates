@@ -56,13 +56,13 @@ repos:
       # update the NOT INSTALLABLE ADDONS section above
       - id: oca-update-pre-commit-excluded-addons
       - id: oca-fix-manifest-website
-        args: ["https://github.com/kmee/kmee-l10n-uae"]
+        args: ["https://github.com/kmee/l10n-united-arab-emirates"]
       - id: oca-gen-addon-readme
         args:
           - --addons-dir=.
           - --branch=20.0
           - --org-name=kmee
-          - --repo-name=kmee-l10n-uae
+          - --repo-name=l10n-united-arab-emirates
           - --if-source-changed
           - --keep-source-digest
           - --convert-fragments-to-markdown

@@ -1,10 +1,10 @@
 
 
-# UAE localization for Odoo
+# United Arab Emirates localization
 <!-- /!\ Non OCA Context : Set here the badge of your runbot / runboat instance. -->
-[![Pre-commit Status](https://github.com/kmee/kmee-l10n-uae/actions/workflows/pre-commit.yml/badge.svg?branch=20.0)](https://github.com/kmee/kmee-l10n-uae/actions/workflows/pre-commit.yml?query=branch%3A20.0)
-[![Build Status](https://github.com/kmee/kmee-l10n-uae/actions/workflows/test.yml/badge.svg?branch=20.0)](https://github.com/kmee/kmee-l10n-uae/actions/workflows/test.yml?query=branch%3A20.0)
-[![codecov](https://codecov.io/gh/kmee/kmee-l10n-uae/branch/20.0/graph/badge.svg)](https://codecov.io/gh/kmee/kmee-l10n-uae)
+[![Pre-commit Status](https://github.com/kmee/l10n-united-arab-emirates/actions/workflows/pre-commit.yml/badge.svg?branch=20.0)](https://github.com/kmee/l10n-united-arab-emirates/actions/workflows/pre-commit.yml?query=branch%3A20.0)
+[![Build Status](https://github.com/kmee/l10n-united-arab-emirates/actions/workflows/test.yml/badge.svg?branch=20.0)](https://github.com/kmee/l10n-united-arab-emirates/actions/workflows/test.yml?query=branch%3A20.0)
+[![codecov](https://codecov.io/gh/kmee/l10n-united-arab-emirates/branch/20.0/graph/badge.svg)](https://codecov.io/gh/kmee/l10n-united-arab-emirates)
 <!-- /!\ Non OCA Context : Set here the badge of your translation instance. -->
 
 <!-- /!\ do not modify above this line -->
