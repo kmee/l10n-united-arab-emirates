@@ -19,9 +19,9 @@ org_slug: kmee
 postgres_image: ''
 rebel_module_groups: []
 repo_description: UAE electronic invoicing and PINT-AE integrations for Odoo.
-repo_name: UAE localization for Odoo
-repo_slug: kmee-l10n-uae
-repo_website: https://github.com/kmee/kmee-l10n-uae
+repo_name: United Arab Emirates localization
+repo_slug: l10n-united-arab-emirates
+repo_website: https://github.com/kmee/l10n-united-arab-emirates
 use_pyproject_toml: true
 use_ruff: true
 
