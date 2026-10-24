@@ -16,9 +16,9 @@ UAE Electronic Invoicing Sales
 .. |badge2| image:: https://img.shields.io/badge/license-AGPL--3-blue.png
     :target: http://www.gnu.org/licenses/agpl-3.0-standalone.html
     :alt: License: AGPL-3
-.. |badge3| image:: https://img.shields.io/badge/github-kmee%2Fl10n--uae-lightgray.png?logo=github
-    :target: https://github.com/kmee/l10n-uae/tree/20.0/l10n_ae_edi_sale
-    :alt: kmee/l10n-uae
+.. |badge3| image:: https://img.shields.io/badge/github-kmee%2Fl10n--united--arab--emirates-lightgray.png?logo=github
+    :target: https://github.com/kmee/l10n-united-arab-emirates/tree/20.0/l10n_ae_edi_sale
+    :alt: kmee/l10n-united-arab-emirates
 
 |badge1| |badge2| |badge3|
 
@@ -90,14 +90,13 @@ subtracted again from the final invoice's payable amount. XML frozen
 before receipt keeps its original declared payment amounts.
 
 The synthetic browser journey creates the order, advance, receipt, final
-and partial credit through native UI actions. See the scenario manuals
-in Portuguese and English under ``docs/user/``. Posted negative
-deduction quantity edits are coordinated with fiscal preparation and
-refused after freezing. Native posted balances are not recalculated;
-accounting discrepancies require review. Other line fields and
-CRUD/link/source races, multiple advances and complete adjustment/FX
-matrices remain pending. Production transport and accredited ASP
-homologation remain unavailable.
+and partial credit through native UI actions. Posted negative deduction
+quantity edits are coordinated with fiscal preparation and refused after
+freezing. Native posted balances are not recalculated; accounting
+discrepancies require review. Other line fields and CRUD/link/source
+races, multiple advances and complete adjustment/FX matrices remain
+pending. Production transport and accredited ASP homologation remain
+unavailable.
 
 Known issues / Roadmap
 ======================
@@ -114,10 +113,10 @@ combinations, together with fiscal ratification, remain pending.
 Bug Tracker
 ===========
 
-Bugs are tracked on `GitHub Issues <https://github.com/kmee/l10n-uae/issues>`_.
+Bugs are tracked on `GitHub Issues <https://github.com/kmee/l10n-united-arab-emirates/issues>`_.
 In case of trouble, please check there if your issue has already been reported.
 If you spotted it first, help us to smash it by providing a detailed and welcomed
-`feedback <https://github.com/kmee/l10n-uae/issues/new?body=module:%20l10n_ae_edi_sale%0Aversion:%2020.0%0A%0A**Steps%20to%20reproduce**%0A-%20...%0A%0A**Current%20behavior**%0A%0A**Expected%20behavior**>`_.
+`feedback <https://github.com/kmee/l10n-united-arab-emirates/issues/new?body=module:%20l10n_ae_edi_sale%0Aversion:%2020.0%0A%0A**Steps%20to%20reproduce**%0A-%20...%0A%0A**Current%20behavior**%0A%0A**Expected%20behavior**>`_.
 
 Do not contact contributors directly about support or help with technical issues.
 
@@ -145,6 +144,6 @@ Current maintainer:
 
 |maintainer-mileo| 
 
-This module is part of the `kmee/l10n-uae <https://github.com/kmee/l10n-uae/tree/20.0/l10n_ae_edi_sale>`_ project on GitHub.
+This module is part of the `kmee/l10n-united-arab-emirates <https://github.com/kmee/l10n-united-arab-emirates/tree/20.0/l10n_ae_edi_sale>`_ project on GitHub.
 
 You are welcome to contribute.

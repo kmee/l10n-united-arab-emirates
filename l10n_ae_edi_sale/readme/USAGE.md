@@ -10,8 +10,7 @@ the advance invoice; it is not subtracted again from the final invoice's payable
 XML frozen before receipt keeps its original declared payment amounts.
 
 The synthetic browser journey creates the order, advance, receipt, final and partial
-credit through native UI actions. See the scenario manuals in Portuguese and English
-under `docs/user/`. Posted negative deduction quantity edits are coordinated with fiscal
+credit through native UI actions. Posted negative deduction quantity edits are coordinated with fiscal
 preparation and refused after freezing. Native posted balances are not recalculated;
 accounting discrepancies require review. Other line fields and CRUD/link/source races,
 multiple advances and complete adjustment/FX matrices remain pending. Production
