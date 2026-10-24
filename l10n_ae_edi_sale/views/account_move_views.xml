@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<odoo>
+    <record id="account_move_form_uae_advance" model="ir.ui.view">
+        <field name="name">account.move.form.uae.advance</field>
+        <field name="model">account.move</field>
+        <field name="inherit_id" ref="l10n_ae_edi.account_move_form_uae_edi" />
+        <field name="arch" type="xml">
+            <xpath expr="//page[@name='uae_edi']" position="inside">
+                <group
+                    string="Taxed Advance References"
+                    invisible="move_type != 'out_invoice' or l10n_ae_received_document"
+                >
+                    <field
+                        name="l10n_ae_advance_reference_summary"
+                        nolabel="1"
+                        readonly="1"
+                    />
+                </group>
+            </xpath>
+        </field>
+    </record>
+</odoo>
