@@ -1,0 +1,624 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<meta name="generator" content="Docutils: https://docutils.sourceforge.io/" />
+<title>UAE Electronic Invoicing</title>
+<style type="text/css">
+
+/*
+:Author: David Goodger (goodger@python.org)
+:Id: $Id: html4css1.css 9511 2024-01-13 09:50:07Z milde $
+:Copyright: This stylesheet has been placed in the public domain.
+
+Default cascading style sheet for the HTML output of Docutils.
+Despite the name, some widely supported CSS2 features are used.
+
+See https://docutils.sourceforge.io/docs/howto/html-stylesheets.html for how to
+customize this style sheet.
+*/
+
+/* used to remove borders from tables and images */
+.borderless, table.borderless td, table.borderless th {
+  border: 0 }
+
+table.borderless td, table.borderless th {
+  /* Override padding for "table.docutils td" with "! important".
+     The right padding separates the table cells. */
+  padding: 0 0.5em 0 0 ! important }
+
+.first {
+  /* Override more specific margin styles with "! important". */
+  margin-top: 0 ! important }
+
+.last, .with-subtitle {
+  margin-bottom: 0 ! important }
+
+.hidden {
+  display: none }
+
+.subscript {
+  vertical-align: sub;
+  font-size: smaller }
+
+.superscript {
+  vertical-align: super;
+  font-size: smaller }
+
+a.toc-backref {
+  text-decoration: none ;
+  color: black }
+
+blockquote.epigraph {
+  margin: 2em 5em ; }
+
+dl.docutils dd {
+  margin-bottom: 0.5em }
+
+object[type="image/svg+xml"], object[type="application/x-shockwave-flash"] {
+  overflow: hidden;
+}
+
+/* Uncomment (and remove this text!) to get bold-faced definition list terms
+dl.docutils dt {
+  font-weight: bold }
+*/
+
+div.abstract {
+  margin: 2em 5em }
+
+div.abstract p.topic-title {
+  font-weight: bold ;
+  text-align: center }
+
+div.admonition, div.attention, div.caution, div.danger, div.error,
+div.hint, div.important, div.note, div.tip, div.warning {
+  margin: 2em ;
+  border: medium outset ;
+  padding: 1em }
+
+div.admonition p.admonition-title, div.hint p.admonition-title,
+div.important p.admonition-title, div.note p.admonition-title,
+div.tip p.admonition-title {
+  font-weight: bold ;
+  font-family: sans-serif }
+
+div.attention p.admonition-title, div.caution p.admonition-title,
+div.danger p.admonition-title, div.error p.admonition-title,
+div.warning p.admonition-title, .code .error {
+  color: red ;
+  font-weight: bold ;
+  font-family: sans-serif }
+
+/* Uncomment (and remove this text!) to get reduced vertical space in
+   compound paragraphs.
+div.compound .compound-first, div.compound .compound-middle {
+  margin-bottom: 0.5em }
+
+div.compound .compound-last, div.compound .compound-middle {
+  margin-top: 0.5em }
+*/
+
+div.dedication {
+  margin: 2em 5em ;
+  text-align: center ;
+  font-style: italic }
+
+div.dedication p.topic-title {
+  font-weight: bold ;
+  font-style: normal }
+
+div.figure {
+  margin-left: 2em ;
+  margin-right: 2em }
+
+div.footer, div.header {
+  clear: both;
+  font-size: smaller }
+
+div.line-block {
+  display: block ;
+  margin-top: 1em ;
+  margin-bottom: 1em }
+
+div.line-block div.line-block {
+  margin-top: 0 ;
+  margin-bottom: 0 ;
+  margin-left: 1.5em }
+
+div.sidebar {
+  margin: 0 0 0.5em 1em ;
+  border: medium outset ;
+  padding: 1em ;
+  background-color: #ffffee ;
+  width: 40% ;
+  float: right ;
+  clear: right }
+
+div.sidebar p.rubric {
+  font-family: sans-serif ;
+  font-size: medium }
+
+div.system-messages {
+  margin: 5em }
+
+div.system-messages h1 {
+  color: red }
+
+div.system-message {
+  border: medium outset ;
+  padding: 1em }
+
+div.system-message p.system-message-title {
+  color: red ;
+  font-weight: bold }
+
+div.topic {
+  margin: 2em }
+
+h1.section-subtitle, h2.section-subtitle, h3.section-subtitle,
+h4.section-subtitle, h5.section-subtitle, h6.section-subtitle {
+  margin-top: 0.4em }
+
+h1.title {
+  text-align: center }
+
+h2.subtitle {
+  text-align: center }
+
+hr.docutils {
+  width: 75% }
+
+img.align-left, .figure.align-left, object.align-left, table.align-left {
+  clear: left ;
+  float: left ;
+  margin-right: 1em }
+
+img.align-right, .figure.align-right, object.align-right, table.align-right {
+  clear: right ;
+  float: right ;
+  margin-left: 1em }
+
+img.align-center, .figure.align-center, object.align-center {
+  display: block;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+table.align-center {
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.align-left {
+  text-align: left }
+
+.align-center {
+  clear: both ;
+  text-align: center }
+
+.align-right {
+  text-align: right }
+
+/* reset inner alignment in figures */
+div.align-right {
+  text-align: inherit }
+
+/* div.align-center * { */
+/*   text-align: left } */
+
+.align-top    {
+  vertical-align: top }
+
+.align-middle {
+  vertical-align: middle }
+
+.align-bottom {
+  vertical-align: bottom }
+
+ol.simple, ul.simple {
+  margin-bottom: 1em }
+
+ol.arabic {
+  list-style: decimal }
+
+ol.loweralpha {
+  list-style: lower-alpha }
+
+ol.upperalpha {
+  list-style: upper-alpha }
+
+ol.lowerroman {
+  list-style: lower-roman }
+
+ol.upperroman {
+  list-style: upper-roman }
+
+p.attribution {
+  text-align: right ;
+  margin-left: 50% }
+
+p.caption {
+  font-style: italic }
+
+p.credits {
+  font-style: italic ;
+  font-size: smaller }
+
+p.label {
+  white-space: nowrap }
+
+p.rubric {
+  font-weight: bold ;
+  font-size: larger ;
+  color: maroon ;
+  text-align: center }
+
+p.sidebar-title {
+  font-family: sans-serif ;
+  font-weight: bold ;
+  font-size: larger }
+
+p.sidebar-subtitle {
+  font-family: sans-serif ;
+  font-weight: bold }
+
+p.topic-title {
+  font-weight: bold }
+
+pre.address {
+  margin-bottom: 0 ;
+  margin-top: 0 ;
+  font: inherit }
+
+pre.literal-block, pre.doctest-block, pre.math, pre.code {
+  margin-left: 2em ;
+  margin-right: 2em }
+
+pre.code .ln { color: gray; } /* line numbers */
+pre.code, code { background-color: #eeeeee }
+pre.code .comment, code .comment { color: #5C6576 }
+pre.code .keyword, code .keyword { color: #3B0D06; font-weight: bold }
+pre.code .literal.string, code .literal.string { color: #0C5404 }
+pre.code .name.builtin, code .name.builtin { color: #352B84 }
+pre.code .deleted, code .deleted { background-color: #DEB0A1}
+pre.code .inserted, code .inserted { background-color: #A3D289}
+
+span.classifier {
+  font-family: sans-serif ;
+  font-style: oblique }
+
+span.classifier-delimiter {
+  font-family: sans-serif ;
+  font-weight: bold }
+
+span.interpreted {
+  font-family: sans-serif }
+
+span.option {
+  white-space: nowrap }
+
+span.pre {
+  white-space: pre }
+
+span.problematic, pre.problematic {
+  color: red }
+
+span.section-subtitle {
+  /* font-size relative to parent (h1..h6 element) */
+  font-size: 80% }
+
+table.citation {
+  border-left: solid 1px gray;
+  margin-left: 1px }
+
+table.docinfo {
+  margin: 2em 4em }
+
+table.docutils {
+  margin-top: 0.5em ;
+  margin-bottom: 0.5em }
+
+table.footnote {
+  border-left: solid 1px black;
+  margin-left: 1px }
+
+table.docutils td, table.docutils th,
+table.docinfo td, table.docinfo th {
+  padding-left: 0.5em ;
+  padding-right: 0.5em ;
+  vertical-align: top }
+
+table.docutils th.field-name, table.docinfo th.docinfo-name {
+  font-weight: bold ;
+  text-align: left ;
+  white-space: nowrap ;
+  padding-left: 0 }
+
+/* "booktabs" style (no vertical lines) */
+table.docutils.booktabs {
+  border: 0px;
+  border-top: 2px solid;
+  border-bottom: 2px solid;
+  border-collapse: collapse;
+}
+table.docutils.booktabs * {
+  border: 0px;
+}
+table.docutils.booktabs th {
+  border-bottom: thin solid;
+  text-align: left;
+}
+
+h1 tt.docutils, h2 tt.docutils, h3 tt.docutils,
+h4 tt.docutils, h5 tt.docutils, h6 tt.docutils {
+  font-size: 100% }
+
+ul.auto-toc {
+  list-style-type: none }
+
+</style>
+</head>
+<body>
+<div class="document" id="uae-electronic-invoicing">
+<h1 class="title">UAE Electronic Invoicing</h1>
+
+<!-- !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!! This file is generated by oca-gen-addon-readme !!
+!! changes will be overwritten.                   !!
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!! source digest: sha256:2b2bb092a3687c56552e29996005cb00605fca96cda94aa2f50f0e4e6096a53b
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! -->
+<p><a class="reference external image-reference" href="https://odoo-community.org/page/development-status"><img alt="Alpha" src="https://img.shields.io/badge/maturity-Alpha-red.png" /></a> <a class="reference external image-reference" href="http://www.gnu.org/licenses/agpl-3.0-standalone.html"><img alt="License: AGPL-3" src="https://img.shields.io/badge/license-AGPL--3-blue.png" /></a> <a class="reference external image-reference" href="https://github.com/kmee/kmee-l10n-uae/tree/20.0/l10n_ae_edi"><img alt="kmee/kmee-l10n-uae" src="https://img.shields.io/badge/github-kmee%2Fkmee--l10n--uae-lightgray.png?logo=github" /></a></p>
+<p>Validate confirmed company TINs and Free Zone beneficiary presence.
+Opt-in company policy creates a frozen accounting snapshot and
+transmission in the native posting transaction. A separate controlled
+worker validates PINT, persists attempts and sends to a loopback mock
+after commit. Authenticated controlled events preserve independent
+validation, delivery and tax-report evidence. Production preparation is
+disabled; the mock contract is KMEE’s own.</p>
+<p>Authenticated fiscal evidence packages include reviewed retention
+obligations and the complete hold/release history in a versioned
+appendix. Native read and Data Export rights apply to every linked row;
+restricted history refuses export. Classification does not change the
+original fiscal bytes or authorize deletion.</p>
+<p>Reviewed document deadlines retain an explicit rule, event, calendar,
+dates and owner. Native read-only assessments distinguish API receipts
+from complete confirmations. Internal reminders use the current UAE
+date, native activities and a bounded scheduled action; duplicate
+requests preserve one reminder. A record requiring review does not block
+other eligible reminders. No legal date is inferred from the invoice
+date and no internal reminder dispatches or reports a fiscal document.</p>
+<div class="admonition important">
+<p class="first admonition-title">Important</p>
+<p class="last">This is an alpha version, the data model and design can change at any time without warning.
+Only for development or testing purpose, do not use in production.
+<a class="reference external" href="https://odoo-community.org/page/development-status">More details on development status</a></p>
+</div>
+<p><strong>Table of contents</strong></p>
+<div class="contents local topic" id="contents">
+<ul class="simple">
+<li><a class="reference internal" href="#usage" id="toc-entry-1">Usage</a></li>
+<li><a class="reference internal" href="#known-issues-roadmap" id="toc-entry-2">Known issues / Roadmap</a></li>
+<li><a class="reference internal" href="#bug-tracker" id="toc-entry-3">Bug Tracker</a></li>
+<li><a class="reference internal" href="#credits" id="toc-entry-4">Credits</a><ul>
+<li><a class="reference internal" href="#authors" id="toc-entry-5">Authors</a></li>
+<li><a class="reference internal" href="#contributors" id="toc-entry-6">Contributors</a></li>
+<li><a class="reference internal" href="#maintainers" id="toc-entry-7">Maintainers</a></li>
+</ul>
+</li>
+</ul>
+</div>
+<div class="section" id="usage">
+<h1><a class="toc-backref" href="#toc-entry-1">Usage</a></h1>
+<p>Install only in an isolated Odoo 20.0 development database. In the
+company’s UAE E-Invoicing tab, confirm identity, select a sandbox ASP
+binding and optionally enable queuing on posting. An explicit invoice
+binding overrides the company default. The controlled external process
+sends committed intents; API acceptance does not confirm delivery or FTA
+reporting. These Alpha modules are not approved for production fiscal
+transmission.</p>
+<p>For a separate billing query account, assign <strong>UAE Integration → Billing
+Status Reader</strong> to a plain active internal user with only its permitted
+companies. The native Odoo20 JSON2 API provides scoped status, preserved
+PINT XML and paginated event facts without accounting or sending
+privileges. Preparing an existing posted sandbox invoice is a separate
+operation requiring native Invoice/write permissions. Native API keys
+belong to Odoo; the addon adds no key store or credential fields. Full
+client creation/callback integration remains pending.</p>
+<p><strong>Fiscal Evidence Auditor</strong> adds read access to transport attempts,
+original billing receipts, local correction history and received
+documents. It inherits Billing Status Reader and grants no accounting,
+provider configuration, dispatch or processing rights. Native Data
+Export must be granted separately; internal worker tokens stay
+restricted. Open <strong>UAE Audit</strong> to review issued/received documents,
+attempts, confirmations, billing receipts and corrections in read-only
+views. <strong>Original PINT XML</strong> downloads the preserved issue bytes after
+checking their hash; it creates no attachment or send. For a permitted
+export, select the issue and use native <strong>Actions → Export</strong>. Company
+and role revocation apply to subsequent reads, exports and downloads.
+Full archive/retention and customer security acceptance remain required.</p>
+<p>For an outbound self-billed purchase, use a native self-billing purchase
+journal and select a UAE Self-Billing Agreement in the invoice’s UAE
+tab. Accounting managers open <strong>Invoicing → Configuration → UAE
+Self-Billing Agreements</strong> to maintain buyer-role agreements for the
+company and commercial supplier, including reference, supply scope,
+validity dates and a reference to reviewed supplier onboarding evidence.
+Both parties need UAE VAT TRNs and eligible participant endpoints.
+Missing or expired agreements block automatic posting/queuing. Only tax
+invoices/credit notes are eligible; ordinary purchases and received
+documents do not emit. Invoice389 and credit261 preserve the company as
+buyer issuer, the partner as supplier and the selected agreement in
+immutable transmission evidence. The checks do not query a live VAT or
+ASP registry.</p>
+<p>For incoming buyer-issued self-billing, use a separate agreement with
+local role <strong>Supplier Receiving Self-Billing</strong>, referencing the known
+buyer and reviewed onboarding evidence. Received accounting forms
+display the original agreement reference and process without enabling
+another outbound transmission.</p>
+<p>For an outgoing UAE sale adjustment, select the official <strong>UAE Credit
+Note Reason</strong> in the native <strong>Credit Note</strong> wizard, then use <strong>Reverse</strong>
+to create a draft. Review any partial quantities/prices and original
+reference before checking and posting. The code is also editable in the
+draft’s UAE tab. Free-text reason alone does not satisfy the emission
+check; automatic preparation blocks posting until an official code is
+selected. Received documents and ordinary vendor reversals do not use
+this outbound wizard field.</p>
+<p>For a buyer-issued self-billed purchase adjustment, use the same native
+wizard and review partial lines. The resulting vendor credit retains the
+self-billing journal, official reason and original reference. Select an
+eligible <strong>UAE Self-Billing Agreement</strong> again for its company,
+commercial supplier and date: the wizard does not copy it. Missing
+agreement blocks Check and Prepare before UUID/transmission. With
+automatic preparation enabled, native Post retains posted accounting and
+records Requires Review. Supplier contacts use their commercial entity’s
+agreements. Confirm the purchase fiscal position and line VAT with the
+tax specialist if the expected tax is unavailable.</p>
+<p>For a reviewed commercial sale or credit, select <strong>Commercial Document</strong>
+and the taxes determined by the tax specialist. With the PINT addon
+installed, <strong>IBR-122-AE</strong> blocks standard VAT at <strong>Check UAE Data</strong> and
+<strong>Prepare UAE E-Invoice</strong>. Automatic preparation on <strong>Confirm</strong> retains
+posted accounting and records <strong>Requires Review</strong>, without a
+UUID/transmission. Review the line taxes; the system does not change
+their classification automatically. Formal PINT validation remains
+required. The native credit wizard preserves the commercial category,
+which is protected after preparation.</p>
+<p>For a correction covering several original invoices, create a separate
+customer credit and use <strong>Reviewed Credit Allocations</strong> in its UAE tab.
+Select each posted local original and enter its allocated net/VAT in the
+credit’s currency. The original number/date are preserved; company,
+customer, currency, category and process must match. External originals
+require authentic number/date and <strong>External Original Review Evidence</strong>,
+without a fabricated accounting invoice. Allocation totals must match
+the credit’s own net/VAT. Preparation protects the rows; XML contains
+separate original references, while allocation amounts stay in internal
+evidence. These links do not reconcile accounting balances. Volume
+discount handling remains unresolved.</p>
+<p>If controlled batch validation stops a prepared document locally, its
+UAE tab shows <strong>Local Sending Review</strong>, reason and recording time. Use
+<strong>Validate UAE E-Invoice</strong> to inspect the preserved document. The
+document is excluded from subsequent automatic batch selections while
+other eligible invoices continue. This records no remote attempt or ASP
+rejection and does not modify the posted invoice or frozen evidence.
+Automatic correction/unblocking and complete operational recovery remain
+required work.</p>
+<p>For scheduled controlled sending, accounting managers open <strong>UAE
+Provider Bindings</strong>, select the reviewed <strong>Sandbox</strong> binding and enable
+<strong>Automatic Controlled Dispatch</strong>. Support must configure a native Odoo
+cron worker and protected local API credentials. The default is off;
+production bindings cannot enable it. The native job checks eligible
+committed invoices every minute. Queuing on posting is a separate
+company option. API acceptance leaves fiscal/delivery confirmations
+pending. Missing scheduler configuration leaves the invoice queued; ask
+support to inspect native Scheduled Actions. Archiving prevents new
+submissions but retains reconciliation of existing attempts while
+scheduling stays enabled. Disabling scheduling also stops automatic
+lookup.</p>
+<p>Fiscal Evidence Auditor users with separate native Data Export
+permission can download an issued revision’s <strong>Fiscal Evidence Package</strong>
+from UAE Audit. Its versioned ZIP preserves the snapshot/XML, attempts,
+original events and related billing/correction metadata with a hash
+inventory. Existing preserved conventional files are included without
+rendering. Corrupt originals and partial access are refused. See
+scenario25 in the PT/EN manuals. This audit export does not replace
+backups, retention/holds or a restored-database verification.</p>
+<p>Accounting managers can open <strong>Invoicing → Configuration → UAE Document
+Deadlines</strong> to review an explicit basis, inclusive due date, reminder
+date, responsible user and requested fact for an invoice or credit note.
+Approve the reviewed basis before requesting an activity. <strong>Assess
+Deadline</strong> is read-only and uses the current UAE day; <strong>Schedule
+Internal Reminder</strong> creates one native To-Do when eligible. The hourly
+job checks approved records and isolates records requiring renewed
+owner/access review. API receipt and fiscal confirmations remain
+distinct. Completion of an activity does not reset reminder history. See
+scenario28 in the PT/EN manuals. These internal reminders do not
+determine legal timeliness or notify the FTA; full incident/calendar and
+escalation requirements remain open.</p>
+<p>With native product-manager rights, use <strong>Customers → Products → New</strong>
+and open <strong>UAE Classification</strong>. A service requires a reviewed SAC and
+scheme version; goods require HS, and a reviewed mixed item requires
+both. No classification code or SAC version is supplied automatically.
+Single-variant template fields update that variant; multiple variants
+must be configured individually. Ambiguous template classification
+writes are refused. Select the actual product in invoice lines before
+preparation. Later product edits do not rewrite the prepared payload,
+XML or ledger. See scenario47 in the PT/EN manuals for the service
+journey and its controlled-provider limits.</p>
+<p>For a reviewed <strong>Summary Invoice</strong>, either explicit <strong>Invoice Period
+Start</strong> or <strong>Invoice Period End</strong> owns the period as a unit. Neither is
+filled from accounting dates. If both are absent and native deferred
+line dates are installed, complete dated economic lines can supply the
+enclosing interval. These dates become protected fiscal sources after
+preparation. Other native deferral dates remain ordinary accounting
+data. Due dates and payment installments never supply missing period
+dates. See scenario63 in the PT/EN manuals for the Enterprise journey;
+Community supports explicit reviewed header dates.</p>
+</div>
+<div class="section" id="known-issues-roadmap">
+<h1><a class="toc-backref" href="#toc-entry-2">Known issues / Roadmap</a></h1>
+<p>The integration is under development. The following release gates remain
+open:</p>
+<ul class="simple">
+<li>Complete end-to-end acceptance for sending, authenticated signed-event
+ingress, receiving and self-billing, including scheduler authority and
+company isolation.</li>
+<li>Qualify multi-currency, multiple credit references and advances across
+complete business flows; confirm UUID assignment and correction
+policies with the chosen ASP.</li>
+<li>Complete operational recovery qualification, including bounded
+backoff, batch recovery and reconciliation after interruptions.</li>
+<li>Qualify the remaining security, load, backup/restore (RPO/RTO),
+upgrade/rollback and PINT-AE ruleset transition scenarios on Odoo
+20.0, including Enterprise coexistence.</li>
+<li>Agree accredited ASP API contracts and replace the KMEE-controlled
+ClearTax and Suntech/TCA simulations with documented,
+provider-reviewed adapters. Validate authorized ASP sandbox/pilot
+flows and fiscal reporting before production use; controlled mock
+acceptance is not FTA confirmation.</li>
+<li>Complete and review the English and Brazilian Portuguese user guides
+and site, plus the ten complete training videos by role with visible
+navigation, English narrative captions and no audio narration.</li>
+<li>Complete hosted CI, reproducible release packaging and deployment
+runbooks, then prepare the contribution for community review and a
+proposed OCA umbrella repository.</li>
+</ul>
+<p>Selected passing tests do not by themselves establish complete
+acceptance or production readiness. Public publication and deployment
+require their own readiness review.</p>
+</div>
+<div class="section" id="bug-tracker">
+<h1><a class="toc-backref" href="#toc-entry-3">Bug Tracker</a></h1>
+<p>Bugs are tracked on <a class="reference external" href="https://github.com/kmee/kmee-l10n-uae/issues">GitHub Issues</a>.
+In case of trouble, please check there if your issue has already been reported.
+If you spotted it first, help us to smash it by providing a detailed and welcomed
+<a class="reference external" href="https://github.com/kmee/kmee-l10n-uae/issues/new?body=module:%20l10n_ae_edi%0Aversion:%2020.0%0A%0A**Steps%20to%20reproduce**%0A-%20...%0A%0A**Current%20behavior**%0A%0A**Expected%20behavior**">feedback</a>.</p>
+<p>Do not contact contributors directly about support or help with technical issues.</p>
+</div>
+<div class="section" id="credits">
+<h1><a class="toc-backref" href="#toc-entry-4">Credits</a></h1>
+<div class="section" id="authors">
+<h2><a class="toc-backref" href="#toc-entry-5">Authors</a></h2>
+<ul class="simple">
+<li>KMEE</li>
+</ul>
+</div>
+<div class="section" id="contributors">
+<h2><a class="toc-backref" href="#toc-entry-6">Contributors</a></h2>
+<ul class="simple">
+<li>KMEE<ul>
+<li>Luis Felipe Miléo <a class="reference external" href="mailto:mileo&#64;kmee.com.br">mileo&#64;kmee.com.br</a></li>
+</ul>
+</li>
+</ul>
+</div>
+<div class="section" id="maintainers">
+<h2><a class="toc-backref" href="#toc-entry-7">Maintainers</a></h2>
+<p>Current maintainer:</p>
+<p><a class="reference external image-reference" href="https://github.com/mileo"><img alt="mileo" src="https://github.com/mileo.png?size=40px" /></a></p>
+<p>This module is part of the <a class="reference external" href="https://github.com/kmee/kmee-l10n-uae/tree/20.0/l10n_ae_edi">kmee/kmee-l10n-uae</a> project on GitHub.</p>
+<p>You are welcome to contribute.</p>
+</div>
+</div>
+</div>
+</body>
+</html>

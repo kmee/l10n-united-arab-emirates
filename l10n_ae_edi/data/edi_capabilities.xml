@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<odoo noupdate="1">
+    <record id="capability_submit" model="l10n_ae.edi.capability">
+        <field name="name">Submit an Electronic Document</field>
+        <field name="code">submit</field>
+    </record>
+    <record id="capability_lookup" model="l10n_ae.edi.capability">
+        <field name="name">Reconcile an Existing Submission</field>
+        <field name="code">lookup</field>
+    </record>
+    <record id="capability_report" model="l10n_ae.edi.capability">
+        <field name="name">Retrieve Separate Fiscal Reporting Facts</field>
+        <field name="code">report</field>
+    </record>
+    <record id="capability_receive" model="l10n_ae.edi.capability">
+        <field name="name">Retrieve Incoming Documents</field>
+        <field name="code">receive</field>
+    </record>
+    <record id="capability_billing_invoice" model="l10n_ae.edi.capability">
+        <field name="name">Issue Billing Invoices</field>
+        <field name="code">billing_invoice</field>
+    </record>
+    <record id="capability_billing_credit" model="l10n_ae.edi.capability">
+        <field name="name">Issue Billing Credit Notes</field>
+        <field name="code">billing_credit</field>
+    </record>
+    <record id="capability_selfbilling_invoice" model="l10n_ae.edi.capability">
+        <field name="name">Issue Self-Billed Invoices</field>
+        <field name="code">selfbilling_invoice</field>
+    </record>
+    <record id="capability_selfbilling_credit" model="l10n_ae.edi.capability">
+        <field name="name">Issue Self-Billed Credit Notes</field>
+        <field name="code">selfbilling_credit</field>
+    </record>
+</odoo>

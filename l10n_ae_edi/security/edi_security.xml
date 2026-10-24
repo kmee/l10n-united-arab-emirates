@@ -1,0 +1,222 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<odoo>
+    <record id="cbuae_rate_review_company_rule" model="ir.access">
+        <field name="name">CBUAE native rate review company isolation</field>
+        <field name="model_id" ref="model_l10n_ae_cbuae_rate_review" />
+        <field name="operation">cud</field>
+        <field name="domain">[('company_id', 'in', company_ids)]</field>
+    </record>
+    <record id="cbuae_rate_review_source_read_rule" model="ir.access">
+        <field name="name">CBUAE imported ancestor rate source reading</field>
+        <field name="model_id" ref="model_l10n_ae_cbuae_rate_review" />
+        <field name="operation">r</field>
+        <field
+            name="domain"
+        >['|', ('company_id', 'in', company_ids), '&amp;', ('company_id', 'parent_of', company_ids), ('native_rate_id', '!=', False)]</field>
+    </record>
+    <record id="cbuae_publication_company_rule" model="ir.access">
+        <field name="name">CBUAE publication company isolation</field>
+        <field name="model_id" ref="model_l10n_ae_cbuae_publication" />
+        <field name="operation">cud</field>
+        <field name="domain">[('company_id', 'in', company_ids)]</field>
+    </record>
+    <record id="cbuae_publication_source_read_rule" model="ir.access">
+        <field name="name">CBUAE imported ancestor publication reading</field>
+        <field name="model_id" ref="model_l10n_ae_cbuae_publication" />
+        <field name="operation">r</field>
+        <field
+            name="domain"
+        >['|', ('company_id', 'in', company_ids), '&amp;', ('company_id', 'parent_of', company_ids), ('rate_review_ids.native_rate_id', '!=', False)]</field>
+    </record>
+    <record id="edi_calendar_company_rule" model="ir.access">
+        <field name="name">UAE calendar version company isolation</field>
+        <field name="model_id" ref="model_l10n_ae_edi_calendar" />
+        <field name="operation">crud</field>
+        <field name="domain">[('company_id', 'in', company_ids)]</field>
+    </record>
+    <record id="edi_incident_restoration_company_rule" model="ir.access">
+        <field name="name">UAE reviewed service restoration company isolation</field>
+        <field name="model_id" ref="model_l10n_ae_edi_incident_restoration" />
+        <field name="operation">crud</field>
+        <field name="domain">[('company_id', 'in', company_ids)]</field>
+    </record>
+    <record id="edi_incident_impact_company_rule" model="ir.access">
+        <field name="name">UAE reviewed incident impact company isolation</field>
+        <field name="model_id" ref="model_l10n_ae_edi_incident_impact" />
+        <field name="operation">crud</field>
+        <field name="domain">[('company_id', 'in', company_ids)]</field>
+    </record>
+    <record id="edi_incident_notice_company_rule" model="ir.access">
+        <field name="name">UAE supplied notice company isolation</field>
+        <field name="model_id" ref="model_l10n_ae_edi_incident_notice" />
+        <field name="operation">crud</field>
+        <field name="domain">[('company_id', 'in', company_ids)]</field>
+    </record>
+    <record id="edi_incident_confirmation_company_rule" model="ir.access">
+        <field name="name">UAE supplied FTA confirmation company isolation</field>
+        <field name="model_id" ref="model_l10n_ae_edi_incident_confirmation" />
+        <field name="operation">crud</field>
+        <field name="domain">[('company_id', 'in', company_ids)]</field>
+    </record>
+    <record id="edi_incident_company_rule" model="ir.access">
+        <field name="name">UAE system failure incident company isolation</field>
+        <field name="model_id" ref="model_l10n_ae_edi_incident" />
+        <field name="operation">crud</field>
+        <field name="domain">[('company_id', 'in', company_ids)]</field>
+    </record>
+    <record id="edi_deadline_company_rule" model="ir.access">
+        <field name="name">UAE reviewed deadline company isolation</field>
+        <field name="model_id" ref="model_l10n_ae_edi_deadline" />
+        <field name="operation">crud</field>
+        <field name="domain">[('company_id', 'in', company_ids)]</field>
+    </record>
+    <record id="edi_retention_company_rule" model="ir.access">
+        <field name="name">UAE retention company isolation</field>
+        <field name="model_id" ref="model_l10n_ae_edi_retention" />
+        <field name="operation">cud</field>
+        <field name="domain">[('company_id', 'in', company_ids)]</field>
+    </record>
+    <record id="edi_retention_evidence_read_rule" model="ir.access">
+        <field
+            name="name"
+        >UAE reviewed retention: selected or assigned archived audit evidence</field>
+        <field name="model_id" ref="model_l10n_ae_edi_retention" />
+        <field name="operation">r</field>
+        <field name="domain">
+            ['|', ('company_id', 'in', company_ids), '&amp;',
+            ('company_id.active', '=', False),
+            ('company_id', 'in', user.with_context(active_test=False).company_ids.ids
+            if user.active and user.has_group('l10n_ae_edi.group_fiscal_auditor') else [])]
+        </field>
+    </record>
+    <record id="edi_retention_hold_company_rule" model="ir.access">
+        <field name="name">UAE hold history company isolation</field>
+        <field name="model_id" ref="model_l10n_ae_edi_retention_hold" />
+        <field name="operation">cud</field>
+        <field name="domain">[('company_id', 'in', company_ids)]</field>
+    </record>
+    <record id="edi_retention_hold_evidence_read_rule" model="ir.access">
+        <field
+            name="name"
+        >UAE retained hold history: selected or assigned archived audit evidence</field>
+        <field name="model_id" ref="model_l10n_ae_edi_retention_hold" />
+        <field name="operation">r</field>
+        <field name="domain">
+            ['|', ('company_id', 'in', company_ids), '&amp;',
+            ('company_id.active', '=', False),
+            ('company_id', 'in', user.with_context(active_test=False).company_ids.ids
+            if user.active and user.has_group('l10n_ae_edi.group_fiscal_auditor') else [])]
+        </field>
+    </record>
+    <record id="edi_billing_request_company_rule" model="ir.access">
+        <field name="name">UAE original billing request company isolation</field>
+        <field name="model_id" ref="model_l10n_ae_edi_billing_request" />
+        <field name="operation">cud</field>
+        <field name="domain">[('company_id', 'in', company_ids)]</field>
+    </record>
+    <record id="edi_billing_request_evidence_read_rule" model="ir.access">
+        <field
+            name="name"
+        >UAE selected or assigned archived original billing request evidence</field>
+        <field name="model_id" ref="model_l10n_ae_edi_billing_request" />
+        <field name="operation">r</field>
+        <field name="domain">
+            ['|', ('company_id', 'in', company_ids), '&amp;',
+            ('company_id.active', '=', False),
+            ('company_id', 'in', user.with_context(active_test=False).company_ids.ids
+            if user.active and user.has_group('l10n_ae_edi.group_fiscal_auditor') else [])]
+        </field>
+    </record>
+    <record id="edi_correction_company_rule" model="ir.access">
+        <field name="name">UAE local correction company isolation</field>
+        <field name="model_id" ref="model_l10n_ae_edi_correction" />
+        <field name="operation">cud</field>
+        <field name="domain">[('company_id', 'in', company_ids)]</field>
+    </record>
+    <record id="edi_correction_evidence_read_rule" model="ir.access">
+        <field
+            name="name"
+        >UAE selected or assigned archived local correction evidence</field>
+        <field name="model_id" ref="model_l10n_ae_edi_correction" />
+        <field name="operation">r</field>
+        <field name="domain">
+            ['|', ('company_id', 'in', company_ids), '&amp;',
+            ('company_id.active', '=', False),
+            ('company_id', 'in', user.with_context(active_test=False).company_ids.ids
+            if user.active and user.has_group('l10n_ae_edi.group_fiscal_auditor') else [])]
+        </field>
+    </record>
+    <record id="credit_reference_company_rule" model="ir.access">
+        <field name="name">UAE credit reference company isolation</field>
+        <field name="model_id" ref="model_l10n_ae_credit_reference" />
+        <field name="operation">crud</field>
+        <field name="domain">[('company_id', 'in', company_ids)]</field>
+    </record>
+    <record id="selfbilling_agreement_company_rule" model="ir.access">
+        <field name="name">UAE self-billing agreement company isolation</field>
+        <field name="model_id" ref="model_l10n_ae_selfbilling_agreement" />
+        <field name="operation">crud</field>
+        <field name="domain">[('company_id', 'in', company_ids)]</field>
+    </record>
+    <record id="edi_binding_company_rule" model="ir.access">
+        <field name="name">UAE ASP binding company isolation</field>
+        <field name="model_id" ref="model_l10n_ae_edi_binding" />
+        <field name="operation">crud</field>
+        <field name="domain">[('company_id', 'in', company_ids)]</field>
+    </record>
+    <record id="edi_transmission_company_rule" model="ir.access">
+        <field name="name">UAE frozen invoice company isolation</field>
+        <field name="model_id" ref="model_l10n_ae_edi_transmission" />
+        <field name="operation">cud</field>
+        <field name="domain">[('company_id', 'in', company_ids)]</field>
+    </record>
+    <record id="edi_transmission_evidence_read_rule" model="ir.access">
+        <field name="name">UAE selected or assigned archived audit originals</field>
+        <field name="model_id" ref="model_l10n_ae_edi_transmission" />
+        <field name="operation">r</field>
+        <field name="domain">
+            ['|', ('company_id', 'in', company_ids), '&amp;',
+            ('company_id.active', '=', False),
+            ('company_id', 'in', user.with_context(active_test=False).company_ids.ids
+            if user.active and user.has_group('l10n_ae_edi.group_fiscal_auditor') else [])]
+        </field>
+    </record>
+    <record id="edi_attempt_company_rule" model="ir.access">
+        <field name="name">UAE transport attempt company isolation</field>
+        <field name="model_id" ref="model_l10n_ae_edi_attempt" />
+        <field name="operation">cud</field>
+        <field name="domain">[('company_id', 'in', company_ids)]</field>
+    </record>
+    <record id="edi_attempt_evidence_read_rule" model="ir.access">
+        <field
+            name="name"
+        >UAE selected or assigned archived transport attempt evidence</field>
+        <field name="model_id" ref="model_l10n_ae_edi_attempt" />
+        <field name="operation">r</field>
+        <field name="domain">
+            ['|', ('company_id', 'in', company_ids), '&amp;',
+            ('company_id.active', '=', False),
+            ('company_id', 'in', user.with_context(active_test=False).company_ids.ids
+            if user.active and user.has_group('l10n_ae_edi.group_fiscal_auditor') else [])]
+        </field>
+    </record>
+    <record id="edi_event_company_rule" model="ir.access">
+        <field name="name">UAE authenticated event company isolation</field>
+        <field name="model_id" ref="model_l10n_ae_edi_event" />
+        <field name="operation">cud</field>
+        <field name="domain">[('company_id', 'in', company_ids)]</field>
+    </record>
+    <record id="edi_event_evidence_read_rule" model="ir.access">
+        <field
+            name="name"
+        >UAE selected or assigned archived authenticated event evidence</field>
+        <field name="model_id" ref="model_l10n_ae_edi_event" />
+        <field name="operation">r</field>
+        <field name="domain">
+            ['|', ('company_id', 'in', company_ids), '&amp;',
+            ('company_id.active', '=', False),
+            ('company_id', 'in', user.with_context(active_test=False).company_ids.ids
+            if user.active and user.has_group('l10n_ae_edi.group_fiscal_auditor') else [])]
+        </field>
+    </record>
+</odoo>

@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<odoo noupdate="1">
+    <record id="ir_cron_deadline_reminders" model="ir.cron">
+        <field name="name">UAE: Reviewed Document Deadline Reminders</field>
+        <field name="model_id" ref="model_l10n_ae_edi_deadline" />
+        <field name="state">code</field>
+        <field name="code">model._cron_deadline_reminders()</field>
+        <field name="user_id" ref="base.user_admin" />
+        <field
+            name="group_ids"
+            eval="[Command.link(ref('account.group_account_manager'))]"
+        />
+        <field name="interval_number" eval="1" />
+        <field name="interval_type">hours</field>
+        <field name="active" eval="True" />
+    </record>
+    <record id="ir_cron_controlled_dispatch" model="ir.cron">
+        <field name="name">UAE: Controlled Invoice Dispatch</field>
+        <field name="model_id" ref="model_l10n_ae_edi_binding" />
+        <field name="state">code</field>
+        <field name="code">model._cron_dispatch_controlled()</field>
+        <field name="user_id" ref="base.user_admin" />
+        <field
+            name="group_ids"
+            eval="[Command.link(ref('group_controlled_sender')), Command.link(ref('account.group_account_manager'))]"
+        />
+        <field name="interval_number" eval="1" />
+        <field name="interval_type">minutes</field>
+        <field name="active" eval="False" />
+    </record>
+</odoo>

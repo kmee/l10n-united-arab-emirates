@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<odoo>
+    <record id="res_company_form_uae_edi" model="ir.ui.view">
+        <field name="name">res.company.form.uae.edi</field>
+        <field name="model">res.company</field>
+        <field name="inherit_id" ref="base.view_company_form" />
+        <field name="arch" type="xml">
+            <xpath expr="//notebook" position="before">
+                <field name="l10n_ae_fiscal_country_code" invisible="1" />
+            </xpath>
+            <xpath expr="//notebook" position="inside">
+                <page
+                    string="UAE E-Invoicing"
+                    name="uae_edi"
+                    invisible="l10n_ae_fiscal_country_code != 'AE'"
+                >
+                    <group>
+                        <field name="l10n_ae_tin" />
+                        <field name="l10n_ae_tin_confirmed" />
+                        <field name="l10n_ae_registration_type" />
+                        <field name="l10n_ae_registration_authority" />
+                        <field
+                            name="l10n_ae_edi_binding_id"
+                            domain="[('company_id', '=', id), ('environment', '=', 'sandbox')]"
+                        />
+                        <field name="l10n_ae_edi_auto_prepare" />
+                        <div class="text-muted" colspan="2">
+                            Add the matching legal registration number in General Information
+                            using the additional identifiers next to TRN.
+                        </div>
+                    </group>
+                </page>
+            </xpath>
+        </field>
+    </record>
+</odoo>

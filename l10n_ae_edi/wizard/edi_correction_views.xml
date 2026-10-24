@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<odoo>
+    <record id="edi_correction_wizard_form" model="ir.ui.view">
+        <field name="name">l10n_ae.edi.correction.wizard.form</field>
+        <field name="model">l10n_ae.edi.correction.wizard</field>
+        <field name="arch" type="xml">
+            <form string="Correct Before Sending">
+                <group>
+                    <field name="move_id" />
+                    <field name="source_transmission_id" />
+                    <field name="reason" />
+                </group>
+                <p
+                >The original issue is preserved. The invoice returns to native draft for correction. Reposting and preparation create its next revision.</p>
+                <footer>
+                    <button
+                        name="action_confirm"
+                        type="object"
+                        string="Start Correction"
+                        class="btn-primary"
+                    />
+                    <button string="Cancel" special="cancel" class="btn-secondary" />
+                </footer>
+            </form>
+        </field>
+    </record>
+</odoo>

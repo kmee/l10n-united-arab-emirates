@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<odoo>
+    <record id="edi_incident_notice_wizard_form" model="ir.ui.view">
+        <field name="name">l10n_ae.edi.incident.notice.wizard.form</field>
+        <field name="model">l10n_ae.edi.incident.notice.wizard</field>
+        <field name="arch" type="xml">
+            <form string="Record Supplied Notice Evidence">
+                <group>
+                    <field
+                        name="incident_id"
+                        options="{'no_create': True, 'no_open': True}"
+                    />
+                    <field name="evidence_origin" />
+                    <field name="sender_role" />
+                    <field name="sender_name" />
+                    <field
+                        name="taxpayer_roles"
+                        invisible="sender_role != 'taxpayer'"
+                        required="sender_role == 'taxpayer'"
+                    />
+                    <field name="recipient_role" />
+                    <field name="recipient_name" />
+                    <field name="recipient_address" />
+                    <field name="channel" />
+                    <field name="sent_at" />
+                    <field name="external_reference" />
+                    <field name="review_note" />
+                    <field name="document_filename" />
+                    <field name="document" filename="document_filename" />
+                </group>
+                <p class="text-muted">
+                    Times are shown in your Odoo time zone. Supply the original document, up to 10 MiB. Recording a supplied or simulated artifact does not send a notice or verify its delivery, authenticity or acknowledgment.
+                </p>
+                <footer>
+                    <button
+                        name="action_confirm"
+                        string="Record Reviewed Evidence"
+                        type="object"
+                        class="btn-primary"
+                    />
+                    <button string="Cancel" special="cancel" class="btn-secondary" />
+                </footer>
+            </form>
+        </field>
+    </record>
+</odoo>

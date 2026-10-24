@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<odoo>
+    <record id="edi_deadline_form" model="ir.ui.view">
+        <field name="name">l10n_ae.edi.deadline.form</field>
+        <field name="model">l10n_ae.edi.deadline</field>
+        <field name="arch" type="xml">
+            <form string="UAE Document Deadline" duplicate="false">
+                <header>
+                    <button
+                        name="action_approve"
+                        type="object"
+                        string="Approve Reviewed Deadline"
+                        class="btn-primary"
+                        groups="account.group_account_manager"
+                        invisible="state != 'draft'"
+                    />
+                    <button
+                        name="action_assess_deadline"
+                        type="object"
+                        string="Assess Deadline"
+                    />
+                    <button
+                        name="action_schedule_reminder"
+                        type="object"
+                        string="Schedule Internal Reminder"
+                        groups="account.group_account_manager"
+                        invisible="state != 'approved'"
+                    />
+                    <field name="state" widget="statusbar" />
+                </header>
+                <sheet>
+                    <group>
+                        <field name="name" readonly="state == 'approved'" />
+                        <field name="company_id" options="{'no_open': True}" />
+                        <field
+                            name="move_id"
+                            readonly="state == 'approved'"
+                            domain="[('company_id', '=', company_id), ('move_type', 'in', ['out_invoice', 'out_refund', 'in_invoice', 'in_refund'])]"
+                            options="{'no_create': True, 'no_open': True}"
+                        />
+                        <field
+                            name="registration_status"
+                            readonly="state == 'approved'"
+                        />
+                        <field name="rule_basis" readonly="state == 'approved'" />
+                        <field name="anchor_kind" readonly="state == 'approved'" />
+                        <field name="anchor_date" readonly="state == 'approved'" />
+                        <field name="due_date" readonly="state == 'approved'" />
+                        <field name="reminder_date" readonly="state == 'approved'" />
+                        <field name="timezone" />
+                        <field
+                            name="responsible_id"
+                            readonly="state == 'approved'"
+                            options="{'no_create': True, 'no_open': True}"
+                        />
+                        <field name="requested_fact" readonly="state == 'approved'" />
+                    </group>
+                    <group string="Reviewed Basis">
+                        <field name="calendar_basis" readonly="state == 'approved'" />
+                        <field name="source_reference" readonly="state == 'approved'" />
+                        <field name="policy_version" readonly="state == 'approved'" />
+                        <field name="review_note" readonly="state == 'approved'" />
+                    </group>
+                    <group string="Approval History">
+                        <field name="approved_by_id" options="{'no_open': True}" />
+                        <field name="approved_at" />
+                    </group>
+                    <group string="Reminder History">
+                        <field name="alerted_by_id" options="{'no_open': True}" />
+                        <field name="alerted_at" />
+                    </group>
+                    <group string="Latest Scheduled Check">
+                        <field name="last_checked_at" />
+                        <field name="last_check_state" />
+                        <field name="check_review_note" />
+                    </group>
+                    <p
+                        class="text-muted"
+                    >Dates and the requested observed fact require review. An API receipt is separate from fiscal confirmations; observing either does not determine legal timeliness.</p>
+                </sheet>
+                <chatter />
+            </form>
+        </field>
+    </record>
+    <record id="edi_deadline_list" model="ir.ui.view">
+        <field name="name">l10n_ae.edi.deadline.list</field>
+        <field name="model">l10n_ae.edi.deadline</field>
+        <field name="arch" type="xml">
+            <list>
+                <field name="name" />
+                <field name="company_id" options="{'no_open': True}" />
+                <field name="move_id" options="{'no_open': True}" />
+                <field name="state" />
+                <field name="due_date" />
+                <field name="requested_fact" />
+                <field name="responsible_id" options="{'no_open': True}" />
+                <field name="last_check_state" />
+            </list>
+        </field>
+    </record>
+    <record id="edi_deadline_action" model="ir.actions.act_window">
+        <field name="name">UAE Document Deadlines</field>
+        <field name="res_model">l10n_ae.edi.deadline</field>
+        <field name="view_mode">list,form</field>
+    </record>
+    <menuitem
+        id="edi_deadline_menu"
+        name="UAE Document Deadlines"
+        parent="account.menu_finance_configuration"
+        action="edi_deadline_action"
+        groups="account.group_account_manager"
+    />
+</odoo>

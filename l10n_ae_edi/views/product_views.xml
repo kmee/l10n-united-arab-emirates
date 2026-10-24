@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!-- Copyright 2026 KMEE
+     License AGPL-3.0 or later (https://www.gnu.org/licenses/agpl). -->
+<odoo>
+    <record id="product_template_form_uae_classification" model="ir.ui.view">
+        <field name="name">product.template.form.uae.classification</field>
+        <field name="model">product.template</field>
+        <field name="inherit_id" ref="product.product_template_form_view" />
+        <field name="arch" type="xml">
+            <xpath expr="//page[@name='general_information']" position="after">
+                <page
+                    name="l10n_ae_classification"
+                    string="UAE Classification"
+                    invisible="'AE' not in fiscal_country_codes"
+                >
+                    <p
+                    >Use reviewed classification codes. Goods require HS; services require SAC and its scheme version. Mixed items require both. No code is supplied automatically.</p>
+                    <p
+                        invisible="not id or is_product_variant or product_variant_count == 1"
+                    >Configure classification on each individual variant.</p>
+                    <group
+                        invisible="not is_product_variant and id and product_variant_count != 1"
+                    >
+                        <field name="l10n_ae_is_good_and_service" />
+                        <field name="l10n_ae_edi_rcm_nature_code" />
+                        <field
+                            name="l10n_ae_classification_code"
+                            invisible="type == 'service' and not l10n_ae_is_good_and_service"
+                        />
+                        <field
+                            name="l10n_ae_service_accounting_code"
+                            invisible="type != 'service' and not l10n_ae_is_good_and_service"
+                        />
+                        <field
+                            name="l10n_ae_service_accounting_version"
+                            invisible="type != 'service' and not l10n_ae_is_good_and_service"
+                        />
+                    </group>
+                </page>
+            </xpath>
+        </field>
+    </record>
+</odoo>
