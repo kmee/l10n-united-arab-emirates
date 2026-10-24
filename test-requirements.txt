@@ -1,0 +1,2 @@
+# Needed to install account_peppol, a dependency of l10n_ae_edi_pint_peppol
+phonenumbers
