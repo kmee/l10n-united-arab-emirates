@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<odoo>
+    <record id="edi_inbox_event_review_form" model="ir.ui.view">
+        <field name="name">l10n_ae.edi.inbox.event.review.form</field>
+        <field name="model">l10n_ae.edi.inbox.event.review</field>
+        <field name="arch" type="xml">
+            <form string="Review Delivery Event Conflict">
+                <div class="alert alert-info" role="alert">
+                    Compare the retained event originals with the business evidence.
+                    Select the originals that are approved for processing.
+                </div>
+                <group>
+                    <field name="inbox_id" options="{'no_open': True}" />
+                    <field name="company_id" invisible="1" />
+                </group>
+                <field name="original_ids" readonly="1">
+                    <list create="false" edit="false" delete="false">
+                        <field name="id" string="Original ID" />
+                        <field name="received_at" />
+                        <field name="remote_id" />
+                        <field name="xml_hash" class="text-wrap text-break" />
+                        <field name="move_id" />
+                    </list>
+                </field>
+                <field
+                    name="approved_inbox_ids"
+                    widget="many2many_tags"
+                    domain="[('id', 'in', original_ids)]"
+                    options="{'no_create': True, 'no_create_edit': True}"
+                />
+                <group>
+                    <field name="justification" required="1" />
+                    <field name="review_reference" required="1" />
+                </group>
+                <footer>
+                    <button
+                        name="action_confirm"
+                        type="object"
+                        string="Approve Selected Originals"
+                        class="btn-primary"
+                    />
+                    <button special="cancel" string="Cancel" class="btn-secondary" />
+                </footer>
+            </form>
+        </field>
+    </record>
+</odoo>

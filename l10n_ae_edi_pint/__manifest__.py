@@ -1,0 +1,38 @@
+# Copyright 2026 KMEE
+# License AGPL-3.0 or later (https://www.gnu.org/licenses/agpl).
+{
+    "name": "UAE PINT Electronic Invoicing",
+    "summary": "Extend the public Odoo PINT builder for UAE invoices",
+    "version": "20.0.1.0.0",
+    "development_status": "Alpha",
+    "category": "Accounting/Localizations",
+    "author": "KMEE, Odoo Community Association (OCA)",
+    "maintainers": ["mileo"],
+    "website": "https://github.com/kmee/l10n-united-arab-emirates",
+    "license": "AGPL-3",
+    "depends": ["l10n_ae_edi", "account_edi_ubl_cii"],
+    "data": [
+        "security/inbox_groups.xml",
+        "security/ir.access.csv",
+        "security/inbox_security.xml",
+        "data/ir_cron.xml",
+        "views/edi_binding_views.xml",
+        "views/account_move_views.xml",
+        "views/account_tax_views.xml",
+        "views/account_journal_views.xml",
+        "views/account_move_send_wizard_views.xml",
+        "views/edi_inbox_views.xml",
+        "views/edi_inbox_receiver_views.xml",
+        "views/edi_inbox_selection_views.xml",
+        "views/edi_inbox_event_review_views.xml",
+        "views/edi_inbox_task_views.xml",
+        "views/res_company_views.xml",
+        "views/edi_audit_inbox_views.xml",
+        "views/edi_retention_views.xml",
+    ],
+    "external_dependencies": {
+        "python": ["packaging", "lxml>=5.2,<7", "saxonche>=13.0,<14"]
+    },
+    "installable": True,
+    "post_init_hook": "post_init_hook",
+}

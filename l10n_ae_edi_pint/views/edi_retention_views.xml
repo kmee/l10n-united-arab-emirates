@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<odoo>
+    <record id="edi_retention_form_received" model="ir.ui.view">
+        <field name="name">l10n_ae.edi.retention.form.received</field>
+        <field name="model">l10n_ae.edi.retention</field>
+        <field name="inherit_id" ref="l10n_ae_edi.edi_retention_form" />
+        <field name="arch" type="xml">
+            <field name="transmission_id" position="attributes">
+                <attribute name="readonly">state == 'approved' or inbox_id</attribute>
+                <attribute name="required">not inbox_id</attribute>
+            </field>
+            <field name="transmission_id" position="after">
+                <field
+                    name="inbox_id"
+                    domain="[('company_id', '=', company_id)]"
+                    required="not transmission_id"
+                    readonly="state == 'approved' or transmission_id"
+                    options="{'no_create': True, 'no_open': True}"
+                />
+            </field>
+        </field>
+    </record>
+</odoo>

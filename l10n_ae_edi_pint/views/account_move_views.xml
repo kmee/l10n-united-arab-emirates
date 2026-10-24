@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<odoo>
+    <record id="account_move_form_uae_pint" model="ir.ui.view">
+        <field name="name">account.move.form.uae.pint</field>
+        <field name="model">account.move</field>
+        <field name="inherit_id" ref="l10n_ae_edi.account_move_form_uae_edi" />
+        <field name="arch" type="xml">
+            <xpath
+                expr="//label[@for='l10n_ae_dispatch_review_required']"
+                position="attributes"
+            >
+                <attribute
+                    name="string"
+                >Automatic sending is paused for this document. Use Validate UAE E-Invoice to review the preserved document.</attribute>
+            </xpath>
+            <xpath expr="//form/header" position="inside">
+                <button
+                    name="action_l10n_ae_validate_pint"
+                    type="object"
+                    string="Validate UAE E-Invoice"
+                    groups="account.group_account_invoice"
+                    invisible="country_code != 'AE' or move_type == 'entry' or l10n_ae_received_document or (move_type not in ('out_invoice', 'out_refund') and not (move_type in ('in_invoice', 'in_refund') and is_self_billing))"
+                />
+            </xpath>
+            <xpath
+                expr="//field[@name='l10n_ae_received_tax_inclusive_amount']"
+                position="after"
+            >
+                <field
+                    name="l10n_ae_received_aed_review"
+                    readonly="1"
+                    invisible="not l10n_ae_received_aed_review"
+                />
+            </xpath>
+            <xpath expr="//page[@name='uae_edi']/group[1]" position="after">
+                <group
+                    string="Prepared PINT Package"
+                    invisible="not l10n_ae_transmission_id"
+                >
+                    <field name="l10n_ae_normative_ruleset" readonly="1" />
+                    <field name="l10n_ae_normative_manifest_sha256" readonly="1" />
+                    <label
+                        for="l10n_ae_normative_ruleset"
+                        colspan="2"
+                        string="Pinned at preparation. This does not confirm validation, delivery or FTA acceptance."
+                    />
+                </group>
+            </xpath>
+            <xpath expr="//page[@name='uae_edi']/group[1]" position="inside">
+                <field
+                    name="l10n_ae_received_delivery_summary"
+                    readonly="1"
+                    invisible="not l10n_ae_received_delivery_summary"
+                />
+                <field
+                    name="l10n_ae_received_credit_reference_summary"
+                    readonly="1"
+                    invisible="not l10n_ae_received_credit_reference_summary"
+                />
+                <button
+                    name="action_l10n_ae_download_xml"
+                    type="object"
+                    string="Download UAE XML"
+                    colspan="2"
+                    groups="account.group_account_readonly,account.group_account_invoice"
+                    invisible="not l10n_ae_transmission_id"
+                />
+            </xpath>
+        </field>
+    </record>
+</odoo>

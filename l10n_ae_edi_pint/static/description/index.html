@@ -1,0 +1,736 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<meta name="generator" content="Docutils: https://docutils.sourceforge.io/" />
+<title>UAE PINT Electronic Invoicing</title>
+<style type="text/css">
+
+/*
+:Author: David Goodger (goodger@python.org)
+:Id: $Id: html4css1.css 9511 2024-01-13 09:50:07Z milde $
+:Copyright: This stylesheet has been placed in the public domain.
+
+Default cascading style sheet for the HTML output of Docutils.
+Despite the name, some widely supported CSS2 features are used.
+
+See https://docutils.sourceforge.io/docs/howto/html-stylesheets.html for how to
+customize this style sheet.
+*/
+
+/* used to remove borders from tables and images */
+.borderless, table.borderless td, table.borderless th {
+  border: 0 }
+
+table.borderless td, table.borderless th {
+  /* Override padding for "table.docutils td" with "! important".
+     The right padding separates the table cells. */
+  padding: 0 0.5em 0 0 ! important }
+
+.first {
+  /* Override more specific margin styles with "! important". */
+  margin-top: 0 ! important }
+
+.last, .with-subtitle {
+  margin-bottom: 0 ! important }
+
+.hidden {
+  display: none }
+
+.subscript {
+  vertical-align: sub;
+  font-size: smaller }
+
+.superscript {
+  vertical-align: super;
+  font-size: smaller }
+
+a.toc-backref {
+  text-decoration: none ;
+  color: black }
+
+blockquote.epigraph {
+  margin: 2em 5em ; }
+
+dl.docutils dd {
+  margin-bottom: 0.5em }
+
+object[type="image/svg+xml"], object[type="application/x-shockwave-flash"] {
+  overflow: hidden;
+}
+
+/* Uncomment (and remove this text!) to get bold-faced definition list terms
+dl.docutils dt {
+  font-weight: bold }
+*/
+
+div.abstract {
+  margin: 2em 5em }
+
+div.abstract p.topic-title {
+  font-weight: bold ;
+  text-align: center }
+
+div.admonition, div.attention, div.caution, div.danger, div.error,
+div.hint, div.important, div.note, div.tip, div.warning {
+  margin: 2em ;
+  border: medium outset ;
+  padding: 1em }
+
+div.admonition p.admonition-title, div.hint p.admonition-title,
+div.important p.admonition-title, div.note p.admonition-title,
+div.tip p.admonition-title {
+  font-weight: bold ;
+  font-family: sans-serif }
+
+div.attention p.admonition-title, div.caution p.admonition-title,
+div.danger p.admonition-title, div.error p.admonition-title,
+div.warning p.admonition-title, .code .error {
+  color: red ;
+  font-weight: bold ;
+  font-family: sans-serif }
+
+/* Uncomment (and remove this text!) to get reduced vertical space in
+   compound paragraphs.
+div.compound .compound-first, div.compound .compound-middle {
+  margin-bottom: 0.5em }
+
+div.compound .compound-last, div.compound .compound-middle {
+  margin-top: 0.5em }
+*/
+
+div.dedication {
+  margin: 2em 5em ;
+  text-align: center ;
+  font-style: italic }
+
+div.dedication p.topic-title {
+  font-weight: bold ;
+  font-style: normal }
+
+div.figure {
+  margin-left: 2em ;
+  margin-right: 2em }
+
+div.footer, div.header {
+  clear: both;
+  font-size: smaller }
+
+div.line-block {
+  display: block ;
+  margin-top: 1em ;
+  margin-bottom: 1em }
+
+div.line-block div.line-block {
+  margin-top: 0 ;
+  margin-bottom: 0 ;
+  margin-left: 1.5em }
+
+div.sidebar {
+  margin: 0 0 0.5em 1em ;
+  border: medium outset ;
+  padding: 1em ;
+  background-color: #ffffee ;
+  width: 40% ;
+  float: right ;
+  clear: right }
+
+div.sidebar p.rubric {
+  font-family: sans-serif ;
+  font-size: medium }
+
+div.system-messages {
+  margin: 5em }
+
+div.system-messages h1 {
+  color: red }
+
+div.system-message {
+  border: medium outset ;
+  padding: 1em }
+
+div.system-message p.system-message-title {
+  color: red ;
+  font-weight: bold }
+
+div.topic {
+  margin: 2em }
+
+h1.section-subtitle, h2.section-subtitle, h3.section-subtitle,
+h4.section-subtitle, h5.section-subtitle, h6.section-subtitle {
+  margin-top: 0.4em }
+
+h1.title {
+  text-align: center }
+
+h2.subtitle {
+  text-align: center }
+
+hr.docutils {
+  width: 75% }
+
+img.align-left, .figure.align-left, object.align-left, table.align-left {
+  clear: left ;
+  float: left ;
+  margin-right: 1em }
+
+img.align-right, .figure.align-right, object.align-right, table.align-right {
+  clear: right ;
+  float: right ;
+  margin-left: 1em }
+
+img.align-center, .figure.align-center, object.align-center {
+  display: block;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+table.align-center {
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.align-left {
+  text-align: left }
+
+.align-center {
+  clear: both ;
+  text-align: center }
+
+.align-right {
+  text-align: right }
+
+/* reset inner alignment in figures */
+div.align-right {
+  text-align: inherit }
+
+/* div.align-center * { */
+/*   text-align: left } */
+
+.align-top    {
+  vertical-align: top }
+
+.align-middle {
+  vertical-align: middle }
+
+.align-bottom {
+  vertical-align: bottom }
+
+ol.simple, ul.simple {
+  margin-bottom: 1em }
+
+ol.arabic {
+  list-style: decimal }
+
+ol.loweralpha {
+  list-style: lower-alpha }
+
+ol.upperalpha {
+  list-style: upper-alpha }
+
+ol.lowerroman {
+  list-style: lower-roman }
+
+ol.upperroman {
+  list-style: upper-roman }
+
+p.attribution {
+  text-align: right ;
+  margin-left: 50% }
+
+p.caption {
+  font-style: italic }
+
+p.credits {
+  font-style: italic ;
+  font-size: smaller }
+
+p.label {
+  white-space: nowrap }
+
+p.rubric {
+  font-weight: bold ;
+  font-size: larger ;
+  color: maroon ;
+  text-align: center }
+
+p.sidebar-title {
+  font-family: sans-serif ;
+  font-weight: bold ;
+  font-size: larger }
+
+p.sidebar-subtitle {
+  font-family: sans-serif ;
+  font-weight: bold }
+
+p.topic-title {
+  font-weight: bold }
+
+pre.address {
+  margin-bottom: 0 ;
+  margin-top: 0 ;
+  font: inherit }
+
+pre.literal-block, pre.doctest-block, pre.math, pre.code {
+  margin-left: 2em ;
+  margin-right: 2em }
+
+pre.code .ln { color: gray; } /* line numbers */
+pre.code, code { background-color: #eeeeee }
+pre.code .comment, code .comment { color: #5C6576 }
+pre.code .keyword, code .keyword { color: #3B0D06; font-weight: bold }
+pre.code .literal.string, code .literal.string { color: #0C5404 }
+pre.code .name.builtin, code .name.builtin { color: #352B84 }
+pre.code .deleted, code .deleted { background-color: #DEB0A1}
+pre.code .inserted, code .inserted { background-color: #A3D289}
+
+span.classifier {
+  font-family: sans-serif ;
+  font-style: oblique }
+
+span.classifier-delimiter {
+  font-family: sans-serif ;
+  font-weight: bold }
+
+span.interpreted {
+  font-family: sans-serif }
+
+span.option {
+  white-space: nowrap }
+
+span.pre {
+  white-space: pre }
+
+span.problematic, pre.problematic {
+  color: red }
+
+span.section-subtitle {
+  /* font-size relative to parent (h1..h6 element) */
+  font-size: 80% }
+
+table.citation {
+  border-left: solid 1px gray;
+  margin-left: 1px }
+
+table.docinfo {
+  margin: 2em 4em }
+
+table.docutils {
+  margin-top: 0.5em ;
+  margin-bottom: 0.5em }
+
+table.footnote {
+  border-left: solid 1px black;
+  margin-left: 1px }
+
+table.docutils td, table.docutils th,
+table.docinfo td, table.docinfo th {
+  padding-left: 0.5em ;
+  padding-right: 0.5em ;
+  vertical-align: top }
+
+table.docutils th.field-name, table.docinfo th.docinfo-name {
+  font-weight: bold ;
+  text-align: left ;
+  white-space: nowrap ;
+  padding-left: 0 }
+
+/* "booktabs" style (no vertical lines) */
+table.docutils.booktabs {
+  border: 0px;
+  border-top: 2px solid;
+  border-bottom: 2px solid;
+  border-collapse: collapse;
+}
+table.docutils.booktabs * {
+  border: 0px;
+}
+table.docutils.booktabs th {
+  border-bottom: thin solid;
+  text-align: left;
+}
+
+h1 tt.docutils, h2 tt.docutils, h3 tt.docutils,
+h4 tt.docutils, h5 tt.docutils, h6 tt.docutils {
+  font-size: 100% }
+
+ul.auto-toc {
+  list-style-type: none }
+
+</style>
+</head>
+<body>
+<div class="document" id="uae-pint-electronic-invoicing">
+<h1 class="title">UAE PINT Electronic Invoicing</h1>
+
+<!-- !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!! This file is generated by oca-gen-addon-readme !!
+!! changes will be overwritten.                   !!
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!! source digest: sha256:92d3e73533ae5e7d6e108ea619902924dc55716e0ba0096c978e56cfab90255b
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! -->
+<p><a class="reference external image-reference" href="https://odoo-community.org/page/development-status"><img alt="Alpha" src="https://img.shields.io/badge/maturity-Alpha-red.png" /></a> <a class="reference external image-reference" href="http://www.gnu.org/licenses/agpl-3.0-standalone.html"><img alt="License: AGPL-3" src="https://img.shields.io/badge/license-AGPL--3-blue.png" /></a> <a class="reference external image-reference" href="https://github.com/kmee/l10n-united-arab-emirates/tree/20.0/l10n_ae_edi_pint"><img alt="kmee/l10n-united-arab-emirates" src="https://img.shields.io/badge/github-kmee%2Fl10n--united--arab--emirates-lightgray.png?logo=github" /></a></p>
+<p>Extend the public Community UBL/PINT generator for UAE identifiers and
+document processes. Freeze the generated XML at preparation and validate
+it using pinned UBL XSD plus shared and UAE Schematron rules. Reviewed
+incoming AED billing and self-billing documents use the public UBL21
+importer with existing counterparties and taxes, protected original
+evidence and economic accounting roles. Additional scenario fields,
+foreign currency and the full conformance matrix remain under
+development. This module does not submit directly to Peppol or the FTA.</p>
+<p>Received evidence packages preserve the exact original XML, processing
+evidence and a versioned retention appendix. Reviewed obligations and
+active/released holds remain portable without processing the original or
+creating accounting entries.</p>
+<p>Each processing-history entry records the selected PINT package and
+manifest digest separately from its validation report. A missing
+validation resource still retains the selected package for a safe retry.
+Older history without a recorded package remains unpinned and is never
+assigned the current default.</p>
+<div class="admonition important">
+<p class="first admonition-title">Important</p>
+<p class="last">This is an alpha version, the data model and design can change at any time without warning.
+Only for development or testing purpose, do not use in production.
+<a class="reference external" href="https://odoo-community.org/page/development-status">More details on development status</a></p>
+</div>
+<p><strong>Table of contents</strong></p>
+<div class="contents local topic" id="contents">
+<ul class="simple">
+<li><a class="reference internal" href="#usage" id="toc-entry-1">Usage</a></li>
+<li><a class="reference internal" href="#known-issues-roadmap" id="toc-entry-2">Known issues / Roadmap</a></li>
+<li><a class="reference internal" href="#bug-tracker" id="toc-entry-3">Bug Tracker</a></li>
+<li><a class="reference internal" href="#credits" id="toc-entry-4">Credits</a><ul>
+<li><a class="reference internal" href="#authors" id="toc-entry-5">Authors</a></li>
+<li><a class="reference internal" href="#contributors" id="toc-entry-6">Contributors</a></li>
+<li><a class="reference internal" href="#maintainers" id="toc-entry-7">Maintainers</a></li>
+</ul>
+</li>
+</ul>
+</div>
+<div class="section" id="usage">
+<h1><a class="toc-backref" href="#toc-entry-1">Usage</a></h1>
+<p>Install only in an isolated Odoo 20.0 development database. Read the
+repository architecture and QA instructions before preparing synthetic
+documents. These Alpha modules are not approved for production fiscal
+transmission.</p>
+<p><strong>Check UAE Data</strong> includes the native XML builder’s returned
+constraints for tax, commercial and eligible self-billed documents. A
+missing buyer country produces IBR-011; a missing supplier country
+produces IBR-009. Review the corresponding Contact or authorized company
+address, save and repeat Check on the same draft. Check does not post or
+freeze a fiscal issue. Unprepared Preview uses the same checked build
+once; prepared Preview verifies and reads the original frozen XML. Local
+formal validation and actual provider/FTA confirmations are separate
+operations. Native Send may still export again after Check; no
+cross-request cache is introduced.</p>
+<p>Native UAE fallback XML downloads refuse a returned builder error before
+releasing the preview. A missing buyer country displays IBR-011 through
+Check and HTTP 422 through that download. A valid unprepared draft
+preview does not post or create an issue; prepared downloads retain the
+frozen original access/integrity checks. Known category, reverse-charge
+nature, payment and AED consistency errors return per-document native
+constraints. Direct integrations must honor <tt class="docutils literal">(content, errors)</tt>; bytes
+with errors are not usable invoices. This is focused local
+qualification, separate from formal PINT validation and fiscal
+acceptance. See scenario 2 and its execution limits.</p>
+<p>Accounting managers can open <strong>Received UAE Documents</strong>, inspect the
+preserved XML and select <strong>Process Received Document</strong>. A supported
+ordinary AED tax invoice creates a supplier bill in draft; <strong>Open
+Accounting Document</strong> opens it for accounting review. Unknown
+suppliers/taxes, invalid XML and unsupported scenarios remain in review
+with diagnostics. The original evidence cannot be edited, and a received
+document cannot be emitted again.</p>
+<p>Native accounting branches can use eligible shared or parent-owned
+supplier, tax and economic-role journal records under the receiving
+user’s ordinary access rules. Keep the receiving branch selected.
+Unrelated-company records remain excluded and ambiguity requires review.
+Fiscal identities, credit references and self-billing agreements remain
+specific to the receiving company; the parent’s agreement does not
+authorize its branch. Scenario23 in the PT/EN manuals describes this
+distinction and the focused test limits.</p>
+<p>Before a new controlled receipt, an ordinary company-authorized
+Accounting Manager must declare <strong>Retrieve Incoming Documents</strong> in the
+binding’s controlled contract, enter a review note and select <strong>Review
+Contract Capabilities</strong>. A receive-only contract is allowed. Unreviewed
+contracts or contracts missing that operation refuse before any original
+or delivery event is retained, including elevated calls. Editing the
+declaration invalidates current approval; already retained originals
+remain available for inspection and local manager processing. The
+technical receiving role does not grant contract review or accounting
+processing. Scenario74 in the PT/EN manuals covers this boundary;
+pre-HTTP refusal and scheduled retrieval still require separate
+requalification.</p>
+<p>This inbox currently receives from the separately configured KMEE
+loopback mock worker. It does not connect to an accredited provider
+sandbox or constitute FTA acceptance.</p>
+<p>For periodic controlled receipt, enable <strong>Automatic Controlled
+Receiving</strong> on a sandbox binding and assign the native <strong>UAE: Controlled
+Document Receiving</strong> scheduled action to a dedicated <strong>Controlled
+Document Receiver</strong> account. Support configures the loopback service
+outside ordinary binding fields. Each invocation preserves one bounded
+queue page without importing or posting it. The binding displays a
+protected receiving cursor/route and any configuration or retrieval
+review code. Failed pages remain retrievable; the cursor cannot be reset
+through ordinary editing. Accounting managers review each original
+separately in <strong>Received UAE Documents</strong>. See scenario 22 in the PT/EN
+user manuals for the tested workflow and suspension semantics.</p>
+<p>An administrator may assign <strong>UAE Integration / Controlled Document
+Receiver</strong> to a dedicated internal service account with only the
+required companies. The controlled worker uses <tt class="docutils literal">process=False</tt> for
+that account and preserves original XML without creating an accounting
+draft. An active accounting manager then processes the inbox through the
+native form. Archiving the service or removing its role/company access
+stops subsequent retrieval and receipt; support can resume lookup of the
+original after reviewed restoration. The role grants no accounting,
+sending, confirmation-event or binding configuration permissions.</p>
+<p>Received tax credit notes in AED can become draft supplier refunds when
+their single preceding invoice reference matches an existing supplier
+bill. The declared credit reason, prepaid amount and payable amount
+remain available for review. Processing does not post, reconcile or
+import payments. Missing or ambiguous references stay in the
+received-document review inbox with their original XML.</p>
+<p>Ordinary AED commercial invoices and credits can also be processed. A
+supplier without a VAT identifier must already have the matching routing
+endpoint, legal registration number/type and issuing authority. Unknown
+identities and tax mappings stay in review. The received category and
+original currency are protected; declared amounts keep the XML currency
+even if the accounting draft is reviewed in another currency.</p>
+<p>Buyer-issued self-billed invoices and credits in AED can become draft
+customer invoices and refunds when the local company is the XML
+supplier. A manager must maintain one valid UAE agreement with local
+role <strong>Supplier Receiving Self-Billing</strong> for the known buyer. Existing
+matching billing drafts are reused without replacing their lines or
+origin identifiers; differences remain in review. A received self-billed
+credit needs one or more uniquely matching original self-billed sales.
+The agreement reference at receipt remains available after later
+agreement changes. Posting received sales never emits them again.</p>
+<p>When the sender declares a prepaid amount, the accounting history
+identifies it as a remote declaration for review. Receiving does not
+create a local payment. Confirm any local settlement through the usual
+accounting review and posting process.</p>
+<p>For foreign-currency emission, the default is Odoo’s dated native
+currency conversion for the invoice conversion date. The frozen issue
+records its AED-per-document-unit rate, conversion/source dates and the
+actual dated Odoo currency-rate records used; the source is identified
+as Odoo currency rates and its CBUAE origin is explicitly unverified.
+Use the three <strong>Reviewed AED Exchange Rate</strong>, <strong>AED Exchange Rate Date</strong>
+and <strong>AED Exchange Rate Source</strong> fields together to supply a reviewed
+override. A partial override requires review; clear all three to return
+to the native conversion. The effective conversion and frozen evidence
+preserve the quote and converted AED line/header values. A mismatch
+against the AED ledger, a missing/undated source, or a different
+VAT-point date blocks preparation for accounting review. The source
+field is a human reference and does not verify CBUAE publication.</p>
+<p>For a received foreign-currency bill, review <strong>Amounts Declared by the
+Sender</strong> in the UAE tab. Document currency, declared exchange rate,
+fiscal AED VAT and gross amounts remain protected. They do not set the
+local reviewed quote or create a payment. Currency must already be
+active; malformed rates/amounts and inconsistent fiscal lines stay in
+review. Unequal converted-versus-declared AED headers create a draft
+with <strong>Received AED Header Review</strong>: check the original XML and
+accounting before posting. The immutable comparison preserves both
+values and does not replace declarations or certify tax compliance.
+Matching headers have no discrepancy notice. Worked USD
+invoice/partial-credit vectors and a native multiline receipt browser
+journey are tested; full combinations remain pending.</p>
+<p>The received-document form retains <strong>Processing History</strong>. Failed
+processing keeps its operator, time, diagnostic and original XML hash
+even after reviewed master-data correction allows a draft bill. Use
+<strong>Process Received Document</strong> again after the correction; do not replace
+XML. A successful replay does not create another draft or history entry.
+Fiscal auditors see read-only history without accounting access.</p>
+<p>With native <strong>Export: Allowed</strong>, select <strong>Download Evidence Package</strong> in
+the received original’s form or UAE Audit inbox. Opening these forms
+does not build the ZIP. An integrity failure refuses the explicit
+download while keeping the form available. It preserves exact XML,
+protected receipt details, every processing attempt and retained report,
+credit references and a SHA256/size manifest. Hash mismatch or a missing
+recorded report blocks export. Attempts without reports retain that
+absence. Repeated downloads are deterministic until new processing adds
+evidence. Download never revalidates or creates accounting/attachments.
+This package is not a restorable database backup; retention and restore
+remain required.</p>
+<p>For a received combined credit, process or review its original invoices
+first, then inspect <strong>Received Invoice References</strong> in the inbox and
+accounting UAE tab. Authentic numbers and optional XML dates are
+preserved. The draft keeps the credit’s own lines and totals; receipt
+creates no allocation, reconciliation or payment. Multiple originals
+leave the singular native reversal relation empty. Missing or ambiguous
+originals keep the whole credit in review. A reviewed legacy bill can be
+entered through normal supplier accounting before retrying the same
+original XML. Never fabricate an original or rewrite receipt evidence to
+bypass review.</p>
+<p>For internal incoming attention, configure <strong>UAE Incoming Document
+Reviewer</strong> in the company’s <strong>UAE E-Invoicing</strong> tab using native company
+editing permission. Choose an active internal Accounting Manager with
+access to that company and original. In the received original, <strong>Request
+Internal Review</strong> reuses one protected task and native activity,
+including after the activity is completed. Receipt remains independent
+of reviewer availability. The hourly <strong>UAE: Received Document Internal
+Review</strong> cron checks at most 100 eligible originals and records a
+configuration-review outcome when access or reviewer configuration
+requires attention, while other rows continue.</p>
+<p>After reviewed master-data recovery and successful processing of the
+same original, use <strong>Resolve Internal Review</strong> in <strong>UAE Incoming
+Reviews</strong>. It preserves request, assignment and processing history and
+completes only its own outstanding activity. Completing an activity
+alone does not process XML, resolve conflicts or acknowledge a fiscal
+document. Changing future company routing does not rewrite earlier
+assignments. See scenario 29 in the PT/EN manuals for the selected
+native journey and proof limits.</p>
+<p>When <strong>Remote ID Conflict</strong> is present, an Accounting Manager who can
+read every retained original may use <strong>Review Identity Variant</strong>.
+Compare the exact original/hash with all displayed members and business
+evidence, then enter <strong>Justification</strong> and <strong>Review Reference</strong>.
+<strong>Select This Original</strong> records internal eligibility without processing
+or posting. A new distinct XML received while the assistant is open
+requires cancelling and reopening it. Historical conflict remains;
+<strong>Identity Review Pending</strong> clears only for the current eligible
+original. Existing accounting links remain pinned to their original.
+Multiple linked originals require escalation.</p>
+<p>Process the selected original separately with <strong>Process Received
+Document</strong>. Internal identity selections are append-only and separate
+from processing history. <strong>Received Evidence Package</strong> includes the
+complete selection history and other retained originals with their own
+processing/retention evidence. Missing access to any required original,
+decision or artifact refuses the package; incomplete history is not
+silently omitted. Packages refresh after processing or reviewed
+retention/hold changes. Selection/export does not establish supplier
+authenticity or ASP/FTA acceptance. Full provider protocols, adverse
+recovery, notification policy and acceptance matrices remain required.</p>
+<p>For confirmed disclosed-agent transactions, select <strong>Disclosed Agent
+Billing</strong> and enter <strong>Principal ID</strong>, the principal’s 15-digit TRN. Keep
+supplier VAT and Free Zone beneficiary separate. <strong>Check UAE Data</strong>,
+preparation and automatic preparation on posting diagnose missing
+Principal ID (IBR-137) or equality with the economic supplier VAT
+(IBR-176). The ASCII-digit format check is local semantic validation.
+Preparation freezes principal and flags. Billing input accepts
+<tt class="docutils literal">l10n_ae_principal_id</tt>; replay preserves the issue. Supported received
+agent/Free Zone combinations conserve principal and original bytes in
+draft accounting. Duplicate principal structure or an existing
+self-billed draft with a different principal requires review. These
+flows do not establish ASP/FTA acceptance.</p>
+<p>For a reviewed payment instrument, open the native Bank journal’s
+<strong>Incoming Payments</strong> or <strong>Outgoing Payments</strong> method lines and use
+<strong>UAE Payment Instrument</strong>. This optional country metadata changes only
+document classification. A blank value retains supported native
+cash/manual or bank/manual derivation; no preferred method means
+instrument <tt class="docutils literal">1</tt>, even when Recipient Bank is present. Cheque <tt class="docutils literal">20</tt>
+uses the selected method’s reviewed classification and remittance,
+without inferring bank/card/mandate details. Frozen originals remain
+unchanged after journal edits. Code <tt class="docutils literal">30</tt> still requires a recipient
+account. Scenario 57 in the PT/EN manuals records selected evidence and
+limitations; the nine offered choices are not qualification of every
+instrument/document matrix.</p>
+<p>A selected native method that does not identify a supported instrument
+requires review of <strong>UAE Payment Instrument</strong> on its journal method
+line. Native Post keeps the invoice posted and records UAE review
+without an issue/UUID; explicit Check/Prepare refuse the missing
+classification. Review the same line, then prepare the existing invoice.
+The online-service 68 tracer retains its reference without inventing
+card/mandate data; subsequent master changes preserve its original and
+ledger. Scenario 58 in the PT/EN manuals records the rendered journey
+and its limits. All nine reviewed codes have basic ordinary 380/AED XML
+representation coverage, with a selected account required only for
+transfer 30; this does not qualify every instrument/document/direction
+matrix or execute payments. Structured optional groups remain pending.</p>
+<p>The native payment-term form exposes reviewed <strong>UAE Billing Frequency</strong>,
+separate from installments and due dates. Selecting a term in the
+invoice Form supplies an editable cadence default. Explicit reviewed
+supply dates remain independent. <strong>Other</strong> requires an explanation in
+<strong>Other UAE Billing Frequency</strong>, appended to the existing invoice note.
+Check/Prepare refuse a missing explanation; Post retains native
+accounting. Prepared cadence, explanation and original XML are protected
+against later edits. Scenarios 59–60 in the PT/EN manuals document
+Monthly and Other UI journeys. API defaults, eight other code
+qualifications, deferred-line mapping and full document/FX/received
+matrices remain pending. The pinned executable rule uses DescriptionCode
+despite the upstream semantic page’s Description binding; research
+records that discrepancy.</p>
+<p>For API billing cadence, <tt class="docutils literal">submit_document</tt> uses the selected payment
+term’s reviewed frequency when <tt class="docutils literal">l10n_ae_billing_frequency_code</tt> is
+omitted. An explicit value overrides it; <tt class="docutils literal">false</tt> or <tt class="docutils literal">null</tt> clears
+it. Its response puts the accounting ID at <tt class="docutils literal">accounting.move_id</tt>;
+<tt class="docutils literal">get_document</tt> returns the issue in <tt class="docutils literal">document</tt>. Received
+self-billing keeps the original cadence and full OTH Note on its
+protected draft; an absent cadence is not inferred from local payment
+terms. See scenarios 61–62.</p>
+<p>Computed AED line amounts and allowance bases preserve precision without
+reproduced binary arithmetic tails. Quantity 3 ×USD 0.10 at 3.672500
+retains raw line AED VAT 0.0550875/gross 1.1568375 and prepares with
+native AED header 0.07/1.17. A full discount retains allowance
+base/amount USD 0.3 and zero totals. Source inputs and ledger remain
+unchanged.</p>
+<p>For foreign documents on an AED ledger, retain the core AED TaxTotal and
+full accounting gross normalized for document direction. Independently
+compare the reviewed quote with the inverse persisted
+invoice_currency_rate at six decimals; mismatched quotes require review.
+This avoids false cent-rounding refusals on matching multi-line
+invoices. Non-AED ledgers retain their separate reviewed fiscal
+conversion. This is a documented engineering policy, not a statutory FX
+aggregation equation or ASP acceptance. Check and preview remain
+distinct from formal Validate:100 lines atUSD 1.23/5% with per-line
+rounding still fail aligned-ibrp-s-09 for source VAT 6.00 versus
+expected6.15. No ledger patch bypasses that rule. Scenario14 describes
+the actions, repair boundaries and pending complete rounding/browser/ASP
+qualification.</p>
+<p>For an unprepared UAE invoice, native <strong>Send → Format for this Send</strong>
+offers <strong>Customer default</strong>, <strong>PINT-AE</strong> and <strong>PDF only</strong>. This choice
+belongs to the current wizard and does not change the customer
+preference. Changing the sending method keeps an explicit choice. PINT
+generation retains its mandatory checks; PDF-only generation does not
+fulfill a required electronic invoice obligation. Already prepared
+originals retain their PINT format. Native batch Send still uses
+customer defaults per invoice.</p>
+</div>
+<div class="section" id="known-issues-roadmap">
+<h1><a class="toc-backref" href="#toc-entry-2">Known issues / Roadmap</a></h1>
+<p>Complete the accepted specification in the KMEE brain repository,
+including all UAE transaction scenarios, foreign currency, full fiscal
+identity and ingestion, multiple credit references and advances, billing
+reconciliation, operational receiving, migration and release readiness.
+Current offline validation and controlled receiving checkpoints provide
+partial evidence; they do not complete the full acceptance catalogue or
+accredited ASP homologation.</p>
+</div>
+<div class="section" id="bug-tracker">
+<h1><a class="toc-backref" href="#toc-entry-3">Bug Tracker</a></h1>
+<p>Bugs are tracked on <a class="reference external" href="https://github.com/kmee/l10n-united-arab-emirates/issues">GitHub Issues</a>.
+In case of trouble, please check there if your issue has already been reported.
+If you spotted it first, help us to smash it by providing a detailed and welcomed
+<a class="reference external" href="https://github.com/kmee/l10n-united-arab-emirates/issues/new?body=module:%20l10n_ae_edi_pint%0Aversion:%2020.0%0A%0A**Steps%20to%20reproduce**%0A-%20...%0A%0A**Current%20behavior**%0A%0A**Expected%20behavior**">feedback</a>.</p>
+<p>Do not contact contributors directly about support or help with technical issues.</p>
+</div>
+<div class="section" id="credits">
+<h1><a class="toc-backref" href="#toc-entry-4">Credits</a></h1>
+<div class="section" id="authors">
+<h2><a class="toc-backref" href="#toc-entry-5">Authors</a></h2>
+<ul class="simple">
+<li>KMEE</li>
+</ul>
+</div>
+<div class="section" id="contributors">
+<h2><a class="toc-backref" href="#toc-entry-6">Contributors</a></h2>
+<ul class="simple">
+<li>KMEE</li>
+</ul>
+<p>Native UAE tax category table (<tt class="docutils literal"><span class="pre">data/template/account.tax-ae.csv</span></tt>):
+copyright Odoo S.A., reused from the public LGPL-3 <tt class="docutils literal">l10n_ae_ubl_pint</tt>
+proposal in <a class="reference external" href="https://github.com/odoo/odoo/pull/262200">Odoo PR
+#262200</a>, source head
+<tt class="docutils literal">c8f6dbb0b1618eda96c54d5dd9367d30843ae9be</tt>. KMEE supplies the Odoo 20
+integration and missing-category preservation behavior. The table adds
+category metadata only; VAT-only import accounting and the complete
+reverse-charge/margin calculation require separate qualification.</p>
+</div>
+<div class="section" id="maintainers">
+<h2><a class="toc-backref" href="#toc-entry-7">Maintainers</a></h2>
+<p>Current maintainer:</p>
+<p><a class="reference external image-reference" href="https://github.com/mileo"><img alt="mileo" src="https://github.com/mileo.png?size=40px" /></a></p>
+<p>This module is part of the <a class="reference external" href="https://github.com/kmee/l10n-united-arab-emirates/tree/20.0/l10n_ae_edi_pint">kmee/l10n-united-arab-emirates</a> project on GitHub.</p>
+<p>You are welcome to contribute.</p>
+</div>
+</div>
+</div>
+</body>
+</html>

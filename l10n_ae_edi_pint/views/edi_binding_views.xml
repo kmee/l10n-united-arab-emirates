@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<odoo>
+    <record id="edi_binding_form_inbound" model="ir.ui.view">
+        <field name="name">l10n_ae.edi.binding.form.inbound</field>
+        <field name="model">l10n_ae.edi.binding</field>
+        <field name="inherit_id" ref="l10n_ae_edi.edi_binding_form" />
+        <field name="arch" type="xml">
+            <field name="controlled_dispatch_enabled" position="after">
+                <field
+                    name="controlled_receive_enabled"
+                    invisible="environment != 'sandbox'"
+                />
+                <field name="controlled_inbound_cursor" readonly="1" />
+                <field name="controlled_inbound_route" readonly="1" />
+                <field
+                    name="controlled_receive_error"
+                    invisible="not controlled_receive_error"
+                />
+                <field
+                    name="controlled_receive_error_at"
+                    invisible="not controlled_receive_error"
+                />
+            </field>
+        </field>
+    </record>
+</odoo>

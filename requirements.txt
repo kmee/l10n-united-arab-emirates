@@ -1,0 +1,4 @@
+# generated from manifests external_dependencies
+lxml>=5.2,<7
+packaging
+saxonche>=13.0,<14
