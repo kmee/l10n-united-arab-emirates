@@ -11,7 +11,6 @@ import sys
 import uuid
 import zipfile
 from contextlib import closing
-from unittest import skipIf
 
 from lxml import etree
 
@@ -2341,8 +2340,12 @@ class TestUaeInvoiceXmlSource(UaePintTestCommon):
         self.assertEqual(transmission.read(observed_fields)[0], original)
         self.assertEqual((invoice.amount_tax, invoice.amount_total), (5, 105))
 
-    @skipIf(not shutil.which("wkhtmltopdf"), "wkhtmltopdf is not installed")
     def test_buyer98_pdf_preserves_private_original_in_invoice_company(self):
+        engine_module = self.env["ir.module.module"].search_count(
+            [("name", "=", "base_report_wkhtmltox"), ("state", "=", "installed")]
+        )
+        if not (engine_module and shutil.which("wkhtmltopdf")):
+            self.skipTest("The wkhtmltopdf PDF engine is not available.")
         company = self.env.company
         other_company = self.env["res.company"].create(
             {"name": "Synthetic current PDF company B"}
