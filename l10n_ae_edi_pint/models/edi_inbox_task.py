@@ -53,7 +53,9 @@ class UaeEdiInboxTask(models.Model):
         readonly=True,
     )
     check_review_note = fields.Text(readonly=True)
-    source_state = fields.Selection(related="inbox_id.state", readonly=True)
+    source_state = fields.Selection(
+        related="inbox_id.state", string="Inbox State", readonly=True
+    )
     source_identity_conflict = fields.Boolean(
         related="inbox_id.identity_conflict", readonly=True
     )
